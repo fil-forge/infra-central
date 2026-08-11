@@ -9,7 +9,7 @@ import (
 
 	"github.com/openbao/openbao/api/v2"
 
-	"github.com/fil-forge/forge-central/internal/vaultinit"
+	"github.com/fil-forge/infra-central/internal/vaultinit"
 )
 
 // openBaoStartupBudget bounds the wait for the ECS service to start serving.

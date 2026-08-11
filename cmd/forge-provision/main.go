@@ -24,8 +24,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/fil-forge/forge-central/internal/fund"
-	"github.com/fil-forge/forge-central/internal/ssmstore"
+	"github.com/fil-forge/infra-central/internal/fund"
+	"github.com/fil-forge/infra-central/internal/ssmstore"
 )
 
 // Request is the event Terraform sends through aws_lambda_invocation.

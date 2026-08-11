@@ -10,7 +10,7 @@ terraform {
     organization = "fil-forge"
 
     workspaces {
-      name = "forge-central-prod-apps"
+      name = "infra-central-prod-apps"
     }
   }
 
@@ -31,7 +31,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project = "forge-central"
+      Project = "infra-central"
       Stage   = "prod"
     }
   }
@@ -57,7 +57,7 @@ variable "image_tags" {
 
 data "tfe_outputs" "platform" {
   organization = "fil-forge"
-  workspace    = "forge-central-prod-platform"
+  workspace    = "infra-central-prod-platform"
 }
 
 locals {

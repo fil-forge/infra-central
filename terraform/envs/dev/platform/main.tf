@@ -9,7 +9,7 @@ terraform {
     organization = "fil-forge"
 
     workspaces {
-      name = "forge-central-dev-platform"
+      name = "infra-central-dev-platform"
     }
   }
 
@@ -26,7 +26,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project = "forge-central"
+      Project = "infra-central"
       Stage   = "dev"
     }
   }

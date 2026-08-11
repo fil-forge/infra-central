@@ -10,7 +10,7 @@
 # ECR repositories are regional, and Lambda will only pull an image from ECR in
 # the same region as the function, so a stage in another region cannot reuse
 # this repository. Standing up a second region means a second workspace with a
-# region-qualified name, e.g. forge-central-bootstrap-us-west-2, and a
+# region-qualified name, e.g. infra-central-bootstrap-us-west-2, and a
 # `make publish AWS_REGION=us-west-2` to fill it.
 #
 # Stages sharing a region share this repository. They pin different digests, so
@@ -23,7 +23,7 @@ terraform {
     organization = "fil-forge"
 
     workspaces {
-      name = "forge-central-bootstrap"
+      name = "infra-central-bootstrap"
     }
   }
 

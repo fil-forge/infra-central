@@ -434,7 +434,7 @@ cp -r terraform/envs/dev terraform/envs/staging
 Then, in the copy:
 
 1. Set the workspace names in both `cloud` blocks to
-   `forge-central-staging-{platform,apps}`.
+   `infra-central-staging-{platform,apps}`.
 2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
    default tag in both roots.
 3. In `platform/terraform.tfvars`, set `hostname_suffix` to

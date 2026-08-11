@@ -10,8 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/fil-forge/forge-central/internal/dbinit"
-	"github.com/fil-forge/forge-central/internal/keygen"
+	"github.com/fil-forge/infra-central/internal/dbinit"
+	"github.com/fil-forge/infra-central/internal/keygen"
 )
 
 // identityServices each get an Ed25519 service identity.

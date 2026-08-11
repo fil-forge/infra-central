@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/fil-forge/forge-central/internal/fund"
+	"github.com/fil-forge/infra-central/internal/fund"
 )
 
 // Default amounts, matching smelt's. They stay well under the Calibration USDFC
