@@ -1,0 +1,22 @@
+# Pinned per service, by digest. A digest names one artifact and cannot move
+# underneath a running service, so a redeploy cannot silently change what runs.
+#
+# No digests yet: prod is not set up, and they have to come from the images the
+# services actually publish. A preview fails until they are filled in, which is the
+# right outcome for a stage nobody has deployed.
+config:
+  aws:region: us-east-2
+  forge-central:account: prod
+
+  # Real money: storage is provisioned only against a funded payment plan.
+  forge-central:allowProvisionWithoutPaymentPlan: "false"
+
+  forge-central:logLevel: info
+
+  # forge-central:imageDigests:
+  #   sprue: sha256:...
+  #   hilt: sha256:...
+  #   swarf: sha256:...
+  #   delegator: sha256:...
+  #   signing_service: sha256:...
+  #   plc: sha256:...

@@ -1,0 +1,6 @@
+# Bootstrap for the prod account in us-east-2. The non-prod stack's config file
+# carries the full explanation of why the bootstrap is a project of its own and
+# why there is one stack per account and region.
+config:
+  aws:region: us-east-2
+  forge-central:account: prod

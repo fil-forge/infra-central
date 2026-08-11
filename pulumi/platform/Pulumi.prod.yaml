@@ -1,0 +1,55 @@
+# Non-secret per-stage configuration. Every secret lives in SSM and is minted by
+# the provision Lambda, so this file is safe to commit.
+#
+# Prod differs from dev in three ways that matter: the database is multi-AZ and
+# protected from deletion, OpenBao gets a larger connection budget, and the
+# provision image digest is pinned here, copied from dev when a change is promoted
+# rather than written by whatever was built last.
+#
+# The stack does not exist yet.
+config:
+  aws:region: us-east-2
+
+  # filone-production, its own account.
+  forge-central:account: prod
+
+  # Production has its own delegated zone, so it needs no stage label: services
+  # answer at <service>.forge.fil.one.
+  forge-central:zoneName: forge.fil.one
+  forge-central:hostnameSuffix: forge.fil.one
+
+  # Pinned by digest rather than tag, so the image can never move underneath a
+  # deploy. `make publish` prints the line to paste here.
+  forge-central:provisionImageDigest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+  forge-central:dbInstanceClass: db.t4g.small
+  forge-central:dbAllocatedStorage: "50"
+  forge-central:dbMultiAz: "true"
+  forge-central:dbBackupRetentionDays: "30"
+
+  # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
+  # storage is this database.
+  forge-central:protectStatefulResources: "true"
+
+  # A db.t4g.small allows roughly 225 connections, so 24 for OpenBao still leaves
+  # ample room for the application services.
+  forge-central:openbaoMaxParallel: "24"
+
+  forge-central:containerInsights: "true"
+
+  # Filecoin mainnet.
+  #
+  # The contract addresses are placeholders. smelt only ever configured
+  # Calibration, so the mainnet deployment addresses have to come from the
+  # contracts team before the first prod up. Leaving them obviously wrong is
+  # deliberate: a plausible but incorrect address would fail at transaction time
+  # rather than at review time. The chain configuration is validated before
+  # anything is created, so these fail the preview.
+  forge-central:chain:
+    rpc_url: https://api.node.glif.io/rpc/v1
+    chain_id: 314
+    contracts:
+      fwss: REPLACE_ME
+      filecoin_pay: REPLACE_ME
+      service_provider_registry: REPLACE_ME
+      usdfc_token: REPLACE_ME

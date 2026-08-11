@@ -1,0 +1,5 @@
+name: forge-central-bootstrap
+runtime: go
+description: >-
+  ECR repositories for one account and region. Applied by hand, rarely: once per
+  account and region, before any stage in it can be brought up.

@@ -1,0 +1,5 @@
+name: forge-central-apps
+runtime: go
+description: >-
+  A stage's six ECS services. Reads the platform stack of the same name for
+  everything but its own image digests.

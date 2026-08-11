@@ -1,0 +1,66 @@
+# Non-secret per-stage configuration. Every secret in this project lives in SSM
+# and is minted by the provision Lambda, so this file is safe to commit.
+config:
+  aws:region: us-east-2
+
+  # filone-sandbox. Credentials for another account would otherwise create a
+  # second, quietly working copy of the stage there; naming the account fails the
+  # preview instead.
+  forge-central:account: nonprod
+
+  # The zone is delegated once, by the DNS project, and holds every non-prod
+  # stage. Adding a stage writes records into it and needs no change there.
+  #
+  # fil.one is served by Cloudflare, so this must be the delegated subdomain that
+  # actually exists in Route53.
+  forge-central:zoneName: forge-sandbox.fil.one
+
+  # Services answer at <service>.dev.forge-sandbox.fil.one. The stage label lives
+  # inside the zone, which is what lets one delegation serve dev, staging and any
+  # future PR-preview stage.
+  #
+  # Stated explicitly rather than derived from zoneName, because the delegation
+  # point and the hostname shape need not match.
+  forge-central:hostnameSuffix: dev.forge-sandbox.fil.one
+
+  # Written by `make publish`, and committed for the same reason the rest of this
+  # file is: what is not committed is not what gets deployed. The dev loop is
+  # `make publish`, commit, merge, with nothing to edit by hand.
+  forge-central:provisionImageDigest: sha256:bd75f409d0041f7370e019d8a71680bb33a3e1103d4c644405863a017bf33762
+
+  # Dev runs small and single-AZ. The appliance availability argument that
+  # justifies multi-AZ in prod does not apply to a stage with no appliances.
+  forge-central:dbInstanceClass: db.t4g.micro
+  forge-central:dbMultiAz: "false"
+  forge-central:dbBackupRetentionDays: "1"
+
+  # Lets a dev stage actually be destroyed. Note that destroying it does not
+  # remove the SSM parameters: the provision Lambda creates them, not this
+  # program, so a recreated dev stage comes back with its previous DIDs.
+  forge-central:protectStatefulResources: "false"
+
+  # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, which
+  # leaves headroom for sprue, hilt and swarf at 10 each.
+  forge-central:openbaoMaxParallel: "8"
+
+  # Bumped to re-issue the delegator's two proofs, which were deleted from SSM so
+  # the seed phase would write them base64-encoded, and to rewrite plc's
+  # db-creds-json with an sslmode RDS accepts.
+  forge-central:seedTrigger: "2"
+
+  # Calibration testnet proxy addresses, carried over from smelt's
+  # environments/staging/smart-contracts.env. Public on-chain addresses, and a
+  # contract redeployment should arrive as a reviewable diff.
+  #
+  # Owned by this stack rather than by apps, so the services and the fund phase
+  # read the same values. Sources:
+  #   https://github.com/FilOzone/filecoin-services/releases
+  #   https://github.com/fil-forge/filecoin-services/blob/main/service_contracts/deployments.json
+  forge-central:chain:
+    rpc_url: https://api.calibration.node.glif.io/rpc/v1
+    chain_id: 314159
+    contracts:
+      fwss: "0x0c6875983B20901a7C3c86871f43FdEE77946424"
+      filecoin_pay: "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0"
+      service_provider_registry: "0x839e5c9988e4e9977d40708d0094103c0839Ac9D"
+      usdfc_token: "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"

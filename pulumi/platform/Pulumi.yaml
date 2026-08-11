@@ -1,0 +1,5 @@
+name: forge-central-platform
+runtime: go
+description: >-
+  A stage's long-lived infrastructure: VPC, RDS, S3, DynamoDB, ALB, OpenBao and
+  the Lambda that mints the stage's secrets. One stack per stage.

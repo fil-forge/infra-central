@@ -1,0 +1,8 @@
+# Bootstrap for the non-prod account in us-east-2, holding the repository every
+# non-prod stage in this account and region pulls from.
+config:
+  aws:region: us-east-2
+
+  # filone-sandbox. The number itself lives in the constants package, so a stack
+  # names the account rather than repeating it.
+  forge-central:account: nonprod
