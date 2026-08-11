@@ -1,4 +1,4 @@
-module github.com/fil-forge/forge-central
+module github.com/fil-forge/infra-central
 
 go 1.25.3
 
@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.5
 	github.com/ethereum/go-ethereum v1.17.5
 	github.com/fil-forge/ucantone v0.0.0-20260706102443-79141c5cc52e
-	github.com/fil-forge/ucantool v0.0.0-20260811174839-324a869cd06f
+	github.com/fil-forge/ucantool v0.0.0-20260811190916-ec0494d5f3b6
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openbao/openbao/api/v2 v2.6.0
 	gitlab.com/yawning/secp256k1-voi v0.0.0-20230925100816-f2616030848b
@@ -39,6 +39,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.1 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
