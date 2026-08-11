@@ -1,0 +1,119 @@
+// Command forge-provision mints every secret a Forge stage needs and seeds its
+// databases, running as a Lambda inside the VPC.
+//
+// It exists so that private keys are generated where they will be used rather
+// than on an operator's laptop. Terraform invokes it and receives only public
+// identifiers: DIDs, wallet addresses, and the names of what was created. No
+// private key ever enters Terraform state, and nothing is written to a local
+// disk anywhere in the flow.
+//
+// Two phases, because the ordering is circular otherwise. OpenBao stores its
+// data in Postgres, so its database must exist before it starts; but OpenBao
+// must be running before it can be configured. Phase seed runs after RDS and
+// before OpenBao; phase vault runs once OpenBao is serving.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/aws/aws-lambda-go/lambda"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+
+	"github.com/fil-forge/forge-central/internal/fund"
+	"github.com/fil-forge/forge-central/internal/ssmstore"
+)
+
+// Request is the event Terraform sends through aws_lambda_invocation.
+type Request struct {
+	Phase string `json:"phase"`
+	// Trigger is ignored by the handler. It exists so a caller can force a
+	// re-invocation by changing the input, which is how aws_lambda_invocation
+	// decides whether to call again.
+	Trigger string `json:"trigger,omitempty"`
+
+	// --- fund phase only ---
+
+	// Confirm must be true before the fund phase signs anything. Without it the
+	// phase reports its plan and stops, so no invocation moves money by
+	// accident.
+	Confirm bool `json:"confirm,omitempty"`
+
+	// Amounts are decimal USDFC strings exactly as the operator typed them, so
+	// the number shown in the confirmation prompt is the number that is signed.
+	// Empty means the default.
+	Deposit         string `json:"deposit,omitempty"`
+	LockupAllowance string `json:"lockup_allowance,omitempty"`
+	RateAllowance   string `json:"rate_allowance,omitempty"`
+	MaxLockupPeriod uint64 `json:"max_lockup_period,omitempty"`
+	ForceDeposit    bool   `json:"force_deposit,omitempty"`
+}
+
+// Response carries public material back into Terraform state. Every field here
+// is safe to read by anyone with state access, which is the point.
+type Response struct {
+	Phase string `json:"phase"`
+
+	// DIDs maps a service name to its did:key.
+	DIDs map[string]string `json:"dids,omitempty"`
+	// Addresses maps a wallet name to its EIP-55 address, the value to fund.
+	Addresses map[string]string `json:"addresses,omitempty"`
+	// Databases lists the Postgres databases now present.
+	Databases []string `json:"databases,omitempty"`
+	// Created lists parameters this invocation minted. On a steady-state apply
+	// it is empty, which is the signal that nothing was regenerated.
+	Created []string `json:"created"`
+
+	// Initialised reports whether this invocation initialised OpenBao.
+	Initialised bool `json:"initialised,omitempty"`
+
+	// DryRun is true when the fund phase reported a plan without signing.
+	DryRun     bool         `json:"dry_run,omitempty"`
+	FundPlan   *fund.Plan   `json:"fund_plan,omitempty"`
+	FundResult *fund.Result `json:"fund_result,omitempty"`
+}
+
+func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	lambda.Start(handle)
+}
+
+func handle(ctx context.Context, req Request) (*Response, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config: %w", err)
+	}
+
+	deps := &deps{
+		cfg:     cfg,
+		store:   ssmstore.New(ssm.NewFromConfig(awsCfg), cfg.Stage, cfg.KMSKeyID),
+		secrets: secretsmanager.NewFromConfig(awsCfg),
+	}
+
+	switch req.Phase {
+	case "seed":
+		return deps.seed(ctx)
+	case "vault":
+		return deps.vault(ctx)
+	case "fund":
+		return deps.fund(ctx, req)
+	default:
+		return nil, fmt.Errorf("unknown phase %q; want \"seed\", \"vault\" or \"fund\"", req.Phase)
+	}
+}
+
+// deps is what both phases need: configuration and the two AWS clients.
+type deps struct {
+	cfg     config
+	store   *ssmstore.Store
+	secrets *secretsmanager.Client
+}
