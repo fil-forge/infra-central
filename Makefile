@@ -31,13 +31,18 @@ METADATA    := build/metadata.json
 # for arm64 from any host.
 BUILDER     ?= forge-central
 
+# Lambda reads only a single Docker Image Manifest V2 Schema 2. Left to itself
+# buildx writes OCI media types and attaches a provenance attestation, which
+# turns the pushed digest into a manifest index; Lambda rejects both.
 .PHONY: publish
 publish: login builder
 	docker buildx build \
 	  --builder $(BUILDER) \
 	  --platform linux/arm64 \
 	  --file build/provision.Dockerfile \
-	  --output type=image,name=$(IMAGE),push=true,push-by-digest=true,name-canonical=true \
+	  --provenance=false \
+	  --sbom=false \
+	  --output type=image,name=$(IMAGE),push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=false \
 	  --metadata-file $(METADATA) \
 	  .
 	@digest=$$(jq -r '."containerimage.digest"' $(METADATA)); \
