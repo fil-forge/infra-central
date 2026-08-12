@@ -116,18 +116,30 @@ aws ssm get-parameters-by-path --path /forge/dev --recursive \
 
 ### How each part is deployed
 
-There is no CI/CD yet. Everything below is run by an operator from a developer
-machine, against HCP Terraform for state.
-
-| Part                   | How it is deployed today                                  |
+| Part                   | How it is deployed                                        |
 | ---------------------- | --------------------------------------------------------- |
-| `bootstrap` workspaces | `terraform apply` run locally, always                      |
-| provision image        | `make publish` run locally, pushed to ECR by hand          |
-| `platform` workspaces  | TODO: the deployment path is not settled yet               |
-| `apps` workspaces      | TODO: the deployment path is not settled yet               |
+| `bootstrap` workspaces | `terraform apply` run locally, always                     |
+| provision image        | `make publish` run locally, pushed to ECR by hand         |
+| dev `platform`, `apps` | HCP applies every commit to `main`, no confirmation       |
 
-See [Planned work](#planned-work) for the automation that would replace the
-manual steps.
+The dev stage deploys itself. Both of its workspaces are connected to this
+repository, track `main`, and have auto-apply on, so a merge reaches dev without
+anyone running Terraform. Plans and applies execute on HCP's runners rather than
+on a laptop, which is what keeps a deploy from depending on which Terraform or
+provider version an operator happens to have installed.
+
+`apps` reads `platform` outputs through `tfe_outputs`, so ordering matters:
+`platform` applies first and a run trigger starts `apps` afterwards. A merge
+that touched only one of them runs only that one.
+
+AWS credentials are never stored in a workspace. Each run assumes an IAM role
+in the target account through HCP's OIDC federation, and the credentials expire
+with the run.
+
+Prod is not set up yet. It will get the same two workspaces with auto-apply off,
+so a commit to `main` queues a plan an operator confirms.
+
+See [Planned work](#planned-work) for the manual steps that remain.
 
 ### First time in an account and region
 
@@ -200,13 +212,19 @@ building a second working copy of the stage somewhere unexpected.
 
 ### Bringing up a stage
 
-```bash
-cd terraform/envs/dev/platform && terraform apply   # VPC, RDS, OpenBao, secrets
-cd ../apps                     && terraform apply   # the six services
-```
+Merge the stage's directories to `main`. The `platform` workspace applies the
+VPC, RDS, OpenBao and the secrets; its run trigger then starts `apps`, which
+applies the six services.
 
-The platform apply is slow the first time: it waits for the OpenBao task's cold
-start before it can initialise it.
+The first `platform` apply is slow: it waits for the OpenBao task's cold start
+before it can initialise it, inside a synchronous Lambda call that Lambda caps at
+15 minutes. If it times out there, start the run again — the seed phase
+regenerates nothing that already exists, which is what protects funded wallets.
+
+A new stage's first run usually needs starting by hand, from **Actions → Start
+new run** in the workspace: the workspace is created after its config has already
+landed, so there is no later push for HCP to react to. Everything after that
+arrives on `main`.
 
 ### Funding the wallets
 
@@ -299,15 +317,15 @@ cast call "$FILECOIN_PAY_ADDRESS" \
 ### Iterating on the provision Lambda
 
 ```bash
-make publish && terraform apply
+make publish STAGE=dev
 ```
 
-`make publish` writes the new digest into the stage's `image.auto.tfvars`, so
-there is no line to edit by hand. **Commit that file.** The stage plans in HCP,
-which sees only what is in version control, so an uncommitted digest is applied
-nowhere.
+That writes the new digest into the stage's `image.auto.tfvars`, so there is no
+line to edit by hand. **Commit that file and merge it.** The stage plans in HCP,
+which sees only what is in version control, so a digest left on your machine is
+applied nowhere.
 
-Promoting the same image to prod is a copy of that digest into
+Promoting the same image to prod will be a copy of that digest into
 `terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
 change is ready rather than as a side effect of a build.
 
@@ -318,7 +336,8 @@ tracks `main`; prod pins `sha-<short>`.
 
 ### Confirming nothing was regenerated
 
-The most important check after any apply:
+The most important check after any apply. Read `created_parameters` from the
+run's outputs in HCP, or from a shell:
 
 ```bash
 terraform -chdir=terraform/envs/dev/platform output created_parameters
@@ -330,11 +349,11 @@ assuming a wallet is intact.
 
 ### Rotating a service identity
 
-Delete the parameter, then re-apply:
+Delete the parameter, then start a run for the stage's `platform` workspace from
+**Actions → Start new run**:
 
 ```bash
 aws ssm delete-parameter --name /forge/dev/swarf/identity
-terraform -chdir=terraform/envs/dev/platform apply
 ```
 
 The new DID appears in `service_dids`. Anything that had registered the old DID
@@ -513,20 +532,35 @@ Then, in the copy:
    already delegated and shared by every non-prod stage, so the DNS project
    needs no change. Point the `chain` block at the network this stage
    transacts against.
-4. Create the two HCP workspaces with those names and working directories.
+4. Create the two HCP workspaces with those names and working directories, in
+   Remote execution mode, connected to this repository and tracking `main`.
+   Each needs:
+   - `TFC_AWS_PROVIDER_AUTH` and `TFC_AWS_RUN_ROLE_ARN`, which a variable set
+     supplies to every workspace in the project. Nothing else authenticates to
+     AWS: the run assumes the role through OIDC and the credentials expire with
+     it.
+   - Trigger patterns covering the stage's own directory and
+     `terraform/modules/**/*`. Without the second one, a module change queues no
+     plan and the stage drifts from the repository without saying so.
+   - On `apps`, a run trigger on the stage's `platform` workspace, so it never
+     plans against outputs an in-flight `platform` run is about to change.
+5. Start the first run by hand from **Actions → Start new run**. Merges take it
+   from there.
 
-Prod differs from dev inside `main.tf` rather than by being a different shape:
-multi-AZ database, deletion protection on, a larger OpenBao connection budget,
-and a digest pinned in `terraform.tfvars`, copied from dev when a change is
-promoted rather than written by whatever was built last.
+Prod will differ from dev inside `main.tf` rather than by being a different
+shape: multi-AZ database, deletion protection on, a larger OpenBao connection
+budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
+is promoted rather than written by whatever was built last.
 
 ### A personal sandbox stage
 
 Stage names are not limited to dev and prod. A sandbox stage in **Local**
 execution mode runs Terraform on your machine with only state in HCP, which is
-the fastest loop for iterating on the provision Lambda. It gets no PR previews:
-automatic speculative plans need a VCS-connected workspace, and those require
-Remote execution.
+the fastest loop for iterating on the provision Lambda: no commit, no merge, no
+run to wait for. What it costs is everything the dev stage gets from HCP —
+speculative plans on pull requests, applies that cannot disagree with `main`,
+and a Terraform and provider version that is the same for everyone. Use it to
+iterate, not to host anything anyone depends on.
 
 ## Development
 
@@ -577,17 +611,17 @@ One behaviour has to survive exactly: the CLI writes textual container codecs
 with a trailing newline and raw codecs without, and smelt's committed proof
 files reflect that.
 
-### Deploy to dev automatically on merge
+### Publish the provision image from CI
 
-Landing a change here should reach the dev stage without anyone running
-`terraform apply`. A workflow on merge to `main` that publishes the provision
-image and then triggers the dev platform and apps workspaces in order.
+Terraform changes reach dev on merge, but the image the Lambda runs does not.
+`make publish` is still run by hand from a developer machine with credentials for
+the target account, and the digest it writes has to be committed before a run
+will pick it up.
 
-The ordering is the substance: `apps` reads `platform` outputs through
-`tfe_outputs`, so a run that starts both at once can plan `apps` against stale
-values. HCP run triggers already model this — configuring the apps workspace to
-trigger on a successful platform apply is likely simpler than orchestrating both
-from Actions.
+A workflow on merge to `main` that publishes the image and commits the digest
+would close the last manual step. Ordering needs care: the commit carrying the
+new digest is what triggers the deploy, so the workflow has to publish before it
+writes, and write only what it published.
 
 ### Deploy service changes from their own repositories
 

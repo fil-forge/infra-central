@@ -2,8 +2,11 @@
 #
 # Differs from dev in three ways that matter: the database is multi-AZ and
 # protected from deletion, OpenBao gets a larger connection budget, and the
-# provision image is pinned by a committed digest rather than read from a
-# developer's local file.
+# provision image digest is pinned in terraform.tfvars, copied from dev when a
+# change is promoted rather than written by whatever was built last.
+#
+# The workspace does not exist yet. It will apply nothing without an operator
+# confirming the plan, unlike dev.
 
 terraform {
   required_version = ">= 1.15"

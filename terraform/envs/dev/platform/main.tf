@@ -1,6 +1,7 @@
 # Dev platform: VPC, RDS, S3, DynamoDB, ALB, OpenBao and the provision Lambda.
 #
-# Apply this before envs/dev/apps, which reads its outputs.
+# HCP applies this workspace on every commit to main, then a run trigger starts
+# envs/dev/apps, which reads its outputs.
 
 terraform {
   required_version = ">= 1.15"
@@ -69,8 +70,8 @@ variable "chain" {
   })
 }
 
-# Written by `make publish` into the gitignored image.auto.tfvars, so the dev
-# loop is `make publish && terraform apply` with nothing to edit by hand.
+# Written by `make publish` into image.auto.tfvars, so the dev loop is
+# `make publish`, commit, merge, with nothing to edit by hand.
 variable "provision_image_digest" {
   type = string
 }

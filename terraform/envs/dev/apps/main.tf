@@ -1,7 +1,9 @@
 # Dev apps: the six ECS services.
 #
 # Reads the platform workspace's state rather than re-deriving anything, so a
-# routine image bump plans in seconds and never touches the database.
+# routine image bump plans in seconds and never touches the database. A run
+# trigger on that workspace is what keeps the two in order: HCP applies both on
+# every commit to main, and this one has to wait for the outputs it reads.
 
 terraform {
   required_version = ">= 1.15"
