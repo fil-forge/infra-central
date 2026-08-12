@@ -14,7 +14,10 @@ package dbinit
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -95,6 +98,23 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 // it, and unlike smelt's single-VM deployment the traffic crosses a subnet
 // boundary here.
 func DSN(host string, port int, db Database) string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=require",
-		db.Name, db.Password, host, port, db.Name)
+	return connectionString(host, port, db.Name, db.Name, db.Password)
+}
+
+// AdminDSN renders the master connection string. RDS generates that password
+// itself, so unlike the hex service passwords it can carry punctuation that
+// changes where a URL parser finds the host.
+func AdminDSN(host string, port int, database, username, password string) string {
+	return connectionString(host, port, database, username, password)
+}
+
+func connectionString(host string, port int, database, username, password string) string {
+	dsn := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(username, password),
+		Host:     net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:     "/" + database,
+		RawQuery: "sslmode=require",
+	}
+	return dsn.String()
 }

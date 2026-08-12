@@ -39,3 +39,14 @@ func TestDSNRendersARequireTLSConnectionString(t *testing.T) {
 		t.Errorf("DSN() = %q, want %q", got, want)
 	}
 }
+
+// RDS picks the master password from a wider alphabet than keygen does, and an
+// unescaped one moves where a URL parser thinks the host begins.
+func TestAdminDSNEscapesThePassword(t *testing.T) {
+	got := AdminDSN("db.internal", 5432, "postgres", "forge_admin", "a[b]c/d?e#f")
+	want := "postgres://forge_admin:a%5Bb%5Dc%2Fd%3Fe%23f@db.internal:5432/postgres?sslmode=require"
+
+	if got != want {
+		t.Errorf("AdminDSN() = %q, want %q", got, want)
+	}
+}

@@ -288,8 +288,8 @@ func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database)
 		return err
 	}
 
-	adminDSN := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=require",
-		master.Username, master.Password, d.cfg.DBHost, d.cfg.DBPort, d.cfg.DBAdminDatabase)
+	adminDSN := dbinit.AdminDSN(d.cfg.DBHost, d.cfg.DBPort, d.cfg.DBAdminDatabase,
+		master.Username, master.Password)
 
 	conn, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
