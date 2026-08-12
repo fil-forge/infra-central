@@ -69,7 +69,11 @@ data "tfe_outputs" "platform" {
 }
 
 locals {
-  platform = data.tfe_outputs.platform.values.platform
+  # nonsensitive_values, because tfe_outputs marks the whole `values` map
+  # sensitive and that taint spreads to every output derived from it. Nothing
+  # the platform workspace exports here is a secret: ARNs, subnet ids and
+  # hostnames.
+  platform = data.tfe_outputs.platform.nonsensitive_values.platform
 }
 
 module "apps" {
