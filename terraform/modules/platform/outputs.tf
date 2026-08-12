@@ -36,10 +36,6 @@ output "namespace_name" {
   value = module.network.namespace_name
 }
 
-output "kms_key_arn" {
-  value = module.kms.key_arn
-}
-
 output "listener_arn" {
   value = module.ingress.listener_arn
 }

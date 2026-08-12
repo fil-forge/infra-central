@@ -95,7 +95,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 
 	deps := &deps{
 		cfg:     cfg,
-		store:   ssmstore.New(ssm.NewFromConfig(awsCfg), cfg.Stage, cfg.KMSKeyID),
+		store:   ssmstore.New(ssm.NewFromConfig(awsCfg), cfg.Stage),
 		secrets: secretsmanager.NewFromConfig(awsCfg),
 	}
 

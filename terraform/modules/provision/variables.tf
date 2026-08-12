@@ -53,14 +53,6 @@ variable "chain" {
   })
 }
 
-variable "kms_key_id" {
-  type = string
-}
-
-variable "kms_key_arn" {
-  type = string
-}
-
 variable "db_host" {
   type = string
 }

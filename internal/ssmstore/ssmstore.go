@@ -9,10 +9,15 @@
 // wallet and change a DID that other services have already registered.
 //
 // Private and public material are separate parameters. Private values are
-// SecureString under a customer-managed key; public values (DIDs, addresses,
-// public keys, UCAN proofs) are plain String. That split means the idempotent
-// re-read path never decrypts anything, so the steady-state role does not need
-// kms:Decrypt at all.
+// SecureString; public values (DIDs, addresses, public keys, UCAN proofs) are
+// plain String, so a reader that needs only those never decrypts anything.
+//
+// SecureStrings take the account's AWS-managed SSM key rather than the stage's
+// customer-managed key. The stage's key is destroyed with the stage, and a key
+// in PendingDeletion stops serving decryption immediately, which would leave
+// every parameter here unreadable the moment a stage came down and would fail
+// the next apply that tried to rebuild it. The AWS-managed key cannot be
+// deleted, so the parameters outlive the stage in fact and not just on paper.
 package ssmstore
 
 import (
@@ -30,12 +35,11 @@ import (
 type Store struct {
 	client *ssm.Client
 	stage  string
-	keyID  string // customer-managed KMS key for SecureString values
 }
 
 // New returns a Store writing under /forge-central/<stage>/.
-func New(client *ssm.Client, stage, kmsKeyID string) *Store {
-	return &Store{client: client, stage: stage, keyID: kmsKeyID}
+func New(client *ssm.Client, stage string) *Store {
+	return &Store{client: client, stage: stage}
 }
 
 // Path renders the fully qualified parameter name for a service and key.
@@ -132,7 +136,6 @@ func (s *Store) PutSecret(ctx context.Context, service, name, value string) erro
 		Name:      aws.String(path),
 		Value:     aws.String(value),
 		Type:      types.ParameterTypeSecureString,
-		KeyId:     aws.String(s.keyID),
 		Overwrite: aws.Bool(true),
 	})
 	if err != nil {
@@ -180,9 +183,6 @@ func (s *Store) put(ctx context.Context, path, value string, paramType types.Par
 		Value:     aws.String(value),
 		Type:      paramType,
 		Overwrite: aws.Bool(overwrite),
-	}
-	if paramType == types.ParameterTypeSecureString {
-		in.KeyId = aws.String(s.keyID)
 	}
 
 	if _, err := s.client.PutParameter(ctx, in); err != nil {

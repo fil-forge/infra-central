@@ -10,7 +10,6 @@ output "platform" {
     service_security_group_id = module.platform.service_security_group_id
     namespace_id              = module.platform.namespace_id
     namespace_name            = module.platform.namespace_name
-    kms_key_arn               = module.platform.kms_key_arn
     listener_arn              = module.platform.listener_arn
     alb_dns_name              = module.platform.alb_dns_name
     alb_zone_id               = module.platform.alb_zone_id

@@ -35,13 +35,15 @@ data "aws_iam_policy_document" "execution_secrets" {
     resources = [local.ssm_prefix_arn]
   }
 
+  # Parameters are encrypted under the account's AWS-managed SSM key, which has
+  # no ARN to name here without a lookup, so the grant is bounded by the
+  # service that may use it. The ssm:GetParameter* statement above is what
+  # keeps a task to its own prefix; this only lets it decrypt what it may read.
   statement {
     sid       = "DecryptOwnParameters"
     actions   = ["kms:Decrypt"]
-    resources = [var.kms_key_arn]
+    resources = ["*"]
 
-    # Bounds the grant to parameter decryption, so the key cannot be used to
-    # read anything else it protects, such as OpenBao's storage.
     condition {
       test     = "StringEquals"
       variable = "kms:ViaService"

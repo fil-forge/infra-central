@@ -63,7 +63,6 @@ module "service" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   secrets = {
     OPENBAO_POSTGRES_DSN = "${var.ssm_prefix}/postgres-dsn"

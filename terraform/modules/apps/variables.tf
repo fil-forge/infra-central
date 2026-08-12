@@ -24,10 +24,6 @@ variable "security_group_id" {
   type = string
 }
 
-variable "kms_key_arn" {
-  type = string
-}
-
 variable "listener_arn" {
   type = string
 }

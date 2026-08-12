@@ -36,7 +36,6 @@ resource "aws_lambda_function" "this" {
   environment {
     variables = {
       FORGE_STAGE                = var.stage
-      FORGE_KMS_KEY_ID           = var.kms_key_id
       FORGE_HOSTNAME_SUFFIX      = var.hostname_suffix
       FORGE_DB_HOST              = var.db_host
       FORGE_DB_PORT              = tostring(var.db_port)

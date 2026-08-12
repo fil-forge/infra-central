@@ -83,7 +83,6 @@ module "apps" {
   vpc_id            = local.platform.vpc_id
   subnet_ids        = local.platform.private_subnet_ids
   security_group_id = local.platform.service_security_group_id
-  kms_key_arn       = local.platform.kms_key_arn
 
   listener_arn    = local.platform.listener_arn
   route53_zone_id = local.platform.route53_zone_id

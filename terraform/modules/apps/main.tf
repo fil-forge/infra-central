@@ -56,7 +56,6 @@ module "sprue" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     SPRUE_SERVER_HOST          = "0.0.0.0"
@@ -136,7 +135,6 @@ module "hilt" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     # hilt binds 127.0.0.1 by default, which no health check can reach.
@@ -211,7 +209,6 @@ module "swarf" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     SWARF_SERVER_HOST = "0.0.0.0"
@@ -264,7 +261,6 @@ module "delegator" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     REGISTRAR_SERVER_HOST = "0.0.0.0"
@@ -355,7 +351,6 @@ module "signing_service" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     SIGNING_SERVICE_HOST                     = "0.0.0.0"
@@ -402,7 +397,6 @@ module "plc" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
-  kms_key_arn       = var.kms_key_arn
 
   environment = {
     ENABLE_MIGRATIONS = "true"

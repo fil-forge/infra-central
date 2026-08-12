@@ -93,9 +93,6 @@ module "provision" {
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.lambda_security_group_id
 
-  kms_key_id  = module.kms.key_id
-  kms_key_arn = module.kms.key_arn
-
   db_host                      = module.database.address
   db_port                      = module.database.port
   db_master_secret_arn         = module.database.master_secret_arn

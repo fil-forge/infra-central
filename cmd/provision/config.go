@@ -14,8 +14,6 @@ type config struct {
 	Stage  string
 	Region string
 
-	KMSKeyID string
-
 	// HostnameSuffix builds the did:web identities the proofs are addressed
 	// to, e.g. dev.fil.one.
 	HostnameSuffix string
@@ -45,7 +43,6 @@ func loadConfig() (config, error) {
 	cfg := config{
 		Stage:           os.Getenv("FORGE_STAGE"),
 		Region:          os.Getenv("AWS_REGION"),
-		KMSKeyID:        os.Getenv("FORGE_KMS_KEY_ID"),
 		HostnameSuffix:  os.Getenv("FORGE_HOSTNAME_SUFFIX"),
 		DBHost:          os.Getenv("FORGE_DB_HOST"),
 		DBAdminDatabase: envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
@@ -80,7 +77,6 @@ func loadConfig() (config, error) {
 	var missing []string
 	for name, value := range map[string]string{
 		"FORGE_STAGE":                cfg.Stage,
-		"FORGE_KMS_KEY_ID":           cfg.KMSKeyID,
 		"FORGE_DB_HOST":              cfg.DBHost,
 		"FORGE_DB_MASTER_SECRET_ARN": cfg.DBMasterSecret,
 		"FORGE_HOSTNAME_SUFFIX":      cfg.HostnameSuffix,

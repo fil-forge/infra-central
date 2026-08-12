@@ -40,10 +40,6 @@ variable "security_group_id" {
   type = string
 }
 
-variable "kms_key_arn" {
-  type = string
-}
-
 variable "environment" {
   description = "Plain environment variables. Never put a secret here: task definitions are readable by anyone with ecs:DescribeTaskDefinition."
   type        = map(string)

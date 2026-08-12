@@ -39,10 +39,21 @@ data "aws_iam_policy_document" "this" {
     ]
   }
 
+  # SecureStrings take the account's AWS-managed SSM key, which no stage owns
+  # and no destroy can remove, so the parameters stay readable after the stage
+  # that minted them is gone. The key has no stable ARN to name here without a
+  # lookup that fails in an account which has never written one, so the grant
+  # is bounded by the service that may use it instead.
   statement {
     sid       = "EncryptAndDecryptParameters"
     actions   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
-    resources = [var.kms_key_arn]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.region}.amazonaws.com"]
+    }
   }
 
   # The RDS master credentials, which Terraform never sees because

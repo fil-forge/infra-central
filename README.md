@@ -80,27 +80,33 @@ These each cost an afternoon to rediscover.
   `https://sprue.<stage>.forge-sandbox.fil.one/.well-known/did.json`, so a task in a private
   subnet reaches the public ALB back out through the NAT gateway.
 
-## SSM parameters outlive the stage
+## What survives a destroy
 
-**`terraform destroy` does not delete any secret this project generates.**
+**`terraform destroy` deletes no parameter this project generates.** The
+provision Lambda creates them, so Terraform has no record of them and never
+removes them. An accidental destroy therefore cannot burn a funded wallet or
+invalidate a DID that storage providers have already registered against.
 
-The provision Lambda creates the parameters, so Terraform has no record of them
-and never removes them. That is deliberate: an accidental destroy cannot burn a
-funded wallet or invalidate a DID that storage providers have already
-registered against.
+They also stay readable, which takes deliberate arrangement. SecureStrings are
+encrypted under the account's AWS-managed SSM key rather than the stage's own
+customer-managed key. The stage's key is destroyed with the stage, and a key in
+PendingDeletion stops serving decryption at once, so tying the parameters to it
+would leave every secret unreadable the moment the stage came down and would
+fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
+nothing else, and what it protects is meant to die with the stage: OpenBao's
+storage sits in the same RDS instance and goes at the same time.
 
-It also has a sharp edge worth stating plainly. **A destroyed and recreated
-stage silently comes back with its previous identities and wallets.** That is
-usually what you want, and it is occasionally a surprise, so check before
-assuming a rebuilt stage is fresh:
+So **a destroyed and recreated stage silently comes back with its previous
+identities and wallets.** That is usually what you want, and it is occasionally
+a surprise, so check before assuming a rebuilt stage is fresh:
 
 ```bash
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text
 ```
 
-To genuinely retire a stage, delete the parameters after the destroy, having
-first confirmed the wallets hold no funds:
+To retire a stage, delete the parameters after the destroy, having first
+confirmed the wallets hold no funds:
 
 ```bash
 # Check the balances first. This is not reversible.
