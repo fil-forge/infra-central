@@ -117,15 +117,15 @@ aws ssm get-parameters-by-path --path /forge/dev --recursive \
 ### First time in an account and region
 
 ```bash
-terraform -chdir=terraform/envs/bootstrap init
-terraform -chdir=terraform/envs/bootstrap apply
+terraform -chdir=terraform/envs/bootstrap/us-east-2 init
+terraform -chdir=terraform/envs/bootstrap/us-east-2 apply
 ```
 
-This creates the ECR repository for the provision Lambda image. It is per
-account **and region**: ECR repositories are regional, and Lambda pulls images
-only from ECR in the same region as the function, so a stage in another region
-needs its own bootstrap workspace and its own `make publish AWS_REGION=…`.
-Stages sharing a region share the repository and pin different digests.
+This creates the ECR repository for the provision Lambda image. There is one
+bootstrap directory per region, each with its own workspace and its own
+repository, because ECR repositories are regional and Lambda pulls an image
+only from ECR in the same region as the function. Stages sharing a region share
+the repository and pin different digests.
 
 Take the `repository_url` output into each stage's
 `provision_image_repository_url`, then publish the Lambda image:
@@ -133,6 +133,24 @@ Take the `repository_url` output into each stage's
 ```bash
 make publish STAGE=dev
 ```
+
+### Adding a region
+
+```bash
+cp -r terraform/envs/bootstrap/us-east-2 terraform/envs/bootstrap/us-west-2
+```
+
+Change both region names in the copy: the workspace name
+(`infra-central-bootstrap-us-west-2`) and the provider `region`. Create the
+workspace in HCP Terraform, apply, then fill the repository:
+
+```bash
+make publish STAGE=<stage> AWS_REGION=us-west-2
+```
+
+Point the stages in that region at the new `repository_url`. The digest is
+derived from the image, not from where it is stored, so a stage in the new
+region can pin the same digest an existing stage already runs.
 
 ### Bringing up a stage
 
@@ -322,8 +340,9 @@ terraform/
     provision/  openbao/  ecs-service/
     platform/                                        composes the above
     apps/                                            the six services
+    provision-ecr/                                   ECR repo for the Lambda image
   envs/
-    bootstrap/                                       ECR repo, per account+region
+    bootstrap/<region>/                              one workspace per region
     dev/platform/    dev/apps/
     prod/platform/   prod/apps/
 ```

@@ -62,7 +62,7 @@ variable "chain" {
 }
 
 variable "provision_image_repository_url" {
-  description = "From the bootstrap workspace's repository_url output."
+  description = "From the repository_url output of the bootstrap workspace for this stage's region."
   type        = string
 }
 

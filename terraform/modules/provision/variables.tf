@@ -11,7 +11,7 @@ variable "account_id" {
 }
 
 variable "image_repository_url" {
-  description = "ECR repository URL for the provision image, from the bootstrap workspace."
+  description = "ECR repository URL for the provision image, from the bootstrap workspace for this stage's region."
   type        = string
 }
 

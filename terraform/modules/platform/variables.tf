@@ -18,7 +18,7 @@ variable "vpc_cidr" {
 }
 
 variable "provision_image_repository_url" {
-  description = "ECR repository URL from the bootstrap workspace."
+  description = "ECR repository URL from the bootstrap workspace for this stage's region."
   type        = string
 }
 
