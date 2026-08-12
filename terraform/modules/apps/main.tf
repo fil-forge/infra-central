@@ -49,7 +49,7 @@ module "sprue" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/sprue:${var.image_tags.sprue}"
+  image          = "ghcr.io/fil-forge/sprue@${var.image_digests.sprue}"
   container_port = 8080
 
   cluster_arn       = var.cluster_arn
@@ -129,7 +129,7 @@ module "hilt" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/hilt:${var.image_tags.hilt}"
+  image          = "ghcr.io/fil-forge/hilt@${var.image_digests.hilt}"
   container_port = 8080
 
   cluster_arn       = var.cluster_arn
@@ -204,7 +204,7 @@ module "swarf" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/swarf:${var.image_tags.swarf}"
+  image          = "ghcr.io/fil-forge/swarf@${var.image_digests.swarf}"
   container_port = 8080
 
   cluster_arn       = var.cluster_arn
@@ -257,7 +257,7 @@ module "delegator" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/delegator:${var.image_tags.delegator}"
+  image          = "ghcr.io/fil-forge/delegator@${var.image_digests.delegator}"
   container_port = 8080
 
   cluster_arn       = var.cluster_arn
@@ -348,7 +348,7 @@ module "signing_service" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/piri-signing-service:${var.image_tags.signing_service}"
+  image          = "ghcr.io/fil-forge/piri-signing-service@${var.image_digests.signing_service}"
   container_port = 7446
 
   cluster_arn       = var.cluster_arn
@@ -395,7 +395,7 @@ module "plc" {
   region     = local.region
   account_id = local.account_id
 
-  image          = "ghcr.io/fil-forge/did-method-plc:${var.image_tags.plc}"
+  image          = "ghcr.io/fil-forge/did-method-plc@${var.image_digests.plc}"
   container_port = 3000
 
   cluster_arn       = var.cluster_arn

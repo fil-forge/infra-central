@@ -50,7 +50,7 @@ variable "region" {
   default = "us-east-2"
 }
 
-variable "image_tags" {
+variable "image_digests" {
   description = "Pinned per service in terraform.tfvars, so a deploy names exactly which build ships and arrives as a reviewable diff."
   type = object({
     sprue           = string
@@ -106,7 +106,7 @@ module "apps" {
   indexer_did  = "did:web:indexer.${local.platform.hostname_suffix}"
   etracker_did = "did:web:etracker.${local.platform.hostname_suffix}"
 
-  image_tags = var.image_tags
+  image_digests = var.image_digests
 
   # One home per stage: the platform workspace owns it, this one reads it.
   chain = local.platform.chain

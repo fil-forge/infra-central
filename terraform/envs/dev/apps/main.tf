@@ -52,8 +52,8 @@ variable "region" {
   default = "us-east-2"
 }
 
-variable "image_tags" {
-  description = "Rolling tags are fine here; prod pins sha-<short>."
+variable "image_digests" {
+  description = "Pinned per service in terraform.tfvars. Dev pins digests like prod: HCP applies this workspace on every commit to main, and a rolling tag would make what dev runs depend on when a task last restarted rather than on what was merged."
   type = object({
     sprue           = string
     hilt            = string
@@ -62,15 +62,6 @@ variable "image_tags" {
     signing_service = string
     plc             = string
   })
-
-  default = {
-    sprue           = "main"
-    hilt            = "main"
-    swarf           = "main"
-    delegator       = "main"
-    signing_service = "main"
-    plc             = "main"
-  }
 }
 
 data "tfe_outputs" "platform" {
@@ -116,7 +107,7 @@ module "apps" {
   indexer_did  = "did:web:indexer.${local.platform.hostname_suffix}"
   etracker_did = "did:web:etracker.${local.platform.hostname_suffix}"
 
-  image_tags = var.image_tags
+  image_digests = var.image_digests
 
   # One home per stage: the platform workspace owns it, this one reads it.
   chain = local.platform.chain

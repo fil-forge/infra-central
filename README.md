@@ -331,8 +331,10 @@ change is ready rather than as a side effect of a build.
 
 ### Deploying a service
 
-Change its tag in the stage's `image_tags` and apply the `apps` workspace. Dev
-tracks `main`; prod pins `sha-<short>`.
+Change its digest in the stage's `image_digests` and merge. Every stage pins
+digests, dev included: HCP applies dev on every commit to `main`, and a rolling
+tag would make what dev runs depend on when a task last restarted rather than on
+what was merged.
 
 ### Confirming nothing was regenerated
 
@@ -349,12 +351,16 @@ assuming a wallet is intact.
 
 ### Rotating a service identity
 
-Delete the parameter, then start a run for the stage's `platform` workspace from
-**Actions → Start new run**:
+Delete the parameter:
 
 ```bash
 aws ssm delete-parameter --name /forge/dev/swarf/identity
 ```
+
+Then force the seed phase to run again. A plain run will not do it: the phase is
+an `aws_lambda_invocation`, which re-invokes only when its input changes, and
+deleting a parameter changes nothing Terraform can see. See [Forcing a provision
+phase to re-run](#forcing-a-provision-phase-to-re-run).
 
 The new DID appears in `service_dids`. Anything that had registered the old DID
 has to be told about the new one, which is why this is a deliberate act rather
@@ -383,8 +389,11 @@ textual container codecs end with a newline — and that is what the tests pin.
 
 ```bash
 aws ssm delete-parameter --name /forge/dev/hilt/vault-secret-id
-terraform -chdir=terraform/envs/dev/platform apply -var vault_trigger=$(date +%s)
 ```
+
+Then force the vault phase to run again. There is no way to do that from a
+remote run yet — see [Forcing a provision phase to
+re-run](#forcing-a-provision-phase-to-re-run).
 
 The vault phase also self-heals: if a stored `secret_id` no longer
 authenticates, because OpenBao's storage was rebuilt underneath it, the next run
@@ -504,7 +513,7 @@ envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambd
 
 envs/<stage>/apps/         the six ECS services
   main.tf                  reads platform outputs via tfe_outputs
-  terraform.tfvars         committed: image tags
+  terraform.tfvars         committed: image digests
 ```
 
 Both roots stay short because `modules/platform` and `modules/apps` hold the
@@ -623,19 +632,32 @@ would close the last manual step. Ordering needs care: the commit carrying the
 new digest is what triggers the deploy, so the workflow has to publish before it
 writes, and write only what it published.
 
+### Forcing a provision phase to re-run
+
+`aws_lambda_invocation` re-invokes only when its input changes, which is what
+`seed_trigger` and `vault_trigger` in `modules/platform` exist for. Rotating an
+identity or hilt's OpenBao credential needs one of them bumped.
+
+Neither is reachable today. The stage roots do not expose them, and a VCS-driven
+run takes no `-var` flags, so the only way to bump one is to edit
+`envs/<stage>/platform/main.tf` and merge. Exposing both as root variables would
+let an operator change a workspace variable and start a run, which is probably
+the answer, but it puts a value that means "re-run the thing that mints wallets"
+one text field away from anyone with write access to the workspace. Worth
+deciding deliberately.
+
 ### Deploy service changes from their own repositories
 
-Today a service is deployed by editing `image_tags` here. It should instead
+Today a service is deployed by editing `image_digests` here. It should instead
 happen when a commit lands on the service's own `main`.
 
-Each of the five repos already publishes `sha-<short>` on merge, so the missing
-piece is a `repository_dispatch` from those workflows into this one, carrying
-the service name and the new tag, which then updates the dev stage's tag and
-applies. Worth deciding whether the tag is written back to a committed file, so
-that what dev is running stays visible in git, or held only in workspace
-variables, which is less machinery and less legible.
+The missing piece is a `repository_dispatch` from each service's publish
+workflow into this one, carrying the service name and the digest it just pushed,
+which commits that digest to the dev stage. The commit is what deploys, so dev
+stays visible in git rather than in a workspace variable nobody reads.
 
-Prod stays manual either way: pinned digests and a reviewable diff are the point.
+Prod stays manual either way: a promotion is a digest copied deliberately, and a
+reviewable diff is the point.
 
 ### OpenBao's availability target is open
 

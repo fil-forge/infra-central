@@ -1,10 +1,15 @@
-# Pinned per service. Every repo publishes sha-<short> tags; a rolling tag here
-# would mean a redeploy could silently change what is running.
-image_tags = {
-  sprue           = "sha-5e20d47"
-  hilt            = "sha-c6afc4f"
-  swarf           = "sha-695ba4a"
-  delegator       = "sha-2ca7ff2"
-  signing_service = "sha-d7c06ad"
-  plc             = "main"
-}
+# Pinned per service, by digest. A digest names one artifact and cannot move
+# underneath a running service, so a redeploy cannot silently change what runs.
+#
+# No values yet: prod is not set up, and the digests have to come from the
+# images the services actually publish. A plan fails until they are filled in,
+# which is the right outcome for a stage nobody has deployed.
+#
+# image_digests = {
+#   sprue           = "sha256:..."
+#   hilt            = "sha256:..."
+#   swarf           = "sha256:..."
+#   delegator       = "sha256:..."
+#   signing_service = "sha256:..."
+#   plc             = "sha256:..."
+# }

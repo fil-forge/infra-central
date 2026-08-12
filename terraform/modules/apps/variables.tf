@@ -88,8 +88,8 @@ variable "etracker_did" {
 
 # --- per-stage configuration ---
 
-variable "image_tags" {
-  description = "Image tag per service. Prefer sha-<short> in prod so a deploy names one artifact; main is fine while iterating in dev."
+variable "image_digests" {
+  description = "Image digest per service, pinned by every stage. A digest names one artifact and cannot move underneath a running service, so what a stage runs is a committed fact rather than whatever the tag pointed at when the task last started."
   type = object({
     sprue           = string
     hilt            = string
@@ -99,13 +99,9 @@ variable "image_tags" {
     plc             = string
   })
 
-  default = {
-    sprue           = "main"
-    hilt            = "main"
-    swarf           = "main"
-    delegator       = "main"
-    signing_service = "main"
-    plc             = "main"
+  validation {
+    condition     = alltrue([for digest in values(var.image_digests) : startswith(digest, "sha256:")])
+    error_message = "Every service must be pinned by digest, in the form sha256:<hex>. A tag here would produce an image reference that pulls at task start and fails there instead."
   }
 }
 
