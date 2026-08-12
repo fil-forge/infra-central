@@ -7,7 +7,7 @@ terraform {
   required_version = ">= 1.15"
 
   cloud {
-    organization = "fil-forge"
+    organization = "Filecoin_Foundation"
 
     workspaces {
       name = "infra-central-prod-apps"
@@ -56,7 +56,7 @@ variable "image_tags" {
 }
 
 data "tfe_outputs" "platform" {
-  organization = "fil-forge"
+  organization = "Filecoin_Foundation"
   workspace    = "infra-central-prod-platform"
 }
 

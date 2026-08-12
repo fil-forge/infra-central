@@ -6,7 +6,7 @@ terraform {
   required_version = ">= 1.15"
 
   cloud {
-    organization = "fil-forge"
+    organization = "Filecoin_Foundation"
 
     workspaces {
       name = "infra-central-dev-platform"
