@@ -127,8 +127,12 @@ func EnsureInitialised(ctx context.Context, client *api.Client) (InitResult, err
 	}, nil
 }
 
-// EnsureMounts brings up hilt's KV v2 engine, the transit engine, and an audit
-// device. The client must carry a root or equivalently privileged token.
+// EnsureMounts brings up hilt's KV v2 engine and the transit engine. The client
+// must carry a root or equivalently privileged token.
+//
+// No audit device is enabled: OpenBao 2.x rejects audit devices created over
+// the API and takes them only from the server config file. See the audit
+// follow-up in README.md.
 func EnsureMounts(ctx context.Context, client *api.Client) error {
 	mounts, err := client.Sys().ListMountsWithContext(ctx)
 	if err != nil {
@@ -151,30 +155,6 @@ func EnsureMounts(ctx context.Context, client *api.Client) error {
 		}
 	}
 
-	return ensureAuditDevice(ctx, client)
-}
-
-// ensureAuditDevice sends the audit log to stdout so it lands in the task's
-// CloudWatch log group. An audit device is also a liveness hazard: OpenBao
-// refuses requests when every enabled device is failing, which is why stdout is
-// preferable to a file on an ephemeral container filesystem.
-func ensureAuditDevice(ctx context.Context, client *api.Client) error {
-	devices, err := client.Sys().ListAuditWithContext(ctx)
-	if err != nil {
-		return fmt.Errorf("list audit devices: %w", err)
-	}
-	if _, ok := devices["stdout/"]; ok {
-		return nil
-	}
-
-	err = client.Sys().EnableAuditWithOptionsWithContext(ctx, "stdout", &api.EnableAuditOptions{
-		Type:        "file",
-		Description: "audit log to the container's stdout, collected by CloudWatch",
-		Options:     map[string]string{"file_path": "stdout"},
-	})
-	if err != nil {
-		return fmt.Errorf("enable audit device: %w", err)
-	}
 	return nil
 }
 

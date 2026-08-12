@@ -674,6 +674,24 @@ stays visible in git rather than in a workspace variable nobody reads.
 Prod stays manual either way: a promotion is a digest copied deliberately, and a
 reviewable diff is the point.
 
+### OpenBao runs without an audit log
+
+Nothing records who read or wrote which secret. The provision Lambda used to
+enable a `file` device pointed at stdout, so the audit log landed in the task's
+CloudWatch log group, but OpenBao 2.x rejects audit devices created over the
+API: a file device writes to an arbitrary path and a socket device to an
+arbitrary socket, which it treats as an operator's decision rather than an API
+caller's.
+
+The replacement is an `audit` stanza in the server config, which
+`modules/openbao` already renders at task start. Two things need checking before
+it goes in. A device that cannot write makes OpenBao reject requests, so stdout
+under Fargate has to be confirmed as a sink that never blocks or fills. And
+declarative stanzas were not applied at first boot in 2.5.0-beta
+([openbao#2168](https://github.com/openbao/openbao/issues/2168)), so 2.6.0 needs
+verifying against a fresh instance rather than one that has been through a
+`SIGHUP`.
+
 ### OpenBao's availability target is open
 
 Under [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) a regional
