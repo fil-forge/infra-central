@@ -71,6 +71,13 @@ resource "aws_service_discovery_service" "this" {
 
   name = var.service
 
+  # ECS registers the running task as an instance here, and Cloud Map refuses
+  # to delete a service that still holds one. Replacing this resource therefore
+  # deadlocks against the task it serves: the registration only moves once the
+  # ECS service is updated, which Terraform does after the delete. This lets
+  # the provider clear the instances itself.
+  force_destroy = true
+
   dns_config {
     namespace_id = var.namespace_id
 
