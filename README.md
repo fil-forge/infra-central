@@ -604,6 +604,72 @@ make test
 
 Deliberate compromises that need a change outside this repository.
 
+### Onboarding a regional appliance has no tooling
+
+Everything the central services need is minted and wired by an apply. The first
+Piri/Ingot appliance pointed at a stage needs five more things, and this
+repository provides none of them. Until it does, an appliance cannot finish
+`piri init`: it fails at the approval step with `403`, and if it gets past that,
+uploads fail with `CandidateUnavailable` and hilt rejects every tenant in the
+region.
+
+**Three registration writes.** These are runtime state, not configuration, so no
+apply creates them. smelt does each one from the operator's machine against the
+box; the equivalents here have no home yet.
+
+| What | Where it lands | Without it |
+| ---- | -------------- | ---------- |
+| The appliance's DID on the delegator's allow list | `fc-<stage>-delegator-allow-list` | `piri init` step 4 calls `/registrar/request-approval`, which refuses any DID not on the list with a `403` |
+| `provider register <did> <url> <proof>` plus `provider weight set` against sprue | sprue's database | uploads fail with `CandidateUnavailable: no storage providers available` |
+| `provider add <did> <region>` against hilt | hilt's database | hilt rejects tenant creation for the region and every `/s3/*` invocation ingot makes |
+
+smelt implements these as `staging-allowlist-piri`, `staging-register-piri` and
+`staging-register-ingot`, and its runbook is the best statement of the ordering
+and the failure modes.
+
+**Two proofs, one in each direction.** `keygen.Proofs` deliberately issues three
+of smelt's five, and the seed phase could not issue the other two even if it
+wanted to, because both involve a key that does not exist when a stage is
+brought up:
+
+- `piri-0-proof` — signed by the appliance's own identity key, audience sprue,
+  granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
+  `/pdp/info`. Central never holds that key, so this proof arrives from the
+  appliance and is handed to sprue as the third argument of `provider register`.
+- `hilt-ingot-s3-proof` — signed by hilt, audience ingot's `did:key`, granting
+  `/s3/request/authorize` and the four `/s3/bucket/*` commands. Central holds
+  hilt's key, but ingot has no did:web and its `did:key` is not known until the
+  appliance is provisioned, so this one is issued on demand with the appliance's
+  DID as input and returned to it.
+
+That asymmetry is the shape of the missing tool: onboarding is a request
+carrying the appliance's two DIDs and its public URL, not another idempotent
+phase that mints from nothing.
+
+**There is no shell to run the admin CLIs in.** smelt reaches sprue and hilt
+with `docker compose exec`. Here both run as Fargate tasks in private subnets
+and `enable_execute_command` is not set on any service, so
+`aws ecs execute-command` does not work either. Three ways out, none of them chosen: turn ECS Exec on and
+accept a documented human path into a task; add a Lambda alongside `provision`
+that performs the writes and issues the hilt proof, reusing its SSM access to
+read hilt's identity; or expose the admin operations over the ALB behind
+authentication, which is the largest change and the only one that also serves a
+self-service future.
+
+The delegator's allow list is the exception and can be written today. Its table
+takes a single `did` string as the hash key, so an operator with credentials for
+the account writes the item directly without going near a task, once the item
+shape the delegator reads has been confirmed against its store package.
+
+**Where this belongs is the open question.** The appliance knows its own DIDs
+and its operator runs its bootstrap, which argues for the appliance pulling.
+Every write lands in central's tables and databases, and central holds the key
+that signs the proof going back, which argues for the authority staying here. The
+likely answer is both halves: the appliance presents its DIDs and URL, and
+tooling in this repository performs the three writes and returns the proof.
+Deciding that before the first appliance arrives is cheaper than discovering it
+during one.
+
 ### hilt should authenticate to OpenBao with AWS IAM auth
 
 hilt currently uses AppRole with a `secret_id` delivered through SSM. That works
