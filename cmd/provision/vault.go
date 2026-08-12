@@ -29,6 +29,9 @@ func (d *deps) vault(ctx context.Context) (*Response, error) {
 		return nil, fmt.Errorf("build openbao client: %w", err)
 	}
 
+	slog.Info("waiting for openbao to serve",
+		"addr", d.cfg.OpenBaoAddr, "budget", openBaoStartupBudget.String())
+
 	waitCtx, cancel := context.WithTimeout(ctx, openBaoStartupBudget)
 	defer cancel()
 	if err := vaultinit.WaitForUnsealed(waitCtx, client); err != nil {
@@ -37,22 +40,27 @@ func (d *deps) vault(ctx context.Context) (*Response, error) {
 
 	resp := &Response{Phase: "vault", Created: []string{}}
 
+	slog.Info("resolving the root token")
 	rootToken, err := d.ensureRootToken(ctx, client, resp)
 	if err != nil {
 		return nil, err
 	}
 	client.SetToken(rootToken)
 
+	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)
 	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
 		return nil, err
 	}
 
+	slog.Info("ensuring hilt approle")
 	roleID, err := vaultinit.EnsureHiltAppRole(ctx, client, vaultinit.Config{
 		TokenBoundCIDRs: d.cfg.PrivateCIDRs,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	slog.Info("storing hilt approle credentials")
 	if err := d.store.PutSecret(ctx, "hilt", "vault-role-id", roleID); err != nil {
 		return nil, err
 	}
@@ -78,12 +86,14 @@ func (d *deps) ensureRootToken(ctx context.Context, client *api.Client, resp *Re
 	}
 
 	if !result.Initialised {
+		slog.Info("openbao was already initialised; reading the stored root token")
 		token, err := d.store.GetSecret(ctx, "openbao", "root-token")
 		if err != nil {
 			return "", fmt.Errorf("openbao is initialised but its root token is not in SSM: %w", err)
 		}
 		return token, nil
 	}
+	slog.Info("openbao was uninitialised; storing the new root token and recovery keys")
 
 	// Store the credentials before anything else can fail. An initialised
 	// OpenBao whose root token was never persisted is unrecoverable.

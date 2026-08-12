@@ -83,27 +83,39 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		Created:   []string{},
 	}
 
+	slog.Info("ensuring service identities", "services", len(identityServices))
 	freshIdentities, err := d.seedIdentities(ctx, resp)
 	if err != nil {
 		return nil, err
 	}
+
+	slog.Info("issuing proofs", "minted_identities", len(freshIdentities))
 	if err := d.seedProofs(ctx, resp, freshIdentities); err != nil {
 		return nil, err
 	}
+
+	slog.Info("ensuring wallets", "wallets", len(wallets))
 	if err := d.seedWallets(ctx, resp); err != nil {
 		return nil, err
 	}
+
+	slog.Info("ensuring shared secrets", "secrets", len(randomSecrets))
 	if err := d.seedRandomSecrets(ctx, resp); err != nil {
 		return nil, err
 	}
 
+	slog.Info("ensuring database passwords", "databases", len(databaseServices))
 	databases, err := d.seedDatabasePasswords(ctx, resp)
 	if err != nil {
 		return nil, err
 	}
+
+	slog.Info("creating databases", "databases", len(databases))
 	if err := d.createDatabases(ctx, databases); err != nil {
 		return nil, err
 	}
+
+	slog.Info("storing connection strings", "databases", len(databases))
 	if err := d.storeConnectionStrings(ctx, databases); err != nil {
 		return nil, err
 	}
@@ -310,6 +322,7 @@ func (d *deps) seedDatabasePasswords(ctx context.Context, resp *Response) ([]dbi
 }
 
 func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database) error {
+	slog.Info("reading the RDS master secret", "secret", d.cfg.DBMasterSecret)
 	master, err := d.masterCredentials(ctx)
 	if err != nil {
 		return err
@@ -317,6 +330,13 @@ func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database)
 
 	adminDSN := dbinit.AdminDSN(d.cfg.DBHost, d.cfg.DBPort, d.cfg.DBAdminDatabase,
 		master.Username, master.Password)
+
+	// A security group that drops the connection shows up as a long silence
+	// rather than an error, so the host is worth having in the log before the
+	// dial. The DSN itself is never logged, because it carries the master
+	// password.
+	slog.Info("connecting to postgres as master",
+		"host", d.cfg.DBHost, "port", d.cfg.DBPort, "database", d.cfg.DBAdminDatabase)
 
 	conn, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {

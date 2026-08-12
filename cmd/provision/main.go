@@ -102,6 +102,15 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		secrets: secretsmanager.NewFromConfig(awsCfg),
 	}
 
+	// Every log line here announces the step about to start, never the one
+	// that just finished. A phase fails by hanging at least as often as it
+	// fails by returning an error, and the last line of a hung invocation
+	// should name what it is stuck on rather than the last thing that worked.
+	//
+	// The phase is logged first because all three share one log group, and
+	// without this line a stream gives no clue which one it belongs to.
+	slog.Info("starting phase", "phase", req.Phase, "stage", cfg.Stage)
+
 	switch req.Phase {
 	case "seed":
 		return deps.seed(ctx)

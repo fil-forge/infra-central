@@ -12,6 +12,7 @@ package vaultinit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openbao/openbao/api/v2"
@@ -61,8 +62,11 @@ type Config struct {
 func WaitForUnsealed(ctx context.Context, client *api.Client) error {
 	const interval = 3 * time.Second
 
+	// Every attempt is logged. A task that never starts makes this loop the
+	// whole of the phase, and without the reason each poll gave, the only
+	// evidence left is a timeout four minutes later that names no cause.
 	var lastErr error
-	for {
+	for attempt := 1; ; attempt++ {
 		health, err := client.Sys().SealStatusWithContext(ctx)
 		switch {
 		case err != nil:
@@ -72,6 +76,7 @@ func WaitForUnsealed(ctx context.Context, client *api.Client) error {
 		default:
 			return nil
 		}
+		slog.Info("openbao is not serving yet", "attempt", attempt, "reason", lastErr)
 
 		select {
 		case <-ctx.Done():
