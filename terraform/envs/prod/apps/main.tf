@@ -29,12 +29,20 @@ terraform {
 provider "aws" {
   region = var.region
 
+  # Credentials for another account would otherwise apply a second, quietly
+  # working copy of the stage there. This fails the plan instead.
+  allowed_account_ids = [module.constants.prod_account_id]
+
   default_tags {
     tags = {
       Project = "infra-central"
       Stage   = "prod"
     }
   }
+}
+
+module "constants" {
+  source = "../../../modules/constants"
 }
 
 variable "region" {

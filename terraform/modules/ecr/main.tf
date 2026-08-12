@@ -8,14 +8,14 @@
 #
 # The repository holding the forge-provision Lambda image.
 #
-# One instance per account *and* region. ECR repositories are regional and
-# Lambda pulls an image only from ECR in the same region as the function, so a
-# stage in another region cannot reuse a repository from the first one. Stages
-# sharing a region share this repository: they pin different digests, so they
-# do not interfere.
+# One instance per account *and* region. ECR repositories are regional, Lambda
+# pulls an image only from ECR in the same region as the function, and a pull
+# from another account additionally needs a repository policy that nothing here
+# creates. Stages sharing an account and a region share this repository: they
+# pin different digests, so they do not interfere.
 #
-# The repository name is the same in every region, which is what lets a stage's
-# provision_image_repository_url differ only in the region part of the host.
+# The repository name is the same everywhere, which is what lets a stage derive
+# its image URL from its own account and region.
 #
 # Nothing in this repository is tagged. `make publish` pushes by digest, a stage
 # pins that digest, and the Lambda is deployed from it. IMMUTABLE therefore
@@ -26,8 +26,12 @@
 # instead of this one: there the tag decides what runs, so it has to be
 # immutable, with an exclusion filter for any rolling tag a stage follows.
 
+module "constants" {
+  source = "../constants"
+}
+
 resource "aws_ecr_repository" "provision" {
-  name                 = "forge-central/provision"
+  name                 = module.constants.provision_repository_name
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

@@ -117,15 +117,16 @@ aws ssm get-parameters-by-path --path /forge/dev --recursive \
 ### First time in an account and region
 
 ```bash
-terraform -chdir=terraform/envs/bootstrap/us-east-2 init
-terraform -chdir=terraform/envs/bootstrap/us-east-2 apply
+terraform -chdir=terraform/envs/bootstrap/nonprod/us-east-2 init
+terraform -chdir=terraform/envs/bootstrap/nonprod/us-east-2 apply
 ```
 
 This creates `forge-central/provision`, the ECR repository for the provision
-Lambda image. There is one bootstrap directory per region, each with its own
-workspace and its own repository, because ECR repositories are regional and
-Lambda pulls an image only from ECR in the same region as the function. Stages
-sharing a region share the repository and pin different digests.
+Lambda image. There is one bootstrap directory per account and region, each with
+its own workspace and its own repository: ECR repositories are regional, Lambda
+pulls an image only from ECR in the same region as the function, and a pull from
+another account needs a repository policy this project does not create. Stages
+sharing an account and region share the repository and pin different digests.
 
 Every image this project publishes to ECR lives under the `forge-central/`
 prefix, one repository per image. Per-image repositories are what make per-image
@@ -137,30 +138,41 @@ carries no expiry rule: an untagged image is indistinguishable from one a stage
 is running, and Lambda does not survive having its image deleted. Prune by hand
 when the image count starts to bother you.
 
-Take the `provision_repository_url` output into each stage's
-`provision_image_repository_url`, then publish the Lambda image:
+Then fill the repository:
 
 ```bash
 make publish STAGE=dev
 ```
 
+A stage needs nothing copied from the bootstrap output. It builds the image URL
+from its own account and region, which is the only registry its Lambda can pull
+from anyway; the account ids and the repository name live in
+`terraform/modules/constants`.
+
 ### Adding a region
 
 ```bash
-cp -r terraform/envs/bootstrap/us-east-2 terraform/envs/bootstrap/us-west-2
+cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonprod/us-west-2
 ```
 
 Change both region names in the copy: the workspace name
-(`infra-central-bootstrap-us-west-2`) and the provider `region`. Create the
-workspace in HCP Terraform, apply, then fill the repository:
+(`infra-central-bootstrap-nonprod-us-west-2`) and the provider `region`. Create
+the workspace in HCP Terraform, apply, then fill the repository:
 
 ```bash
 make publish STAGE=<stage> AWS_REGION=us-west-2
 ```
 
-Point the stages in that region at the new `provision_repository_url`. The
-digest is derived from the image, not from where it is stored, so a stage in the
-new region can pin the same digest an existing stage already runs.
+The digest is derived from the image, not from where it is stored, so a stage in
+the new region can pin the same digest an existing stage already runs.
+
+### Adding an account
+
+Copy a `bootstrap/<account>/` directory, point the new copy's provider at the
+account id it belongs to, and add that id to `terraform/modules/constants` if it
+is not there yet. Every root reads its account id from that module, so an apply
+run with credentials for the wrong account fails at plan time rather than
+building a second working copy of the stage somewhere unexpected.
 
 ### Bringing up a stage
 
@@ -350,9 +362,10 @@ terraform/
     provision/  openbao/  ecs-service/
     platform/                                        composes the above
     apps/                                            the six services
-    provision-ecr/                                   forge-central/provision repo
+    ecr/                                             forge-central/provision repo
+    constants/                                       account ids, shared literals
   envs/
-    bootstrap/<region>/                              one workspace per region
+    bootstrap/<account>/<region>/                    one workspace per registry
     dev/platform/    dev/apps/
     prod/platform/   prod/apps/
 ```
@@ -471,8 +484,7 @@ Then, in the copy:
    already delegated and shared by every non-prod stage, so the DNS project
    needs no change. Point the `chain` block at the network this stage
    transacts against.
-4. Create the two HCP workspaces with those names and working directories, then
-   set `provision_image_repository_url` from the bootstrap output.
+4. Create the two HCP workspaces with those names and working directories.
 
 Prod differs from dev inside `main.tf` rather than by being a different shape:
 multi-AZ database, deletion protection on, a larger OpenBao connection budget,

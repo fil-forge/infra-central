@@ -27,12 +27,20 @@ terraform {
 provider "aws" {
   region = var.region
 
+  # Credentials for another account would otherwise apply a second, quietly
+  # working copy of the stage there. This fails the plan instead.
+  allowed_account_ids = [module.constants.prod_account_id]
+
   default_tags {
     tags = {
       Project = "infra-central"
       Stage   = "prod"
     }
   }
+}
+
+module "constants" {
+  source = "../../../modules/constants"
 }
 
 variable "region" {
@@ -64,10 +72,6 @@ variable "chain" {
   })
 }
 
-variable "provision_image_repository_url" {
-  type = string
-}
-
 variable "provision_image_digest" {
   description = "Pinned in terraform.tfvars. `make publish` prints the line to paste."
   type        = string
@@ -80,7 +84,10 @@ module "platform" {
   zone_name       = var.zone_name
   hostname_suffix = var.hostname_suffix
 
-  provision_image_repository_url = var.provision_image_repository_url
+  # The repository the bootstrap workspace for this account and region created.
+  # Derived rather than copied from its output: a Lambda can pull only from its
+  # own account and region, so those two values are the whole address.
+  provision_image_repository_url = "${module.constants.prod_account_id}.dkr.ecr.${var.region}.amazonaws.com/${module.constants.provision_repository_name}"
   provision_image_digest         = var.provision_image_digest
 
   chain = var.chain

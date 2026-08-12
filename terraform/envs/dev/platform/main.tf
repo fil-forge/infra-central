@@ -24,12 +24,20 @@ terraform {
 provider "aws" {
   region = var.region
 
+  # Credentials for another account would otherwise apply a second, quietly
+  # working copy of the stage there. This fails the plan instead.
+  allowed_account_ids = [module.constants.nonprod_account_id]
+
   default_tags {
     tags = {
       Project = "infra-central"
       Stage   = "dev"
     }
   }
+}
+
+module "constants" {
+  source = "../../../modules/constants"
 }
 
 variable "region" {
@@ -61,11 +69,6 @@ variable "chain" {
   })
 }
 
-variable "provision_image_repository_url" {
-  description = "From the repository_url output of the bootstrap workspace for this stage's region."
-  type        = string
-}
-
 # Written by `make publish` into the gitignored image.auto.tfvars, so the dev
 # loop is `make publish && terraform apply` with nothing to edit by hand.
 variable "provision_image_digest" {
@@ -79,7 +82,10 @@ module "platform" {
   zone_name       = var.zone_name
   hostname_suffix = var.hostname_suffix
 
-  provision_image_repository_url = var.provision_image_repository_url
+  # The repository the bootstrap workspace for this account and region created.
+  # Derived rather than copied from its output: a Lambda can pull only from its
+  # own account and region, so those two values are the whole address.
+  provision_image_repository_url = "${module.constants.nonprod_account_id}.dkr.ecr.${var.region}.amazonaws.com/${module.constants.provision_repository_name}"
   provision_image_digest         = var.provision_image_digest
 
   chain = var.chain
