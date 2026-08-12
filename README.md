@@ -355,6 +355,36 @@ Empty means every key already existed and was reused. A non-empty list after
 the first apply of a stage means something was minted; find out what before
 assuming a wallet is intact.
 
+### Smoke-testing a stage
+
+```bash
+make smoke STAGE=dev
+```
+
+Every public service is checked over public HTTPS, needing no AWS credentials.
+A 200 from the health path covers the whole ingress route in one request: the
+Route53 record, the wildcard certificate, the listener rule, the target group
+and a task passing its container health check.
+
+The second check is the one health cannot make. sprue, hilt and swarf mint an
+ephemeral identity when no key is supplied and report themselves healthy either
+way, so `/.well-known/did.json` is read and its `id` compared against
+`did:web:<hostname>`. A mismatch means the service is running an identity
+nothing has registered against.
+
+The script reads `hostname_suffix` from the stage's
+`platform/terraform.tfvars`, so it needs no Terraform state and no TFE token.
+Services are probed concurrently: a task that accepts the connection and never
+replies waits out the whole timeout, and several of those in sequence is a
+minute of nothing.
+
+Two gaps it names in its own output rather than passing over:
+
+- **plc** has no public hostname, so nothing here reaches it.
+- **piri-signing-service** takes a `did:web` but serves no document at it. It is
+  the only service no other service addresses by DID, so nothing resolves it
+  today.
+
 ### Rotating a service identity
 
 Delete the parameter:
@@ -419,6 +449,7 @@ internal/ssmstore/       the never-overwrite parameter store
 internal/fund/           the three FilecoinPay transactions
 build/                   Lambda container image
 scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
+scripts/smoke-test.sh    checks a deployed stage over public HTTPS
 
 # Infra configuration
 terraform/
@@ -599,6 +630,10 @@ iterate, not to host anything anyone depends on.
 make check   # gofmt, go vet, go test, terraform fmt
 make test
 ```
+
+Both run offline against no deployed stage, which is why `make smoke` is
+separate: it needs a stage to be up. See [Smoke-testing a
+stage](#smoke-testing-a-stage).
 
 ## Planned work
 

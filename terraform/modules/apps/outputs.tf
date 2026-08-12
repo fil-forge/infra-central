@@ -10,7 +10,7 @@ output "service_urls" {
 }
 
 output "service_dids" {
-  description = "The did:web each service publishes at /.well-known/did.json."
+  description = "The did:web each service was given. sprue, hilt, swarf and the delegator publish a document at /.well-known/did.json; piri-signing-service does not, so its DID resolves nowhere. Nothing addresses it by DID today."
   value       = local.did
 }
 

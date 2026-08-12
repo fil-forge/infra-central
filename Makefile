@@ -83,6 +83,12 @@ fund-payer:
 test:
 	go test ./...
 
+# Check a deployed stage over public HTTPS. Not part of `check` or `test`, which
+# have to keep passing with no stage deployed and no network.
+.PHONY: smoke
+smoke:
+	scripts/smoke-test.sh $(STAGE)
+
 .PHONY: check
 check:
 	gofmt -l cmd internal
