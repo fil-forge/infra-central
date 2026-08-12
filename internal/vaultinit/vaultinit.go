@@ -53,12 +53,18 @@ type Config struct {
 	TokenBoundCIDRs []string
 }
 
-// WaitForUnsealed blocks until OpenBao reports initialised-or-uninitialised and
-// unsealed, or the context expires.
+// WaitForUnsealed blocks until OpenBao is ready to be configured, or the
+// context expires. Ready means serving and either unsealed or not yet
+// initialised.
 //
 // The wait exists because Terraform invokes this Lambda as soon as the ECS
 // service is created, which is well before the task is serving. With KMS seal
 // there is no unseal step to perform, only one to wait for.
+//
+// Uninitialised counts as ready because it has to. A first bring-up reports
+// sealed until something calls sys/init, and the caller is that something, so
+// treating sealed as a reason to keep waiting deadlocks the first apply of
+// every stage against a server that is behaving correctly.
 func WaitForUnsealed(ctx context.Context, client *api.Client) error {
 	const interval = 3 * time.Second
 
@@ -71,7 +77,13 @@ func WaitForUnsealed(ctx context.Context, client *api.Client) error {
 		switch {
 		case err != nil:
 			lastErr = err
+		case !health.Initialized:
+			// An OpenBao that has never been initialised reports itself sealed,
+			// because there is no barrier to unseal yet. Waiting for it to stop
+			// would wait forever: initialising it is the caller's next step.
+			return nil
 		case health.Sealed:
+			// Initialised and still sealed means the KMS seal did not open it.
 			lastErr = fmt.Errorf("openbao is sealed; check that the KMS seal key is reachable from the task role")
 		default:
 			return nil

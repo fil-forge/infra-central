@@ -17,6 +17,11 @@ import (
 // first apply of a stage always waits out a cold start.
 const openBaoStartupBudget = 4 * time.Minute
 
+// openBaoUnsealBudget bounds the wait for the KMS seal to open a barrier this
+// invocation just created. The task is already serving by then, so this covers
+// one KMS round trip rather than a cold start.
+const openBaoUnsealBudget = 1 * time.Minute
+
 // vault configures a running OpenBao: initialise if needed, mount what Forge
 // uses, and give hilt an AppRole scoped to its own subtree.
 func (d *deps) vault(ctx context.Context) (*Response, error) {
@@ -46,6 +51,19 @@ func (d *deps) vault(ctx context.Context) (*Response, error) {
 		return nil, err
 	}
 	client.SetToken(rootToken)
+
+	// sys/init returns once the barrier is written, and the KMS seal opens it a
+	// moment later. Everything below needs an unsealed core, so the wait that
+	// an uninitialised server was allowed to skip is owed here instead.
+	if resp.Initialised {
+		slog.Info("waiting for the new barrier to unseal", "budget", openBaoUnsealBudget.String())
+
+		unsealCtx, cancel := context.WithTimeout(ctx, openBaoUnsealBudget)
+		defer cancel()
+		if err := vaultinit.WaitForUnsealed(unsealCtx, client); err != nil {
+			return nil, err
+		}
+	}
 
 	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)
 	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
