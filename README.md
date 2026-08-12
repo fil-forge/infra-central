@@ -368,9 +368,11 @@ an `aws_lambda_invocation`, which re-invokes only when its input changes, and
 deleting a parameter changes nothing Terraform can see. See [Forcing a provision
 phase to re-run](#forcing-a-provision-phase-to-re-run).
 
-The new DID appears in `service_dids`. Anything that had registered the old DID
-has to be told about the new one, which is why this is a deliberate act rather
-than something an apply does on its own.
+The new DID appears in `service_dids`, and the rotation also refreshes
+`/forge-central/<stage>/<service>/identity.did`, which holds the same value for
+anyone reading it without decryption rights. Anything that had registered the
+old DID has to be told about the new one, which is why this is a deliberate act
+rather than something an apply does on its own.
 
 Rotating an identity that _signs_ a proof — sprue, indexer or etracker —
 re-issues that proof automatically in the same apply, because the old

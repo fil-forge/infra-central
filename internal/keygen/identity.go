@@ -1,8 +1,6 @@
 package keygen
 
 import (
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 
 	"github.com/fil-forge/ucantone/multikey"
@@ -18,16 +16,19 @@ import (
 
 // Identity is an Ed25519 service identity in every serialization the Forge
 // services accept. smelt writes these to files on a VM; here they are held in
-// memory and handed to the SSM store, so nothing but the returned DID and
-// public key ever leaves the process.
+// memory and handed to the SSM store, so nothing but the returned DID ever
+// leaves the process.
 //
 // The two private serializations exist because the services disagree: hilt and
 // swarf read a PEM file, while the delegator and signing service take the
 // multibase form inline as an environment variable.
+//
+// There is no public-key serialization because no service asks for one. The
+// DID carries the public key, and a consumer that needs the raw bytes decodes
+// them from it.
 type Identity struct {
 	PrivatePEM []byte // PKCS#8 PEM, the "PRIVATE KEY" block — SECRET
 	Multibase  string // Base64pad multibase private key — SECRET
-	PublicPEM  []byte // PKIX PEM public key
 	DID        string // did:key derived from the public key
 }
 
@@ -57,23 +58,9 @@ func newIdentity(signer multikey.Signer) (*Identity, error) {
 		return nil, fmt.Errorf("encode private key PEM: %w", err)
 	}
 
-	publicPEM, err := encodePublicKeyPEM(signer)
-	if err != nil {
-		return nil, err
-	}
-
 	return &Identity{
 		PrivatePEM: privatePEM,
 		Multibase:  multikey.FormatSigner(signer),
-		PublicPEM:  publicPEM,
 		DID:        multikey.KeyIssuer(signer).DID().String(),
 	}, nil
-}
-
-func encodePublicKeyPEM(signer multikey.Signer) ([]byte, error) {
-	pkixBytes, err := x509.MarshalPKIXPublicKey(signer.PublicKey())
-	if err != nil {
-		return nil, fmt.Errorf("marshal public key: %w", err)
-	}
-	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkixBytes}), nil
 }

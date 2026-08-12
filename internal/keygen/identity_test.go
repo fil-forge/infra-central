@@ -66,25 +66,14 @@ func TestMultibaseKeyIsReadableByTheServices(t *testing.T) {
 	}
 }
 
-func TestIdentityPEMBlocksAreLabelledForTheServices(t *testing.T) {
+func TestPrivateKeyPEMIsLabelledForTheServices(t *testing.T) {
 	id, err := GenerateIdentity()
 	if err != nil {
 		t.Fatalf("GenerateIdentity: %v", err)
 	}
 
-	blocks := map[string]struct {
-		pem  []byte
-		want string
-	}{
-		"private key": {pem: id.PrivatePEM, want: "-----BEGIN PRIVATE KEY-----"},
-		"public key":  {pem: id.PublicPEM, want: "-----BEGIN PUBLIC KEY-----"},
-	}
-
-	for name, block := range blocks {
-		t.Run(name, func(t *testing.T) {
-			if !strings.HasPrefix(string(block.pem), block.want) {
-				t.Errorf("PEM does not start with %q", block.want)
-			}
-		})
+	const want = "-----BEGIN PRIVATE KEY-----"
+	if !strings.HasPrefix(string(id.PrivatePEM), want) {
+		t.Errorf("PEM does not start with %q", want)
 	}
 }

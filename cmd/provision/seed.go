@@ -32,6 +32,17 @@ var identityServices = []string{
 	"etracker",
 }
 
+// multibaseServices read their identity as a multibase string in an environment
+// variable rather than as a PEM.
+//
+// Only these two get the multibase copy. It is the same private key in a second
+// encoding, so writing it for a service that reads the PEM would leave a
+// duplicate of live signing material to guard and to rotate for no reader.
+var multibaseServices = map[string]bool{
+	"delegator":       true,
+	"signing-service": true,
+}
+
 // databaseServices each get a Postgres role and database of the same name on
 // the shared instance. openbao is here because it stores its data in Postgres
 // rather than on a volume, which is what lets it survive task replacement.
@@ -132,15 +143,31 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 			return nil, fmt.Errorf("parse stored identity for %s: %w", service, err)
 		}
 
-		// The multibase form and the public material are both derived from the
-		// PEM, so rewriting them is reproducible rather than destructive.
-		if err := d.store.PutSecret(ctx, service, "identity-multibase", id.Multibase); err != nil {
-			return nil, err
+		// The multibase form is derived from the PEM, so rewriting it is
+		// reproducible rather than destructive.
+		if multibaseServices[service] {
+			if err := d.store.PutSecret(ctx, service, "identity-multibase", id.Multibase); err != nil {
+				return nil, err
+			}
 		}
-		if err := d.store.PutPublic(ctx, service, "identity.pub", string(id.PublicPEM)); err != nil {
-			return nil, err
+
+		// The DID is stored as the durable public record of this identity,
+		// readable without decrypting anything.
+		//
+		// It is written once rather than on every apply: an unchanged key
+		// always derives the same DID, so the rewrite only spent a
+		// PutParameter against a 3 TPS quota. A rotation is the exception. The
+		// operator deletes the private parameter and re-applies, which mints a
+		// key deriving a different DID, and leaving the old one in place would
+		// publish a DID that no longer matches the identity behind it.
+		if created {
+			err = d.store.PutPublic(ctx, service, "identity.did", id.DID)
+		} else {
+			_, _, err = d.store.EnsurePublic(ctx, service, "identity.did", func() (string, error) {
+				return id.DID, nil
+			})
 		}
-		if err := d.store.PutPublic(ctx, service, "identity.did", id.DID); err != nil {
+		if err != nil {
 			return nil, err
 		}
 

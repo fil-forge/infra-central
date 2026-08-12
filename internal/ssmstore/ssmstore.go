@@ -9,8 +9,8 @@
 // wallet and change a DID that other services have already registered.
 //
 // Private and public material are separate parameters. Private values are
-// SecureString; public values (DIDs, addresses, public keys, UCAN proofs) are
-// plain String, so a reader that needs only those never decrypts anything.
+// SecureString; public values (DIDs, addresses, UCAN proofs) are plain String,
+// so a reader that needs only those never decrypts anything.
 //
 // SecureStrings take the account's AWS-managed SSM key rather than the stage's
 // customer-managed key. The stage's key is destroyed with the stage, and a key
@@ -105,10 +105,14 @@ func (s *Store) ensure(
 
 // PutPublic writes a plaintext String parameter, overwriting freely.
 //
-// Only for values *derived* from a secret: re-deriving a DID or an address from
-// an unchanged key yields the same DID or address, so an overwrite is a no-op
-// in practice and a public parameter corrupted out of band heals on the next
-// apply. Anything with fresh randomness in it must use EnsurePublic instead.
+// Only for values *derived* from a secret: re-deriving an address from an
+// unchanged key yields the same address, so an overwrite is a no-op in practice
+// and a public parameter corrupted out of band heals on the next apply.
+// Anything with fresh randomness in it must use EnsurePublic instead.
+//
+// Prefer EnsurePublic even for derived values that no reader can corrupt.
+// PutParameter is capped at 3 TPS, so a rewrite that cannot change the stored
+// value still costs a scarce write.
 func (s *Store) PutPublic(ctx context.Context, service, name, value string) error {
 	return s.put(ctx, s.Path(service, name), value, types.ParameterTypeString, true)
 }
