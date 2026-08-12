@@ -1,4 +1,4 @@
-# Build and publish the forge-provision Lambda image.
+# Build and publish the provision Lambda image.
 #
 # The image is pushed by digest and carries no tag at all. The digest is derived
 # from the image itself, so it is correct whether or not anything is committed,

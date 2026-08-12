@@ -1,4 +1,4 @@
-// Command forge-provision mints every secret a Forge stage needs and seeds its
+// Command provision mints every secret a Forge stage needs and seeds its
 // databases, running as a Lambda inside the VPC.
 //
 // It exists so that private keys are generated where they will be used rather

@@ -1,4 +1,4 @@
-# Lambda container image for the forge-provision function.
+# Lambda container image for the provision function.
 #
 # Built and pushed by `make publish`, from CI on merge and from a developer's
 # machine while iterating. Terraform never builds it; it only references the
@@ -20,10 +20,12 @@ COPY internal ./internal
 # the image digest is the deploy identifier, and a path baked into the binary
 # would change it for no reason.
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -trimpath -ldflags="-s -w" -o /bootstrap ./cmd/forge-provision
+    go build -trimpath -ldflags="-s -w" -o /bootstrap ./cmd/provision
 
 FROM public.ecr.aws/lambda/provided:al2023
 
+# The name is the runtime's, not ours: an OS-only runtime starts a function by
+# executing a file called exactly bootstrap. The command stays cmd/provision.
 COPY --from=build /bootstrap ${LAMBDA_RUNTIME_DIR}/bootstrap
 
 CMD [ "bootstrap" ]

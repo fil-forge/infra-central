@@ -6,7 +6,7 @@
 #
 # ---
 #
-# The repository holding the forge-provision Lambda image.
+# The repository holding the provision Lambda image.
 #
 # One instance per account *and* region. ECR repositories are regional, Lambda
 # pulls an image only from ECR in the same region as the function, and a pull

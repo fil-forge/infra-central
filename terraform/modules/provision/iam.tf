@@ -35,7 +35,7 @@ data "aws_iam_policy_document" "this" {
     ]
 
     resources = [
-      "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge/${var.stage}/*",
+      "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge-central/${var.stage}/*",
     ]
   }
 

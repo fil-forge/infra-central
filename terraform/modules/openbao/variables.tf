@@ -71,7 +71,7 @@ variable "kms_key_arn" {
 }
 
 variable "ssm_prefix" {
-  description = "Parameter prefix for openbao, e.g. /forge/dev/openbao."
+  description = "Parameter prefix for openbao, e.g. /forge-central/dev/openbao."
   type        = string
 }
 
@@ -102,7 +102,7 @@ variable "namespace_id" {
 
 variable "namespace_name" {
   type    = string
-  default = "forge.internal"
+  default = "forge-central.internal"
 }
 
 variable "enable_ui" {

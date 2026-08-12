@@ -7,7 +7,7 @@
 # comes back ready with no operator step and no plaintext key anywhere.
 
 locals {
-  name = "forge-${var.stage}"
+  name = "fc-${var.stage}"
 }
 
 resource "aws_kms_key" "this" {

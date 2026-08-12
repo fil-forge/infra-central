@@ -20,7 +20,7 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
 
-  ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge/${var.stage}"
+  ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge-central/${var.stage}"
 
   host = { for service in [
     "sprue", "hilt", "swarf", "delegator", "signing-service"
@@ -151,9 +151,9 @@ module "hilt" {
     HILT_VAULT_TYPE                  = "hashicorp"
     HILT_VAULT_HASHICORP_ADDRESS     = var.openbao_internal_address
     HILT_VAULT_HASHICORP_AUTH_METHOD = "approle"
-    # Mounting KV v2 at forge/hilt puts every tenant secret under that prefix
-    # without changing hilt, whose path builder is already mount-relative.
-    HILT_VAULT_HASHICORP_MOUNT = "forge/hilt"
+    # Mounting KV v2 at forge-central/hilt puts every tenant secret under that
+    # prefix without changing hilt, whose path builder is already mount-relative.
+    HILT_VAULT_HASHICORP_MOUNT = "forge-central/hilt"
 
     HILT_PLC_DIRECTORY = local.plc_directory
 

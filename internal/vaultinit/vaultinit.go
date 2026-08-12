@@ -20,8 +20,9 @@ import (
 const (
 	// HiltMount is where hilt's KV v2 engine lives. hilt's own path builder
 	// emits tenant/<did> relative to its configured mount, so mounting here
-	// puts every hilt secret under forge/hilt without a hilt code change.
-	HiltMount = "forge/hilt"
+	// puts every hilt secret under forge-central/hilt without a hilt code
+	// change. HILT_VAULT_HASHICORP_MOUNT in modules/apps must match.
+	HiltMount = "forge-central/hilt"
 
 	// TransitMount backs the regional appliances' seal "transit" auto-unseal,
 	// per fil-one/RFC#21.

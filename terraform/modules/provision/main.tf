@@ -1,4 +1,4 @@
-# The forge-provision Lambda and its two phased invocations.
+# The provision Lambda and its two phased invocations.
 #
 # This is where every secret in the stage is born. Terraform invokes the
 # function and receives DIDs, wallet addresses and database names; the private
@@ -9,7 +9,7 @@
 # before it can be configured.
 
 locals {
-  name = "forge-${var.stage}-provision"
+  name = "fc-${var.stage}-provision"
 }
 
 resource "aws_lambda_function" "this" {

@@ -6,7 +6,7 @@
 # them from inside the private subnets instead.
 
 locals {
-  name = "forge-${var.stage}"
+  name = "fc-${var.stage}"
 }
 
 resource "aws_db_subnet_group" "this" {

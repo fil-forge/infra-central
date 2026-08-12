@@ -6,7 +6,7 @@
 # name with a real certificate.
 
 locals {
-  name = "forge-${var.stage}"
+  name = "fc-${var.stage}"
 }
 
 data "aws_route53_zone" "this" {

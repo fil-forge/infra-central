@@ -25,9 +25,9 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# The scoping that matters: /forge/<stage>/<service>/* and nothing else. A
-# compromised sprue task cannot read hilt's AppRole secret_id, the delegator's
-# transactor key, or the OpenBao root token.
+# The scoping that matters: /forge-central/<stage>/<service>/* and nothing
+# else. A compromised sprue task cannot read hilt's AppRole secret_id, the
+# delegator's transactor key, or the OpenBao root token.
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     sid       = "ReadOwnParameters"

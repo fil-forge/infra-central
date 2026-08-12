@@ -33,7 +33,7 @@ type Store struct {
 	keyID  string // customer-managed KMS key for SecureString values
 }
 
-// New returns a Store writing under /forge/<stage>/.
+// New returns a Store writing under /forge-central/<stage>/.
 func New(client *ssm.Client, stage, kmsKeyID string) *Store {
 	return &Store{client: client, stage: stage, keyID: kmsKeyID}
 }
@@ -42,13 +42,13 @@ func New(client *ssm.Client, stage, kmsKeyID string) *Store {
 // Every parameter is namespaced by service so a task execution role can be
 // scoped to exactly one prefix.
 func (s *Store) Path(service, name string) string {
-	return fmt.Sprintf("/forge/%s/%s/%s", s.stage, service, name)
+	return fmt.Sprintf("/forge-central/%s/%s/%s", s.stage, service, name)
 }
 
 // Prefix renders a service's parameter prefix, which is what IAM policies and
 // Terraform outputs refer to.
 func (s *Store) Prefix(service string) string {
-	return fmt.Sprintf("/forge/%s/%s", s.stage, service)
+	return fmt.Sprintf("/forge-central/%s/%s", s.stage, service)
 }
 
 // EnsureSecret writes a SecureString only if the parameter does not exist, and

@@ -9,11 +9,11 @@
 # a tmpfs at startup and then execs the real process.
 #
 # The IAM scoping is per service, not per stage. Each execution role can read
-# only /forge/<stage>/<service>/*, so a compromised sprue task cannot read
-# hilt's AppRole secret_id or the delegator's transactor key.
+# only /forge-central/<stage>/<service>/*, so a compromised sprue task cannot
+# read hilt's AppRole secret_id or the delegator's transactor key.
 
 locals {
-  name = "forge-${var.stage}-${var.service}"
+  name = "fc-${var.stage}-${var.service}"
 
   # Every file-borne secret lands in one directory, so the mount is a single
   # known path rather than something derived from the caller's filenames.
@@ -37,11 +37,11 @@ locals {
     local.wrapper_prelude == "" ? var.shell_command : "${local.wrapper_prelude} && exec ${var.shell_command}"
   )
 
-  ssm_prefix_arn = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge/${var.stage}/${var.service}/*"
+  ssm_prefix_arn = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge-central/${var.stage}/${var.service}/*"
 }
 
 resource "aws_cloudwatch_log_group" "this" {
-  name              = "/forge/${var.stage}/${var.service}"
+  name              = "/forge-central/${var.stage}/${var.service}"
   retention_in_days = var.log_retention_days
 }
 

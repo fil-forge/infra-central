@@ -54,7 +54,7 @@ done
 command -v aws >/dev/null || { echo "ERROR: aws CLI not found in PATH" >&2; exit 1; }
 command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 
-FUNCTION="forge-${STAGE}-provision"
+FUNCTION="fc-${STAGE}-provision"
 
 # invoke <confirm> — call the fund phase and print its JSON response. A Lambda
 # error is reported as a successful invocation with FunctionError set, so that

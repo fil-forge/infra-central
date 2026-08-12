@@ -35,10 +35,10 @@ appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to unseal at boo
 | Decision                                        | Why                                                                                                                                                                                                                     |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                             |
-| **SSM Parameter Store, per-service prefixes**   | Each task execution role reads only `/forge/<stage>/<service>/*`. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. smelt's 1Password item is all-or-nothing by comparison. |
+| **SSM Parameter Store, per-service prefixes**   | Each task execution role reads only `/forge-central/<stage>/<service>/*`. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. smelt's 1Password item is all-or-nothing by comparison. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                           |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                       |
-| **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                      |
+| **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                      |
 | **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                |
 | **Two workspaces per stage**                    | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                    |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                |
@@ -95,7 +95,7 @@ usually what you want, and it is occasionally a surprise, so check before
 assuming a rebuilt stage is fresh:
 
 ```bash
-aws ssm get-parameters-by-path --path /forge/dev --recursive \
+aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text
 ```
 
@@ -104,10 +104,10 @@ first confirmed the wallets hold no funds:
 
 ```bash
 # Check the balances first. This is not reversible.
-aws ssm get-parameter --name /forge/dev/signing-service/payer-key.address
-aws ssm get-parameter --name /forge/dev/delegator/transactor-key.address
+aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
+aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 
-aws ssm get-parameters-by-path --path /forge/dev --recursive \
+aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
 ```
@@ -116,11 +116,11 @@ aws ssm get-parameters-by-path --path /forge/dev --recursive \
 
 ### How each part is deployed
 
-| Part                   | How it is deployed                                        |
-| ---------------------- | --------------------------------------------------------- |
-| `bootstrap` workspaces | `terraform apply` run locally, always                     |
-| provision image        | `make publish` run locally, pushed to ECR by hand         |
-| dev `platform`, `apps` | HCP applies every commit to `main`, no confirmation       |
+| Part                   | How it is deployed                                  |
+| ---------------------- | --------------------------------------------------- |
+| `bootstrap` workspaces | `terraform apply` run locally, always               |
+| provision image        | `make publish` run locally, pushed to ECR by hand   |
+| dev `platform`, `apps` | HCP applies every commit to `main`, no confirmation |
 
 The dev stage deploys itself. Both of its workspaces are connected to this
 repository, track `main`, and have auto-apply on, so a merge reaches dev without
@@ -246,7 +246,7 @@ USDFC per day, which is why the amounts below stay small.
 
 **Depositing into FilecoinPay.** USDFC sitting in the payer's wallet is not
 enough. Creating a proof set locks up around 0.9 USDFC, and lockup can only draw
-on funds *deposited into* the FilecoinPay contract, so a freshly faucet-funded
+on funds _deposited into_ the FilecoinPay contract, so a freshly faucet-funded
 wallet still fails with `InsufficientLockupFunds(..., Available=0)`.
 
 ```bash
@@ -302,7 +302,7 @@ deposit amount. Neither is recoverable by this tooling, so both fail loudly.
 To read the balances without invoking anything:
 
 ```bash
-PAYER=$(aws ssm get-parameter --name /forge/dev/signing-service/payer-key.address \
+PAYER=$(aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address \
   --query Parameter.Value --output text)
 
 cast call "$USDFC_TOKEN_ADDRESS" "balanceOf(address)(uint256)" "$PAYER" \
@@ -354,7 +354,7 @@ assuming a wallet is intact.
 Delete the parameter:
 
 ```bash
-aws ssm delete-parameter --name /forge/dev/swarf/identity
+aws ssm delete-parameter --name /forge-central/dev/swarf/identity
 ```
 
 Then force the seed phase to run again. A plain run will not do it: the phase is
@@ -388,7 +388,7 @@ textual container codecs end with a newline — and that is what the tests pin.
 ### Rotating hilt's OpenBao credential
 
 ```bash
-aws ssm delete-parameter --name /forge/dev/hilt/vault-secret-id
+aws ssm delete-parameter --name /forge-central/dev/hilt/vault-secret-id
 ```
 
 Then force the vault phase to run again. There is no way to do that from a
@@ -403,7 +403,7 @@ replaces it rather than leaving hilt unable to start.
 
 ```
 # Go binary executed in AWS to provision DB & secrets
-cmd/forge-provision/     the Lambda: phase dispatch, seeding, OpenBao, funding
+cmd/provision/           the Lambda: phase dispatch, seeding, OpenBao, funding
 internal/keygen/         Ed25519 identities, secp256k1 wallets, UCAN proofs
 internal/dbinit/         idempotent role and database creation
 internal/vaultinit/      OpenBao init, mounts, hilt's AppRole
@@ -501,8 +501,15 @@ certificate:
 
 A stage is a directory pair under `terraform/envs/`, backed by two HCP
 workspaces. Everything is namespaced by the stage name, so stages coexist in one
-AWS account without colliding: `forge-<stage>-*` resources, `/forge/<stage>/*`
-parameters, and `<service>.<stage>.forge-sandbox.fil.one` hostnames.
+AWS account without colliding: `fc-<stage>-*` resources,
+`/forge-central/<stage>/*` parameters, and
+`<service>.<stage>.forge-sandbox.fil.one` hostnames.
+
+`fc` is short for forge-central, this repository's own deployment (as opposed to
+deployments of regional nodes). It is kept short because a target group name is
+capped at 32 characters, and `<prefix>-<stage>-signing-service` has to fit
+inside it. Only AWS resource names abbreviate; paths and namespaces spell
+forge-central out, since nothing there is close to a length limit.
 
 ```
 envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda

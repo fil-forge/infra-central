@@ -16,7 +16,7 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  name       = "forge-${var.stage}"
+  name       = "fc-${var.stage}"
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
 }
@@ -134,7 +134,7 @@ module "openbao" {
 
   kms_key_id  = module.kms.key_id
   kms_key_arn = module.kms.key_arn
-  ssm_prefix  = "/forge/${var.stage}/openbao"
+  ssm_prefix  = "/forge-central/${var.stage}/openbao"
 
   listener_arn      = module.ingress.listener_arn
   listener_priority = 100
@@ -149,7 +149,7 @@ module "openbao" {
   depends_on = [aws_lambda_invocation.seed]
 }
 
-# Initialises OpenBao, mounts KV v2 at forge/hilt and the transit engine, and
+# Initialises OpenBao, mounts KV v2 at forge-central/hilt and the transit
 # issues hilt's AppRole. The function waits out the task's cold start, so this
 # is slow on the first apply of a stage and fast afterwards.
 resource "aws_lambda_invocation" "vault" {

@@ -6,7 +6,7 @@
 # That removes the MinIO root user and password from the design entirely.
 
 locals {
-  name = "forge-${var.stage}"
+  name = "fc-${var.stage}"
 
   # Sprue's three buckets. Names come from its defaults; the stage prefix and
   # account suffix make them globally unique.

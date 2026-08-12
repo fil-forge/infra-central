@@ -7,7 +7,7 @@
 # hostname and would still leave the chain RPC unreachable.
 
 locals {
-  name = "forge-${var.stage}"
+  name = "fc-${var.stage}"
 
   # Two AZs is the minimum RDS multi-AZ and the ALB both require.
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
@@ -106,7 +106,7 @@ resource "aws_route_table_association" "private" {
 # Private DNS for service-to-service calls that do not need a public identity:
 # plc, which smelt also keeps unrouted, and OpenBao's internal address for hilt.
 resource "aws_service_discovery_private_dns_namespace" "internal" {
-  name = "forge.internal"
+  name = "forge-central.internal"
   vpc  = aws_vpc.this.id
 }
 
@@ -176,7 +176,7 @@ resource "aws_security_group" "service" {
 
 resource "aws_security_group" "lambda" {
   name        = "${local.name}-lambda"
-  description = "The forge-provision Lambda, which needs RDS and OpenBao"
+  description = "The provision Lambda, which needs RDS and OpenBao"
   vpc_id      = aws_vpc.this.id
 
   egress {
