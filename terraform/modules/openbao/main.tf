@@ -78,6 +78,12 @@ module "service" {
   # a template around a secret, not a secret in its own right. The heredoc
   # delimiter is deliberately unquoted so the shell substitutes the DSN; the
   # config contains no other shell metacharacters.
+  #
+  # Writing it still needs the ephemeral volume that secret_files would have
+  # brought. Without the mount the container cannot create the directory: it
+  # belongs to the image and the task does not run as root.
+  writable_secret_dir = true
+
   shell_command = join("\n", [
     "umask 077",
     "mkdir -p ${dirname(local.config_path)}",

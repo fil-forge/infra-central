@@ -19,6 +19,11 @@ locals {
   # known path rather than something derived from the caller's filenames.
   secret_dir = "/run/forge"
 
+  # The directory needs a writable mount whether the wrapper writes the files
+  # or the service's own command does. Nothing about the container makes it
+  # writable otherwise: it belongs to the image, and the task is not root.
+  mount_secret_dir = length(var.secret_files) > 0 || var.writable_secret_dir
+
   # format() rather than interpolation because these are *shell* variable
   # references: the container expands $IDENTITY_PEM at startup, Terraform must
   # not try to. %% is a literal percent for printf.
@@ -60,10 +65,10 @@ resource "aws_ecs_task_definition" "this" {
   }
 
   # Fargate has no tmpfs, so this is task ephemeral storage. It is AES-256
-  # encrypted and destroyed with the task, and it exists only when the service
-  # actually has file-borne secrets.
+  # encrypted and destroyed with the task, and it exists only for a service
+  # that writes into secret_dir.
   dynamic "volume" {
-    for_each = length(var.secret_files) > 0 ? [1] : []
+    for_each = local.mount_secret_dir ? [1] : []
 
     content {
       name = "secrets"
@@ -113,7 +118,7 @@ resource "aws_ecs_task_definition" "this" {
         entryPoint = ["/bin/sh", "-c"]
         command    = [local.wrapped_command]
       },
-      length(var.secret_files) == 0 ? {} : {
+      !local.mount_secret_dir ? {} : {
         mountPoints = [{
           sourceVolume  = "secrets"
           containerPath = local.secret_dir

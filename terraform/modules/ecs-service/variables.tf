@@ -71,6 +71,21 @@ variable "secret_files" {
   }
 }
 
+variable "writable_secret_dir" {
+  description = <<-EOT
+    Mount the ephemeral secret_dir volume even when secret_files is empty, for a
+    service whose own shell_command writes a file there.
+
+    Without a mount, secret_dir belongs to the image and the container does not
+    run as root, so the write fails with a permission error and the task crash
+    loops. openbao needs this: its config is a template around a secret rather
+    than a secret in its own right, so it assembles the file itself instead of
+    going through secret_files.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "shell_command" {
   description = "Command to exec, as a shell string. Required when secret_files is set, because the wrapper replaces the image's entrypoint. Null uses the image's own entrypoint and command."
   type        = string
