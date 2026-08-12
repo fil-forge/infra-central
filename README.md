@@ -156,7 +156,7 @@ cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonpro
 ```
 
 Change both region names in the copy: the workspace name
-(`infra-central-bootstrap-nonprod-us-west-2`) and the provider `region`. Create
+(`forge-central-bootstrap-nonprod-us-west-2`) and the provider `region`. Create
 the workspace in HCP Terraform, apply, then fill the repository:
 
 ```bash
@@ -476,7 +476,7 @@ cp -r terraform/envs/dev terraform/envs/staging
 Then, in the copy:
 
 1. Set the workspace names in both `cloud` blocks to
-   `infra-central-staging-{platform,apps}`.
+   `forge-central-staging-{platform,apps}`.
 2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
    default tag in both roots.
 3. In `platform/terraform.tfvars`, set `hostname_suffix` to

@@ -19,7 +19,7 @@ terraform {
     organization = "Filecoin_Foundation"
 
     workspaces {
-      name = "infra-central-bootstrap-nonprod-us-east-2"
+      name = "forge-central-bootstrap-nonprod-us-east-2"
     }
   }
 

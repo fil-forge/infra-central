@@ -10,7 +10,7 @@ terraform {
     organization = "Filecoin_Foundation"
 
     workspaces {
-      name = "infra-central-dev-apps"
+      name = "forge-central-dev-apps"
     }
   }
 
@@ -35,7 +35,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project = "infra-central"
+      Project = "forge-central"
       Stage   = "dev"
     }
   }
@@ -73,7 +73,7 @@ variable "image_tags" {
 
 data "tfe_outputs" "platform" {
   organization = "Filecoin_Foundation"
-  workspace    = "infra-central-dev-platform"
+  workspace    = "forge-central-dev-platform"
 }
 
 locals {

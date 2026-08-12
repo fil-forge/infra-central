@@ -9,7 +9,7 @@ terraform {
     organization = "Filecoin_Foundation"
 
     workspaces {
-      name = "infra-central-dev-platform"
+      name = "forge-central-dev-platform"
     }
   }
 
@@ -30,7 +30,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project = "infra-central"
+      Project = "forge-central"
       Stage   = "dev"
     }
   }
