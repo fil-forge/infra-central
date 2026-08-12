@@ -2,8 +2,9 @@
 # and is minted by the provision Lambda, so this file is safe to commit.
 #
 # provision_image_digest is absent here on purpose: `make publish` writes it to
-# the gitignored image.auto.tfvars, so iterating on the Lambda never means
-# editing a tracked file. Prod pins its digest in this file instead.
+# image.auto.tfvars, so iterating on the Lambda never means editing this file by
+# hand. Prod pins its digest in its own terraform.tfvars, copied from dev when a
+# change is promoted.
 
 # The zone is delegated once, by the DNS project, and holds every non-prod
 # stage. Adding a stage writes records into it and needs no change there.

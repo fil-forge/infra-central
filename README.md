@@ -114,7 +114,27 @@ aws ssm get-parameters-by-path --path /forge/dev --recursive \
 
 ## Runbook
 
+### How each part is deployed
+
+There is no CI/CD yet. Everything below is run by an operator from a developer
+machine, against HCP Terraform for state.
+
+| Part                   | How it is deployed today                                  |
+| ---------------------- | --------------------------------------------------------- |
+| `bootstrap` workspaces | `terraform apply` run locally, always                      |
+| provision image        | `make publish` run locally, pushed to ECR by hand          |
+| `platform` workspaces  | TODO: the deployment path is not settled yet               |
+| `apps` workspaces      | TODO: the deployment path is not settled yet               |
+
+See [Planned work](#planned-work) for the automation that would replace the
+manual steps.
+
 ### First time in an account and region
+
+The bootstrap workspaces are always applied locally. They run rarely, once per
+account and region, and they create the registry that everything else depends
+on, so there is nothing for a pipeline to trigger on and no earlier apply to
+create their state.
 
 ```bash
 terraform -chdir=terraform/envs/bootstrap/nonprod/us-east-2 init
@@ -138,7 +158,11 @@ carries no expiry rule: an untagged image is indistinguishable from one a stage
 is running, and Lambda does not survive having its image deleted. Prune by hand
 when the image count starts to bother you.
 
-Then fill the repository:
+Then fill the repository. **The provision image is built and pushed by hand from
+a developer machine; nothing builds it automatically.** `make publish` needs
+Docker with buildx and AWS credentials for the target account, and it creates a
+`docker-container` builder on first use, because Docker Desktop's default
+builder cannot push by digest and cannot cross-build for arm64.
 
 ```bash
 make publish STAGE=dev
@@ -278,9 +302,14 @@ cast call "$FILECOIN_PAY_ADDRESS" \
 make publish && terraform apply
 ```
 
-`make publish` writes the new digest into a gitignored `image.auto.tfvars`, so
-there is nothing to edit and no commit required. Prod pins its digest in a
-committed `terraform.tfvars` instead, which `make publish` prints for pasting.
+`make publish` writes the new digest into the stage's `image.auto.tfvars`, so
+there is no line to edit by hand. **Commit that file.** The stage plans in HCP,
+which sees only what is in version control, so an uncommitted digest is applied
+nowhere.
+
+Promoting the same image to prod is a copy of that digest into
+`terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
+change is ready rather than as a side effect of a build.
 
 ### Deploying a service
 
@@ -452,7 +481,7 @@ envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambd
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps workspace
-  image.auto.tfvars        gitignored, written by `make publish`
+  image.auto.tfvars        committed, written by `make publish`
 
 envs/<stage>/apps/         the six ECS services
   main.tf                  reads platform outputs via tfe_outputs
@@ -488,7 +517,8 @@ Then, in the copy:
 
 Prod differs from dev inside `main.tf` rather than by being a different shape:
 multi-AZ database, deletion protection on, a larger OpenBao connection budget,
-and a digest pinned in `terraform.tfvars` rather than read from a local file.
+and a digest pinned in `terraform.tfvars`, copied from dev when a change is
+promoted rather than written by whatever was built last.
 
 ### A personal sandbox stage
 

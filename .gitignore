@@ -22,10 +22,10 @@ crash.*.log
 # VCS-driven HCP run needs them present.
 !terraform.tfvars
 
-# Written by `make publish` for the dev iteration loop. Machine-generated and
-# per-developer, so it stays out of version control. Prod pins its digest in the
-# committed terraform.tfvars instead.
-image.auto.tfvars
+# Written by `make publish`, and committed for the same reason as
+# terraform.tfvars: the stage plans in HCP, which only sees what is in version
+# control, so a digest left on the developer's machine would never be applied.
+!image.auto.tfvars
 
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in

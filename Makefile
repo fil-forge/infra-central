@@ -6,8 +6,8 @@
 # commit rather than the code that was just built, so two builds against a dirty
 # tree would claim the same tag; nothing reads a tag here, so there is none.
 #
-# The same target runs on a developer's machine and in CI. CI reaches ECR
-# through GitHub OIDC rather than long-lived keys.
+# There is no CI for this yet: an operator runs the target on their own machine
+# with credentials for the target account, then commits the digest it writes.
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -18,16 +18,23 @@ ECR_REPO    ?= forge-central/provision
 ECR_HOST    := $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE       := $(ECR_HOST)/$(ECR_REPO)
 
-# Where `make publish` records the digest for the dev iteration loop. Gitignored
-# and per-developer; prod pins its digest in a committed terraform.tfvars.
+# Where `make publish` records the digest. The file is committed: the stage
+# plans in HCP, which sees only what is in version control. Prod pins its digest
+# in a committed terraform.tfvars, copied from dev when a change is promoted.
 STAGE       ?= dev
 TFVARS      := terraform/envs/$(STAGE)/platform/image.auto.tfvars
 
 METADATA    := build/metadata.json
 
+# Docker Desktop's default builder uses the `docker` driver, which cannot push
+# by digest. A dedicated docker-container builder can, and it also cross-builds
+# for arm64 from any host.
+BUILDER     ?= forge-central
+
 .PHONY: publish
-publish: login
+publish: login builder
 	docker buildx build \
+	  --builder $(BUILDER) \
 	  --platform linux/arm64 \
 	  --file build/provision.Dockerfile \
 	  --output type=image,name=$(IMAGE),push=true,push-by-digest=true,name-canonical=true \
@@ -42,8 +49,12 @@ publish: login
 	  echo "  image  $(IMAGE)@$$digest"; \
 	  echo "  wrote  $(TFVARS)"; \
 	  echo; \
-	  echo "For prod, commit this line to terraform/envs/prod/platform/terraform.tfvars:"; \
-	  printf '    provision_image_digest = "%s"\n' "$$digest"
+	  echo "Commit $(TFVARS) so the HCP run for $(STAGE) picks up the new image."
+
+.PHONY: builder
+builder:
+	@docker buildx inspect $(BUILDER) >/dev/null 2>&1 \
+	  || docker buildx create --name $(BUILDER) --driver docker-container
 
 .PHONY: login
 login:
