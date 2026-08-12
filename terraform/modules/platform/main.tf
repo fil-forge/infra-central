@@ -31,7 +31,8 @@ module "network" {
 module "kms" {
   source = "../kms"
 
-  stage = var.stage
+  stage                   = var.stage
+  deletion_window_in_days = var.protect_stateful_resources ? 30 : 7
 }
 
 module "database" {
@@ -52,7 +53,9 @@ module "database" {
 module "storage" {
   source = "../storage"
 
-  stage = var.stage
+  stage                  = var.stage
+  force_destroy          = !var.protect_stateful_resources
+  point_in_time_recovery = var.protect_stateful_resources
 }
 
 module "ingress" {
@@ -150,8 +153,8 @@ module "openbao" {
 }
 
 # Initialises OpenBao, mounts KV v2 at forge-central/hilt and the transit
-# issues hilt's AppRole. The function waits out the task's cold start, so this
-# is slow on the first apply of a stage and fast afterwards.
+# engine, and issues hilt's AppRole. The function waits out the task's cold
+# start, so this is slow on the first apply of a stage and fast afterwards.
 resource "aws_lambda_invocation" "vault" {
   function_name = module.provision.function_name
 

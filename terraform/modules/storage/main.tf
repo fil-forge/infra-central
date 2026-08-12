@@ -19,7 +19,13 @@ resource "aws_s3_bucket" "this" {
   for_each = toset(local.buckets)
 
   bucket = "${local.name}-${each.key}-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${local.name}-${each.key}" }
+
+  # Objects here are written by sprue and reproducible from its own state, so
+  # a non-prod stage empties its buckets on destroy rather than failing the
+  # apply and leaving them behind for someone to purge by hand.
+  force_destroy = var.force_destroy
+
+  tags = { Name = "${local.name}-${each.key}" }
 }
 
 resource "aws_s3_bucket_public_access_block" "this" {
@@ -44,15 +50,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   }
 }
 
-resource "aws_s3_bucket_versioning" "this" {
-  for_each = aws_s3_bucket.this
-
-  bucket = each.value.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
+# Versioning is deliberately absent. It protects against an overwrite or a
+# delete of something irreplaceable, and nothing here is: sprue writes these
+# objects and can write them again. Enabling it costs a lifecycle rule to stop
+# noncurrent versions accumulating forever, and it stops a bucket being
+# deleted until every version has been purged one page at a time.
 
 # The delegator's two tables. It uses no Postgres at all, and creates neither
 # table itself, so both have to exist before it starts.

@@ -15,9 +15,10 @@ resource "aws_kms_key" "this" {
   enable_key_rotation = true
 
   # A destroyed key makes every SecureString parameter and OpenBao's entire
-  # storage permanently unreadable, so the window to catch a mistake is as wide
-  # as AWS allows.
-  deletion_window_in_days = 30
+  # storage permanently unreadable, so a protected stage takes the widest
+  # window AWS allows. A stage meant to come apart takes the narrowest, since
+  # the key is the last thing left standing after its destroy.
+  deletion_window_in_days = var.deletion_window_in_days
 }
 
 resource "aws_kms_alias" "this" {
