@@ -163,6 +163,18 @@ resource "aws_security_group" "service" {
     self        = true
   }
 
+  # The Lambda reaches OpenBao over the same private path hilt uses, so the
+  # task group has to accept it. Inline rather than a separate
+  # aws_security_group_rule: inline blocks are the authoritative set for a
+  # group, and a rule declared outside one is stripped on the next apply.
+  ingress {
+    description     = "OpenBao from the provision Lambda"
+    from_port       = 0
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda.id]
+  }
+
   egress {
     description = "Image pulls, chain RPC, and did:web resolution"
     from_port   = 0
@@ -212,17 +224,4 @@ resource "aws_security_group" "database" {
   }
 
   tags = { Name = "${local.name}-database" }
-}
-
-# The Lambda reaches OpenBao over the same private path hilt uses, so the task
-# security group has to accept it. Declared separately to avoid a cycle between
-# the two group definitions.
-resource "aws_security_group_rule" "service_from_lambda" {
-  description              = "OpenBao from the provision Lambda"
-  type                     = "ingress"
-  from_port                = 0
-  to_port                  = 65535
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.service.id
-  source_security_group_id = aws_security_group.lambda.id
 }
