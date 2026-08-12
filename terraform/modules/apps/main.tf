@@ -36,7 +36,7 @@ locals {
   plc_directory = "http://plc.${var.namespace_name}:3000"
 
   # Where the entrypoint wrapper drops file-borne secrets.
-  keys = "/run/forge"
+  keys = "/tmp/forge"
 }
 
 # --- sprue ---------------------------------------------------------------

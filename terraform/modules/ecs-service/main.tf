@@ -15,14 +15,17 @@
 locals {
   name = "fc-${var.stage}-${var.service}"
 
-  # Every file-borne secret lands in one directory, so the mount is a single
-  # known path rather than something derived from the caller's filenames.
-  secret_dir = "/run/forge"
-
-  # The directory needs a writable mount whether the wrapper writes the files
-  # or the service's own command does. Nothing about the container makes it
-  # writable otherwise: it belongs to the image, and the task is not root.
-  mount_secret_dir = length(var.secret_files) > 0 || var.writable_secret_dir
+  # Every file-borne secret lands in one directory, so the path is a single
+  # known one rather than something derived from the caller's filenames.
+  #
+  # Under /tmp because that is the only directory an image is relied on to
+  # leave world-writable. A Fargate ephemeral volume mounts root-owned with no
+  # uid or gid option, so mounting one here would lock out every container that
+  # does not run as root, and the delegator and the signing service both end
+  # their images with USER nobody. The container filesystem carries the same
+  # AES-256 encryption and dies with the task either way, so the volume bought
+  # nothing the write into /tmp does not already have.
+  secret_dir = "/tmp/forge"
 
   # format() rather than interpolation because these are *shell* variable
   # references: the container expands $IDENTITY_PEM at startup, Terraform must
@@ -62,17 +65,6 @@ resource "aws_ecs_task_definition" "this" {
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = var.cpu_architecture
-  }
-
-  # Fargate has no tmpfs, so this is task ephemeral storage. It is AES-256
-  # encrypted and destroyed with the task, and it exists only for a service
-  # that writes into secret_dir.
-  dynamic "volume" {
-    for_each = local.mount_secret_dir ? [1] : []
-
-    content {
-      name = "secrets"
-    }
   }
 
   container_definitions = jsonencode([
@@ -117,13 +109,6 @@ resource "aws_ecs_task_definition" "this" {
       local.wrapped_command == null ? {} : {
         entryPoint = ["/bin/sh", "-c"]
         command    = [local.wrapped_command]
-      },
-      !local.mount_secret_dir ? {} : {
-        mountPoints = [{
-          sourceVolume  = "secrets"
-          containerPath = local.secret_dir
-          readOnly      = false
-        }]
       },
     )
   ])
