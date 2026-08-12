@@ -18,8 +18,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -95,7 +98,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 
 	deps := &deps{
 		cfg:     cfg,
-		store:   ssmstore.New(ssm.NewFromConfig(awsCfg), cfg.Stage),
+		store:   ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
 		secrets: secretsmanager.NewFromConfig(awsCfg),
 	}
 
@@ -109,6 +112,29 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	default:
 		return nil, fmt.Errorf("unknown phase %q; want \"seed\", \"vault\" or \"fund\"", req.Phase)
 	}
+}
+
+// throttleTolerantRetries slows the SSM client down to the write quota instead
+// of failing the invocation.
+//
+// PutParameter is capped at 3 transactions per second on standard throughput,
+// and the seed phase writes dozens of parameters back to back, so a first apply
+// is throttled by design. The SDK's default retryer gives up after three
+// attempts with sub-second backoff, which is not enough to wait out a quota
+// this small. Adaptive mode adds a client-side rate limiter that learns the
+// real rate from the throttling responses, so the burst is paced rather than
+// retried blindly.
+func throttleTolerantRetries(o *ssm.Options) {
+	o.Retryer = retry.NewAdaptiveMode(func(ao *retry.AdaptiveModeOptions) {
+		ao.StandardOptions = append(ao.StandardOptions, func(so *retry.StandardOptions) {
+			so.MaxAttempts = 10
+			so.MaxBackoff = 10 * time.Second
+			// The default token bucket stops retrying once a run has spent its
+			// budget, which is the wrong trade here: the Lambda has a 600s
+			// timeout and nothing else competing for the quota.
+			so.RateLimiter = ratelimit.None
+		})
+	})
 }
 
 // deps is what both phases need: configuration and the two AWS clients.
