@@ -1,5 +1,5 @@
-# Bootstrap for us-east-2: the ECR repository every stage in this region pulls
-# the forge-provision Lambda image from.
+# Bootstrap for us-east-2: the ECR repositories every stage in this region pulls
+# its images from.
 #
 # It lives in its own workspace because of a chicken-and-egg problem. The
 # platform workspace requires an image digest, `make publish` cannot push
@@ -33,10 +33,10 @@ provider "aws" {
   region = "us-east-2"
 }
 
-module "provision_ecr" {
-  source = "../../../modules/provision-ecr"
+module "ecr" {
+  source = "../../../modules/ecr"
 }
 
-output "repository_url" {
-  value = module.provision_ecr.repository_url
+output "provision_repository_url" {
+  value = module.ecr.provision_repository_url
 }

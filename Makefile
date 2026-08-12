@@ -1,10 +1,10 @@
 # Build and publish the forge-provision Lambda image.
 #
-# The deploy identifier is the image manifest digest that ECR returns on push,
-# never a git SHA. A git SHA names the last commit rather than the code you just
-# built, so two different builds against a dirty tree would claim the same tag.
-# A digest is derived from the image itself, so it is correct whether or not
-# anything is committed, and an identical rebuild produces no Terraform diff.
+# The image is pushed by digest and carries no tag at all. The digest is derived
+# from the image itself, so it is correct whether or not anything is committed,
+# and an identical rebuild produces no Terraform diff. A git SHA names the last
+# commit rather than the code that was just built, so two builds against a dirty
+# tree would claim the same tag; nothing reads a tag here, so there is none.
 #
 # The same target runs on a developer's machine and in CI. CI reaches ECR
 # through GitHub OIDC rather than long-lived keys.
@@ -14,7 +14,7 @@ SHELL := /bin/bash
 
 AWS_REGION  ?= us-east-2
 AWS_ACCOUNT ?= $(shell aws sts get-caller-identity --query Account --output text)
-ECR_REPO    ?= forge-provision
+ECR_REPO    ?= forge-central/provision
 ECR_HOST    := $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE       := $(ECR_HOST)/$(ECR_REPO)
 
@@ -24,16 +24,14 @@ STAGE       ?= dev
 TFVARS      := terraform/envs/$(STAGE)/platform/image.auto.tfvars
 
 METADATA    := build/metadata.json
-GIT_SHA     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 .PHONY: publish
 publish: login
 	docker buildx build \
 	  --platform linux/arm64 \
 	  --file build/provision.Dockerfile \
-	  --tag $(IMAGE):sha-$(GIT_SHA) \
+	  --output type=image,name=$(IMAGE),push=true,push-by-digest=true,name-canonical=true \
 	  --metadata-file $(METADATA) \
-	  --push \
 	  .
 	@digest=$$(jq -r '."containerimage.digest"' $(METADATA)); \
 	  if [[ -z "$$digest" || "$$digest" == "null" ]]; then \
@@ -42,7 +40,6 @@ publish: login
 	  printf 'provision_image_digest = "%s"\n' "$$digest" > $(TFVARS); \
 	  echo; \
 	  echo "  image  $(IMAGE)@$$digest"; \
-	  echo "  tag    $(IMAGE):sha-$(GIT_SHA)  (for browsing ECR; Terraform ignores it)"; \
 	  echo "  wrote  $(TFVARS)"; \
 	  echo; \
 	  echo "For prod, commit this line to terraform/envs/prod/platform/terraform.tfvars:"; \

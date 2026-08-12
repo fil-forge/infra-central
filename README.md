@@ -121,13 +121,23 @@ terraform -chdir=terraform/envs/bootstrap/us-east-2 init
 terraform -chdir=terraform/envs/bootstrap/us-east-2 apply
 ```
 
-This creates the ECR repository for the provision Lambda image. There is one
-bootstrap directory per region, each with its own workspace and its own
-repository, because ECR repositories are regional and Lambda pulls an image
-only from ECR in the same region as the function. Stages sharing a region share
-the repository and pin different digests.
+This creates `forge-central/provision`, the ECR repository for the provision
+Lambda image. There is one bootstrap directory per region, each with its own
+workspace and its own repository, because ECR repositories are regional and
+Lambda pulls an image only from ECR in the same region as the function. Stages
+sharing a region share the repository and pin different digests.
 
-Take the `repository_url` output into each stage's
+Every image this project publishes to ECR lives under the `forge-central/`
+prefix, one repository per image. Per-image repositories are what make per-image
+push permissions, lifecycle policies, and tag immutability possible.
+
+`make publish` pushes by digest and writes no tag, so the digest a stage pins is
+the only reference to the image. That is why the repository rejects tags and
+carries no expiry rule: an untagged image is indistinguishable from one a stage
+is running, and Lambda does not survive having its image deleted. Prune by hand
+when the image count starts to bother you.
+
+Take the `provision_repository_url` output into each stage's
 `provision_image_repository_url`, then publish the Lambda image:
 
 ```bash
@@ -148,9 +158,9 @@ workspace in HCP Terraform, apply, then fill the repository:
 make publish STAGE=<stage> AWS_REGION=us-west-2
 ```
 
-Point the stages in that region at the new `repository_url`. The digest is
-derived from the image, not from where it is stored, so a stage in the new
-region can pin the same digest an existing stage already runs.
+Point the stages in that region at the new `provision_repository_url`. The
+digest is derived from the image, not from where it is stored, so a stage in the
+new region can pin the same digest an existing stage already runs.
 
 ### Bringing up a stage
 
@@ -340,7 +350,7 @@ terraform/
     provision/  openbao/  ecs-service/
     platform/                                        composes the above
     apps/                                            the six services
-    provision-ecr/                                   ECR repo for the Lambda image
+    provision-ecr/                                   forge-central/provision repo
   envs/
     bootstrap/<region>/                              one workspace per region
     dev/platform/    dev/apps/

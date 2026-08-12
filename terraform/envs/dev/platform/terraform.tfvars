@@ -15,7 +15,7 @@ zone_name = "forge-sandbox.fil.one"
 hostname_suffix = "dev.forge-sandbox.fil.one"
 
 # From the repository_url output of the bootstrap workspace for this region.
-provision_image_repository_url = "REPLACE_ME.dkr.ecr.us-east-2.amazonaws.com/forge-provision"
+provision_image_repository_url = "REPLACE_ME.dkr.ecr.us-east-2.amazonaws.com/forge-central/provision"
 
 # Calibration testnet proxy addresses, carried over from smelt's
 # environments/staging/smart-contracts.env. Public on-chain addresses, and a

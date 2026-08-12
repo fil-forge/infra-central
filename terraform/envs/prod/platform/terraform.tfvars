@@ -7,7 +7,7 @@ zone_name       = "forge.fil.one"
 hostname_suffix = "forge.fil.one"
 
 # From the repository_url output of the bootstrap workspace for this region.
-provision_image_repository_url = "REPLACE_ME.dkr.ecr.us-east-2.amazonaws.com/forge-provision"
+provision_image_repository_url = "REPLACE_ME.dkr.ecr.us-east-2.amazonaws.com/forge-central/provision"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish` prints the line to paste here.
