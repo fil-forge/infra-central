@@ -89,13 +89,18 @@ resource "aws_service_discovery_service" "this" {
     routing_policy = "MULTIVALUE"
   }
 
-  # Empty, and required. ECS reports task health for the registered instance
-  # only when the Cloud Map service carries custom health config, and the block
+  # Required for ECS to report task health for the registered instance, and it
   # cannot be added to an existing service, so dropping it would mean replacing
   # this service to get it back. `health_check_config`, which the provider
   # recommends instead, serves public namespaces only; this one is private.
   #
-  # failure_threshold used to be set to 1 here. AWS no longer accepts the value
-  # and always applies 1, so stating it only produces a deprecation warning.
-  health_check_custom_config {}
+  # failure_threshold is deprecated and AWS always applies 1, so the value here
+  # is inert. It is stated anyway because an empty block is not sent at all:
+  # CreateService then records no custom health config, the next read finds
+  # none where the configuration declares one, and every plan schedules another
+  # replacement that lands in the same state. The deprecation warning is the
+  # price of a service that stops being recreated on every apply.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 }
