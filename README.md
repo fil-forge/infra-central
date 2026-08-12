@@ -567,7 +567,14 @@ Then, in the copy:
      `terraform/modules/**/*`. Without the second one, a module change queues no
      plan and the stage drifts from the repository without saying so.
    - On `apps`, a run trigger on the stage's `platform` workspace, so it never
-     plans against outputs an in-flight `platform` run is about to change.
+     plans against outputs an in-flight `platform` run is about to change. Also
+     turn on **Auto-apply run triggers**, which is a separate setting from
+     auto-apply: without it, a `platform`-only change queues an `apps` plan that
+     waits for someone to confirm it.
+   - On `apps`, a sensitive `TFE_TOKEN` environment variable holding a team
+     token that can read the `platform` workspace's state outputs. `tfe_outputs`
+     reads them through the API as the tfe provider, and remote state sharing
+     does not cover that path, so the token is what makes the read work.
 5. Start the first run by hand from **Actions → Start new run**. Merges take it
    from there.
 
