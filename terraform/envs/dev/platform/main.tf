@@ -3,7 +3,7 @@
 # Apply this before envs/dev/apps, which reads its outputs.
 
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.15"
 
   cloud {
     organization = "fil-forge"

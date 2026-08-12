@@ -4,7 +4,7 @@
 # routine image bump plans in seconds and never touches the database.
 
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.15"
 
   cloud {
     organization = "fil-forge"
