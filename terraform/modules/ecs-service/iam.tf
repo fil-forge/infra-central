@@ -63,10 +63,15 @@ resource "aws_iam_role" "task" {
 
 # Only sprue (S3) and the delegator (DynamoDB) need anything here. The other
 # four get a role with no permissions at all, which is deliberate.
+#
+# for_each over the map, rather than count over a nullable string: the keys are
+# known while planning even when a policy body is not, so a service still gets
+# its policy when the permissions it grants name resources this same apply
+# creates. OpenBao's seal policy names the KMS key, so this is the normal case.
 resource "aws_iam_role_policy" "task" {
-  count = var.task_policy_json == null ? 0 : 1
+  for_each = var.task_policies
 
-  name   = "service-permissions"
+  name   = each.key
   role   = aws_iam_role.task.id
-  policy = var.task_policy_json
+  policy = each.value
 }

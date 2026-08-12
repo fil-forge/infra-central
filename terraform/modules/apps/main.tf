@@ -105,7 +105,7 @@ module "sprue" {
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
-  task_policy_json = data.aws_iam_policy_document.sprue.json
+  task_policies = { "service-permissions" = data.aws_iam_policy_document.sprue.json }
 
   cpu    = var.sizes.sprue.cpu
   memory = var.sizes.sprue.memory
@@ -315,7 +315,7 @@ module "delegator" {
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
-  task_policy_json = data.aws_iam_policy_document.delegator.json
+  task_policies = { "service-permissions" = data.aws_iam_policy_document.delegator.json }
 
   cpu    = var.sizes.delegator.cpu
   memory = var.sizes.delegator.memory

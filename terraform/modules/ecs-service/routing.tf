@@ -82,7 +82,13 @@ resource "aws_service_discovery_service" "this" {
     routing_policy = "MULTIVALUE"
   }
 
-  health_check_custom_config {
-    failure_threshold = 1
-  }
+  # Empty, and required. ECS reports task health for the registered instance
+  # only when the Cloud Map service carries custom health config, and the block
+  # cannot be added to an existing service, so dropping it would mean replacing
+  # this service to get it back. `health_check_config`, which the provider
+  # recommends instead, serves public namespaces only; this one is private.
+  #
+  # failure_threshold used to be set to 1 here. AWS no longer accepts the value
+  # and always applies 1, so stating it only produces a deprecation warning.
+  health_check_custom_config {}
 }
