@@ -54,4 +54,12 @@ resource "aws_db_instance" "this" {
   performance_insights_enabled = var.performance_insights_enabled
 
   tags = { Name = local.name }
+
+  lifecycle {
+    # RDS accepts a subnet group change only when it also moves the instance to
+    # another VPC, so a renamed subnet group cannot be applied to a live
+    # instance. Replace the instance along with the group instead of failing
+    # the apply on ModifyDBInstance.
+    replace_triggered_by = [aws_db_subnet_group.this]
+  }
 }
