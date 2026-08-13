@@ -168,6 +168,17 @@ its account id from that module, so an apply run with credentials for the wrong
 account fails at plan time rather than building a second working copy of the
 stage somewhere unexpected.
 
+## Development
+
+```bash
+make check   # gofmt, go vet, go test, terraform fmt
+make test
+```
+
+Both run offline against no deployed stage, which is why `make smoke` is
+separate: it needs a stage to be up. See [Smoke-testing a
+stage](#smoke-testing-a-stage).
+
 ## Related
 
 - [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
