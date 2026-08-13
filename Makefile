@@ -70,6 +70,19 @@ login:
 	aws ecr get-login-password --region $(AWS_REGION) \
 	  | docker login --username AWS --password-stdin $(ECR_HOST)
 
+# Move USDFC into the payer's FilecoinPay account. Signing happens inside the
+# provision Lambda, so the payer key never leaves AWS.
+#
+# Amounts are overridable:
+#   make fund-payer STAGE=dev DEPOSIT=5
+#   make fund-payer FUND_ARGS="--rate-allowance 0.2 --force-deposit"
+FUND_ARGS ?=
+DEPOSIT   ?= 3
+
+.PHONY: fund-payer
+fund-payer:
+	scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
+
 .PHONY: test
 test:
 	go test ./...

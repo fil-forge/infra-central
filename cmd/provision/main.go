@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
+	"github.com/fil-forge/infra-central/internal/fund"
 	"github.com/fil-forge/infra-central/internal/ssmstore"
 )
 
@@ -74,7 +75,9 @@ type Response struct {
 	Initialised bool `json:"initialised,omitempty"`
 
 	// DryRun is true when the fund phase reported a plan without signing.
-	DryRun bool `json:"dry_run,omitempty"`
+	DryRun     bool         `json:"dry_run,omitempty"`
+	FundPlan   *fund.Plan   `json:"fund_plan,omitempty"`
+	FundResult *fund.Result `json:"fund_result,omitempty"`
 }
 
 func main() {
@@ -113,8 +116,10 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.seed(ctx)
 	case "vault":
 		return deps.vault(ctx)
+	case "fund":
+		return deps.fund(ctx, req)
 	default:
-		return nil, fmt.Errorf("unknown phase %q; want \"seed\" or \"vault\"", req.Phase)
+		return nil, fmt.Errorf("unknown phase %q; want \"seed\", \"vault\" or \"fund\"", req.Phase)
 	}
 }
 

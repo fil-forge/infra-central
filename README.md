@@ -168,6 +168,78 @@ its account id from that module, so an apply run with credentials for the wrong
 account fails at plan time rather than building a second working copy of the
 stage somewhere unexpected.
 
+### Funding the wallets
+
+The seed phase mints two secp256k1 wallets and reports their addresses. Both
+start empty, and nothing works until they hold funds:
+
+```bash
+terraform -chdir=terraform/envs/dev/platform output wallet_addresses
+```
+
+**Gas, for both wallets.** The delegator's transactor signs provider approvals
+and the payer signs PDP operations, so each needs tFIL on Calibration or FIL on
+mainnet. Faucet:
+<https://faucet.calibnet.chainsafe-fil.io/>
+
+**USDFC, for the payer only.** Faucet:
+<https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc> — capped at 10
+USDFC per day, which is why the amounts below stay small.
+
+**Depositing into FilecoinPay.** USDFC sitting in the payer's wallet is not
+enough. Creating a proof set locks up around 0.9 USDFC, and lockup can only draw
+on funds _deposited into_ the FilecoinPay contract, so a freshly faucet-funded
+wallet still fails with `InsufficientLockupFunds(..., Available=0)`.
+
+```bash
+make fund-payer STAGE=dev
+```
+
+That runs three transactions, the same ones as smelt's
+`scripts/staging-fund-payer.sh`:
+
+1. `USDFC.approve(FilecoinPay, amount)` — let FilecoinPay pull the tokens
+2. `FilecoinPay.deposit(USDFC, payer, amount)` — credit the payer's account
+3. `FilecoinPay.setOperatorApproval(USDFC, FWSS, true, rate, lockup, period)` —
+   let warm storage lock it up
+
+**The signing happens inside the `provision` Lambda, in AWS.**
+
+The script invokes the Lambda twice. The first call reads the chain and prints
+what it would do, signing nothing. You then confirm, and the second call
+broadcasts.
+
+Amounts default to smelt's, which stay under the faucet's daily cap. Override
+them per run:
+
+```bash
+make fund-payer STAGE=dev DEPOSIT=5
+make fund-payer FUND_ARGS="--rate-allowance 0.2 --lockup-allowance 5"
+scripts/fund-payer.sh --stage dev --deposit 3 --force-deposit
+```
+
+Terraform never invokes this phase. An apply must not move money, so funding is
+always an explicit operator action.
+
+Two preconditions are checked before anything is signed: the RPC must report the
+chain id the stage expects, and the payer wallet must already hold at least the
+deposit amount. Neither is recoverable by this tooling, so both fail loudly.
+
+To read the balances without invoking anything:
+
+```bash
+PAYER=$(aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address \
+  --query Parameter.Value --output text)
+
+cast call "$USDFC_TOKEN_ADDRESS" "balanceOf(address)(uint256)" "$PAYER" \
+  --rpc-url https://api.calibration.node.glif.io/rpc/v1
+
+cast call "$FILECOIN_PAY_ADDRESS" \
+  "accounts(address,address)(uint256,uint256,uint256,uint256)" \
+  "$USDFC_TOKEN_ADDRESS" "$PAYER" \
+  --rpc-url https://api.calibration.node.glif.io/rpc/v1
+```
+
 ### Iterating on the provision Lambda
 
 ```bash
