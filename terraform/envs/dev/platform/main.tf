@@ -105,4 +105,9 @@ module "platform" {
   # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, which
   # leaves headroom for sprue, hilt and swarf at 10 each.
   openbao_max_parallel = 8
+
+  # Bumped to re-issue the delegator's two proofs, which were deleted from SSM
+  # so the seed phase would write them base64-encoded, and to rewrite plc's
+  # db-creds-json with an sslmode RDS accepts.
+  seed_trigger = "2"
 }
