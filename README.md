@@ -2,15 +2,31 @@
 
 Deployment configuration for Forge central services on AWS ECS/Fargate.
 
-Five services plus their dependencies, across as many stages as you need:
-**sprue**, **hilt**, **swarf**, **piri-signing-service** and **delegator**,
-backed by a shared RDS Postgres instance and an OpenBao that also serves as the
-root of trust for regional appliances.
+Six services plus their dependencies, across as many stages as you need: five
+with public hostnames — **sprue**, **hilt**, **swarf**,
+**piri-signing-service** and **delegator** — and **plc**, which runs internally
+with no hostname of its own, matching smelt. All of them are backed by a shared
+RDS Postgres instance and an OpenBao that also serves as the root of trust for
+regional appliances.
 
 This replaces the single-VM Docker Compose deployment in
 [smelt](https://github.com/fil-forge/smelt), and carries over its secret and key
 generation code with one substantial change: keys are minted inside AWS by a
 Lambda rather than on an operator's laptop.
+
+## Contents
+
+- [How it fits together](#how-it-fits-together)
+- [Architecture decisions](#architecture-decisions)
+- [What each service needs](#what-each-service-needs) — including [Sharp edges](#sharp-edges)
+- [Repository layout](#repository-layout)
+- [Stages](#stages)
+- [DNS](#dns)
+- [What survives a destroy](#what-survives-a-destroy)
+- [Runbook](#runbook)
+- [Development](#development)
+- [Planned work](#planned-work)
+- [Related](#related)
 
 ## How it fits together
 
@@ -27,8 +43,11 @@ Lambda rather than on an operator's laptop.
    S3              plc (internal)  DynamoDB
 ```
 
-`plc` runs as a sixth service with no public hostname, matching smelt. Regional
-appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to unseal at boot.
+Regional appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to
+unseal at boot.
+
+`piri-signing-service` is spelled `signing-service` in AWS resource names and
+SSM parameter paths; both spellings refer to the same service.
 
 ## Architecture decisions
 
@@ -55,6 +74,13 @@ appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to unseal at boo
 | piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
 | plc                  | 3000 | `/_health`     | yes      | internal only                |
 
+Two more names appear in the parameter store: **indexer** and **etracker**. They
+are not deployed, and they get identities anyway, because the delegator
+validates two UCAN proofs at startup that must be signed by their keys, exactly
+as in smelt. Both are expected to become real services, so their keys are kept
+rather than discarded, which is also what lets the proofs be re-signed after a
+rotation.
+
 ### Sharp edges
 
 These each cost an afternoon to rediscover.
@@ -73,25 +99,160 @@ These each cost an afternoon to rediscover.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on
-  stdout, collected by CloudWatch.
+  stdout, collected by CloudWatch into `/forge-central/<stage>/<service>`, and
+  the provision Lambda into `/aws/lambda/fc-<stage>-provision`. Both are kept
+  for 30 days by default.
 - **swarf's `/revocations/:since` is a long-lived SSE stream**, so the ALB idle
   timeout is raised well above its 60-second default.
 - **did:web resolution goes over the public internet.** hilt resolves sprue at
   `https://sprue.<stage>.forge-sandbox.fil.one/.well-known/did.json`, so a task in a private
   subnet reaches the public ALB back out through the NAT gateway.
-- **Every plan warns that `failure_threshold` is deprecated.** Expected, and
-  the alternatives are worse. AWS fixed the Cloud Map custom health check wait
-  at one 30-second interval and deprecated the parameter, but leaving it out
-  makes the provider create the service with no custom health config at all,
-  after which every plan schedules a replacement that lands in the same state.
-  The comment in `terraform/modules/shared/ecs-service/routing.tf` has the
-  full story. The warning goes away when the provider stops warning on the
-  value AWS forces anyway
-  ([#44285](https://github.com/hashicorp/terraform-provider-aws/issues/44285))
-  or lets the argument go without replacing the service
-  ([PR #43428](https://github.com/hashicorp/terraform-provider-aws/pull/43428));
-  [#44291](https://github.com/hashicorp/terraform-provider-aws/issues/44291)
-  got the deprecation documented.
+- **Every plan warns that `failure_threshold` is deprecated.** Expected, and the
+  alternatives are worse: AWS fixed the Cloud Map custom health check wait at
+  one 30-second interval and deprecated the parameter, but leaving it out makes
+  the provider create the service with no custom health config at all, after
+  which every plan schedules a replacement that lands in the same state. The
+  comment in `terraform/modules/shared/ecs-service/routing.tf` has the full
+  story and tracks the upstream issues that would end the warning.
+
+## Repository layout
+
+```
+# Go binary executed in AWS to provision DB & secrets
+cmd/provision/           the Lambda: phase dispatch, seeding, OpenBao, funding
+internal/keygen/         Ed25519 identities, secp256k1 wallets, UCAN proofs
+internal/dbinit/         idempotent role and database creation
+internal/vaultinit/      OpenBao init, mounts, hilt's AppRole
+internal/ssmstore/       the never-overwrite parameter store
+internal/fund/           the three FilecoinPay transactions
+build/                   Lambda container image
+scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
+scripts/smoke-test.sh    checks a deployed stage over public HTTPS
+
+# Infra configuration
+terraform/
+  modules/                                         the wiring; see Stages below
+  envs/                                            one directory per workspace
+    bootstrap/<account>/<region>/                  one workspace per registry
+    dev/platform/    dev/apps/
+    prod/platform/   prod/apps/                    committed, no workspaces yet
+```
+
+## Stages
+
+A stage is a directory pair under `terraform/envs/`, backed by two HCP
+workspaces. Everything is namespaced by the stage name, so stages coexist in one
+AWS account without colliding:
+
+- `fc-<stage>-*` resources
+- `/forge-central/<stage>/*` parameters
+- `<service>.<stage>.forge-sandbox.fil.one` hostnames
+
+`fc` is short for forge-central, this repository's own deployment (as opposed to
+deployments of regional nodes). It is kept short because a target group name is
+capped at 32 characters, and `<prefix>-<stage>-signing-service` has to fit
+inside it. Only AWS resource names abbreviate; paths and namespaces spell
+forge-central out, since nothing there is close to a length limit.
+
+Files:
+
+```
+envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+  main.tf                  module "platform" plus what this stage overrides
+  terraform.tfvars         committed, non-secret: DNS, chain, contracts
+  outputs.tf               re-exported for the apps workspace
+  image.auto.tfvars        committed, written by `make publish`
+
+envs/<stage>/apps/         the six ECS services
+  main.tf                  reads platform outputs via tfe_outputs
+  terraform.tfvars         committed: image digests
+```
+
+Both roots stay short because `modules/platform` and `modules/apps` hold the
+wiring. That is the point of the split: a stage's root says what differs, and
+nothing else can drift between stages.
+
+The module tree mirrors that split, so each workspace can name the directories
+it depends on:
+
+```
+terraform/modules/
+  platform/                everything the platform workspace builds
+    main.tf                the wiring, calling the seven below
+    network/ kms/ database/ storage/ ingress/ provision/ openbao/
+  apps/                    the six ECS services
+  shared/                  used by more than one workspace
+    ecs-service/           apps, and openbao inside platform
+    constants/             every workspace, bootstrap included
+  ecr/                     bootstrap only
+```
+
+A module used by exactly one workspace lives under that workspace's composite
+module. `shared/` holds the two that genuinely cross the boundary. Adding a
+module therefore never means editing a workspace's trigger patterns in HCP
+web console.
+
+Chain configuration lives in the **platform** workspace and the apps workspace
+reads it from there, so a stage has one set of contract addresses rather than
+two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
+
+## DNS
+
+`fil.one` is served by Cloudflare and has no Route53 zone. One subdomain per AWS
+account is delegated to Route53, and every stage in that account writes records
+inside the zone it was given.
+
+```
+Cloudflare zone fil.one
+  ├── NS forge-sandbox  ──►  Route53 zone forge-sandbox.fil.one  (non-prod account)
+  │                            ├── sprue.dev.forge-sandbox.fil.one
+  │                            ├── ssm.dev.forge-sandbox.fil.one
+  │                            └── …any future stage, same zone
+  └── NS forge          ──►  Route53 zone forge.fil.one          (production account)
+                               ├── sprue.forge.fil.one
+                               └── ssm.forge.fil.one
+```
+
+**Adding a stage requires no change to the DNS project.** That is the property
+the layout is built around, and it is what forces two suffixes rather than one.
+
+A delegation has to cover every stage in its account, so two accounts need two
+delegation points. They cannot be nested: `sandbox.forge.fil.one` would have to
+be delegated from the `forge.fil.one` zone, which lives in the production
+account, putting non-prod DNS inside prod and requiring a prod change for every
+non-prod stage. Sibling names under `fil.one` keep the accounts independent.
+
+Production carries no stage label, because it has a zone to itself:
+`sprue.forge.fil.one`. Non-prod stages take a label inside the shared sandbox
+zone: `sprue.dev.forge-sandbox.fil.one`.
+
+Two per-stage settings follow, and this is where they diverge:
+
+- **`zone_name`** is the delegated Route53 zone records are written into. Every
+  non-prod stage shares `forge-sandbox.fil.one`.
+- **`hostname_suffix`** is what that stage's hostnames end with, which for
+  non-prod includes the stage label.
+
+The delegation itself lives in
+[fil-one/infrastructure](https://github.com/fil-one/infrastructure) and is added
+once per workspace: an `aws_route53_zone` for the delegated name, plus a
+Cloudflare `NS` record carrying that zone's four name servers, named
+`forge-sandbox` in the non-prod workspace and `forge` in the prod one.
+
+Those records are created with `proxied = false`, which matters: these hostnames
+serve `did:web` documents and terminate their own TLS at the ALB, so Cloudflare
+must not sit in front of them.
+
+**Certificates belong here, not in the fil-one/infrastructure project.**
+
+The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
+records into the delegated zone, and waits for validation. Two reasons it
+cannot be one central certificate:
+
+- An ALB needs its certificate in the ALB's own region. A `us-east-1`
+  certificate, which is what CloudFront requires, cannot be attached.
+- A wildcard covers exactly one label, so `*.forge-sandbox.fil.one` does not
+  match `sprue.dev.forge-sandbox.fil.one`. Each stage needs its own.
 
 ## What survives a destroy
 
@@ -133,6 +294,16 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
 
 ## Runbook
 
+### Prerequisites
+
+- **AWS CLI**, with credentials for the target account.
+- **Terraform 1.15 or newer**, for the bootstrap workspaces and for reading a
+  stage's outputs. Stage applies themselves run on HCP's runners.
+- **Docker with buildx**, for `make publish`.
+- **Go and make**, for `make check` and `make test`.
+- **[Foundry](https://getfoundry.sh)'s `cast`**, only to read chain balances by
+  hand. Nothing in the deploy path needs it.
+
 ### How each part is deployed
 
 | Part                   | How it is deployed                                  |
@@ -155,7 +326,8 @@ AWS credentials are never stored in a workspace. Each run assumes an IAM role
 in the target account through HCP's OIDC federation, and the credentials expire
 with the run.
 
-Prod is not set up yet.
+Prod is not deployed yet: `terraform/envs/prod/` is committed, but its two HCP
+workspaces have not been created.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
@@ -182,12 +354,6 @@ Every image this project publishes to ECR lives under the `forge-central/`
 prefix, one repository per image. Per-image repositories are what make per-image
 push permissions, lifecycle policies, and tag immutability possible.
 
-`make publish` pushes by digest and writes no tag, so the digest a stage pins is
-the only reference to the image. That is why the repository rejects tags and
-carries no expiry rule: an untagged image is indistinguishable from one a stage
-is running, and Lambda does not survive having its image deleted. Prune by hand
-when the image count starts to bother you.
-
 Then fill the repository. **The provision image is built and pushed by hand from
 a developer machine; nothing builds it automatically.** `make publish` needs
 Docker with buildx and AWS credentials for the target account, and it creates a
@@ -197,6 +363,12 @@ builder cannot push by digest and cannot cross-build for arm64.
 ```bash
 make publish STAGE=dev
 ```
+
+It pushes by digest and writes no tag, so the digest a stage pins is the only
+reference to the image. That is why the repository rejects tags and carries no
+expiry rule: an untagged image is indistinguishable from one a stage is running,
+and Lambda does not survive having its image deleted. Prune by hand when the
+image count starts to bother you.
 
 A stage needs nothing copied from the bootstrap output. It builds the image URL
 from its own account and region, which is the only registry its Lambda can pull
@@ -229,6 +401,54 @@ its account id from that module, so an apply run with credentials for the wrong
 account fails at plan time rather than building a second working copy of the
 stage somewhere unexpected.
 
+### Adding a stage
+
+```bash
+cp -r terraform/envs/dev terraform/envs/staging
+```
+
+Then, in the copy:
+
+1. Set the workspace names in both `cloud` blocks to
+   `forge-central-staging-{platform,apps}`.
+2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
+   default tag in both roots.
+3. In `platform/terraform.tfvars`, set `hostname_suffix` to
+   `staging.forge-sandbox.fil.one` and leave `zone_name` alone: the zone is
+   already delegated and shared by every non-prod stage, so the DNS project
+   needs no change. Point the `chain` block at the network this stage
+   transacts against.
+4. Create the two HCP workspaces with those names and working directories, in
+   Remote execution mode, connected to this repository and tracking `main`.
+   They belong to the `Filecoin_Foundation` organization, in the `FilOne`
+   project. Each needs:
+   - `TFC_AWS_PROVIDER_AUTH` and `TFC_AWS_RUN_ROLE_ARN`, which a variable set
+     supplies to every workspace in the project. Nothing else authenticates to
+     AWS: the run assumes the role through OIDC and the credentials expire with
+     it.
+   - Trigger patterns covering the stage's own directory, the composite module
+     the workspace uses, and the shared modules. On `platform`:
+     `terraform/envs/staging/platform/**/*`,
+     `terraform/modules/platform/**/*`, `terraform/modules/shared/**/*`. On
+     `apps`, the same three with `apps` in place of `platform`. Without the
+     module patterns, a module change queues no plan and the stage drifts from
+     the repository without saying so. Pointing them at
+     `terraform/modules/**/*` instead works but plans both workspaces on every
+     module change.
+   - On `apps`, a run trigger on the stage's `platform` workspace, so it never
+     plans against outputs an in-flight `platform` run is about to change. Also
+     turn on **Auto-apply run triggers**, which is a separate setting from
+     auto-apply: without it, a `platform`-only change queues an `apps` plan that
+     waits for someone to confirm it.
+   - On `platform`, allow state sharing with `apps`.
+5. Start the first run by hand from **Actions → Start new run**. Merges take it
+   from there.
+
+Prod will differ from dev inside `main.tf` rather than by being a different
+shape: multi-AZ database, deletion protection on, a larger OpenBao connection
+budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
+is promoted rather than written by whatever was built last.
+
 ### Bringing up a stage
 
 Merge the stage's directories to `main`. The `platform` workspace applies the
@@ -244,6 +464,16 @@ A new stage's first run usually needs starting by hand, from **Actions → Start
 new run** in the workspace: the workspace is created after its config has already
 landed, so there is no later push for HCP to react to. Everything after that
 arrives on `main`.
+
+### A personal sandbox stage
+
+Stage names are not limited to dev and prod. A sandbox stage in **Local**
+execution mode runs Terraform on your machine with only state in HCP, which is
+the fastest loop for iterating on the provision Lambda: no commit, no merge, no
+run to wait for. What it costs is everything the dev stage gets from HCP —
+speculative plans on pull requests, applies that cannot disagree with `main`,
+and a Terraform and provider version that is the same for everyone. Use it to
+iterate, not to host anything anyone depends on.
 
 ### Funding the wallets
 
@@ -405,7 +635,7 @@ Rotating an identity that _signs_ a proof — sprue, indexer or etracker —
 re-issues that proof automatically in the same apply, because the old
 delegation would no longer verify against a key that does not exist.
 
-### Why proofs are not rewritten every apply
+#### Why proofs are not rewritten every apply
 
 A UCAN delegation is public but not reproducible: ucantone mints a random
 16-byte nonce per delegation, so signing the same request twice produces
@@ -421,7 +651,7 @@ diffing. Only the framing is reproducible, and that is what the tests pin: a
 textual container is stored as `ucantool` writes it, trailing newline included,
 while a bare DAG-CBOR delegation is stored base64-encoded.
 
-### Why the delegator's proofs are stored base64
+#### Why the delegator's proofs are stored base64
 
 Every proof reaches its consumer as an environment variable that the task's
 entrypoint writes to a file, and an environment variable cannot carry a NUL
@@ -445,222 +675,6 @@ The vault phase also self-heals: if a stored `secret_id` no longer
 authenticates, because OpenBao's storage was rebuilt underneath it, the next run
 replaces it rather than leaving hilt unable to start.
 
-## Repository layout
-
-```
-# Go binary executed in AWS to provision DB & secrets
-cmd/provision/           the Lambda: phase dispatch, seeding, OpenBao, funding
-internal/keygen/         Ed25519 identities, secp256k1 wallets, UCAN proofs
-internal/dbinit/         idempotent role and database creation
-internal/vaultinit/      OpenBao init, mounts, hilt's AppRole
-internal/ssmstore/       the never-overwrite parameter store
-internal/fund/           the three FilecoinPay transactions
-build/                   Lambda container image
-scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
-scripts/smoke-test.sh    checks a deployed stage over public HTTPS
-
-# Infra configuration
-terraform/
-  modules/
-    platform/                                        VPC, RDS, OpenBao, ingress
-      network/  database/  storage/  ingress/        building blocks, used
-      kms/  provision/  openbao/                     only by platform
-    apps/                                            the six services
-    shared/ecs-service/                              apps, and platform's openbao
-    shared/constants/                                account ids, shared literals
-    ecr/                                             forge-central/provision repo
-  envs/
-    bootstrap/<account>/<region>/                    one workspace per registry
-    dev/platform/    dev/apps/
-    prod/platform/   prod/apps/
-```
-
-## DNS
-
-`fil.one` is served by Cloudflare and has no Route53 zone. One subdomain per AWS
-account is delegated to Route53, and every stage in that account writes records
-inside the zone it was given.
-
-```
-Cloudflare zone fil.one
-  ├── NS forge-sandbox  ──►  Route53 zone forge-sandbox.fil.one  (non-prod account)
-  │                            ├── sprue.dev.forge-sandbox.fil.one
-  │                            ├── ssm.dev.forge-sandbox.fil.one
-  │                            └── …any future stage, same zone
-  └── NS forge          ──►  Route53 zone forge.fil.one          (production account)
-                               ├── sprue.forge.fil.one
-                               └── ssm.forge.fil.one
-```
-
-**Adding a stage requires no change to the DNS project.** That is the property
-the layout is built around, and it is what forces two suffixes rather than one.
-
-A delegation has to cover every stage in its account, so two accounts need two
-delegation points. They cannot be nested: `sandbox.forge.fil.one` would have to
-be delegated from the `forge.fil.one` zone, which lives in the production
-account, putting non-prod DNS inside prod and requiring a prod change for every
-non-prod stage. Sibling names under `fil.one` keep the accounts independent.
-
-Production carries no stage label, because it has a zone to itself:
-`sprue.forge.fil.one`. Non-prod stages take a label inside the shared sandbox
-zone: `sprue.dev.forge-sandbox.fil.one`.
-
-Two per-stage settings follow, and this is where they diverge:
-
-- **`zone_name`** is the delegated Route53 zone records are written into. Every
-  non-prod stage shares `forge-sandbox.fil.one`.
-- **`hostname_suffix`** is what that stage's hostnames end with, which for
-  non-prod includes the stage label.
-
-The delegation lives in [fil-one/infrastructure](https://github.com/fil-one/infrastructure)
-project, added once per workspace:
-
-```hcl
-# non-prod workspace
-resource "aws_route53_zone" "forge_sandbox" {
-  name = "forge-sandbox.fil.one"
-}
-
-resource "cloudflare_record" "forge_sandbox_delegation" {
-  count   = 4
-  zone_id = local.zone_id
-  name    = "forge-sandbox"
-  type    = "NS"
-  content = aws_route53_zone.forge_sandbox.name_servers[count.index]
-  proxied = false
-}
-```
-
-with the same pair named `forge` in the prod workspace.
-
-`proxied = false` matters: these hostnames serve `did:web` documents and
-terminate their own TLS at the ALB, so Cloudflare must not sit in front of them.
-
-**Certificates belong here, not in the fil-one/infrastructure project.**
-
-The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
-records into the delegated zone, and waits for validation. Two reasons it
-cannot be one central certificate:
-
-- An ALB needs its certificate in the ALB's own region. A `us-east-1`
-  certificate, which is what CloudFront requires, cannot be attached.
-- A wildcard covers exactly one label, so `*.forge-sandbox.fil.one` does not
-  match `sprue.dev.forge-sandbox.fil.one`. Each stage needs its own.
-
-## Stages
-
-A stage is a directory pair under `terraform/envs/`, backed by two HCP
-workspaces. Everything is namespaced by the stage name, so stages coexist in one
-AWS account without colliding:
-
-- `fc-<stage>-*` resources
-- `/forge-central/<stage>/*` parameters
-- `<service>.<stage>.forge-sandbox.fil.one` hostnames
-
-`fc` is short for forge-central, this repository's own deployment (as opposed to
-deployments of regional nodes). It is kept short because a target group name is
-capped at 32 characters, and `<prefix>-<stage>-signing-service` has to fit
-inside it. Only AWS resource names abbreviate; paths and namespaces spell
-forge-central out, since nothing there is close to a length limit.
-
-Files:
-
-```
-envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
-  main.tf                  module "platform" plus what this stage overrides
-  terraform.tfvars         committed, non-secret: DNS, chain, contracts
-  outputs.tf               re-exported for the apps workspace
-  image.auto.tfvars        committed, written by `make publish`
-
-envs/<stage>/apps/         the six ECS services
-  main.tf                  reads platform outputs via tfe_outputs
-  terraform.tfvars         committed: image digests
-```
-
-Both roots stay short because `modules/platform` and `modules/apps` hold the
-wiring. That is the point of the split: a stage's root says what differs, and
-nothing else can drift between stages.
-
-The module tree mirrors that split, so each workspace can name the directories
-it depends on:
-
-```
-terraform/modules/
-  platform/                everything the platform workspace builds
-    main.tf                the wiring, calling the seven below
-    network/ kms/ database/ storage/ ingress/ provision/ openbao/
-  apps/                    the six ECS services
-  shared/                  used by more than one workspace
-    ecs-service/           apps, and openbao inside platform
-    constants/             every workspace, bootstrap included
-  ecr/                     bootstrap only
-```
-
-A module used by exactly one workspace lives under that workspace's composite
-module. `shared/` holds the two that genuinely cross the boundary. Adding a
-module therefore never means editing a workspace's trigger patterns.
-
-Chain configuration lives in the **platform** workspace and the apps workspace
-reads it from there, so a stage has one set of contract addresses rather than
-two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
-
-### Adding a stage
-
-```bash
-cp -r terraform/envs/dev terraform/envs/staging
-```
-
-Then, in the copy:
-
-1. Set the workspace names in both `cloud` blocks to
-   `forge-central-staging-{platform,apps}`.
-2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
-   default tag in both roots.
-3. In `platform/terraform.tfvars`, set `hostname_suffix` to
-   `staging.forge-sandbox.fil.one` and leave `zone_name` alone: the zone is
-   already delegated and shared by every non-prod stage, so the DNS project
-   needs no change. Point the `chain` block at the network this stage
-   transacts against.
-4. Create the two HCP workspaces with those names and working directories, in
-   Remote execution mode, connected to this repository and tracking `main`.
-   Each needs:
-   - `TFC_AWS_PROVIDER_AUTH` and `TFC_AWS_RUN_ROLE_ARN`, which a variable set
-     supplies to every workspace in the project. Nothing else authenticates to
-     AWS: the run assumes the role through OIDC and the credentials expire with
-     it.
-   - Trigger patterns covering the stage's own directory, the composite module
-     the workspace uses, and the shared modules. On `platform`:
-     `terraform/envs/staging/platform/**/*`,
-     `terraform/modules/platform/**/*`, `terraform/modules/shared/**/*`. On
-     `apps`, the same three with `apps` in place of `platform`. Without the
-     module patterns, a module change queues no plan and the stage drifts from
-     the repository without saying so. Pointing them at
-     `terraform/modules/**/*` instead works but plans both workspaces on every
-     module change.
-   - On `apps`, a run trigger on the stage's `platform` workspace, so it never
-     plans against outputs an in-flight `platform` run is about to change. Also
-     turn on **Auto-apply run triggers**, which is a separate setting from
-     auto-apply: without it, a `platform`-only change queues an `apps` plan that
-     waits for someone to confirm it.
-   - On `platform`, allow state sharing with `apps`.
-5. Start the first run by hand from **Actions → Start new run**. Merges take it
-   from there.
-
-Prod will differ from dev inside `main.tf` rather than by being a different
-shape: multi-AZ database, deletion protection on, a larger OpenBao connection
-budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
-is promoted rather than written by whatever was built last.
-
-### A personal sandbox stage
-
-Stage names are not limited to dev and prod. A sandbox stage in **Local**
-execution mode runs Terraform on your machine with only state in HCP, which is
-the fastest loop for iterating on the provision Lambda: no commit, no merge, no
-run to wait for. What it costs is everything the dev stage gets from HCP —
-speculative plans on pull requests, applies that cannot disagree with `main`,
-and a Terraform and provider version that is the same for everyone. Use it to
-iterate, not to host anything anyone depends on.
-
 ## Development
 
 ```bash
@@ -674,7 +688,8 @@ stage](#smoke-testing-a-stage).
 
 ## Planned work
 
-Deliberate compromises that need a change outside this repository.
+Deliberate compromises and open questions. Some need a change outside this
+repository; the rest are work that has not been done here yet.
 
 ### Onboarding a regional appliance has no tooling
 
@@ -727,7 +742,7 @@ Fargate tasks in private subnets and `enable_execute_command` is not set on any
 service, so `aws ecs execute-command` does not work either. Three ways out:
 
 - turn ECS Exec on and accept a documented human path into a task
-- add a Lambda alongside `provision` that performs the writes and isues the hilt proof, reusing its
+- add a Lambda alongside `provision` that performs the writes and issues the hilt proof, reusing its
   SSM access to read hilt's identity;
 - or expose the admin operations over the ALB behind authentication, which is the largest change and
   the only one that also serves a self-service future.
@@ -834,10 +849,38 @@ multi-AZ database, so a task replacement is a short outage on the boot path
 only. Raising it needs `ha_enabled` in the storage stanza; whether that is
 warranted is the RFC's own open question.
 
+### There is no restore procedure for RDS
+
+Backups run: seven days of automated snapshots by default, one in dev, and a
+final snapshot on delete unless a stage sets `skip_final_snapshot`. Nothing says
+how to use them. A restore is also more than the services' data, because
+OpenBao's storage lives in the same instance: rolling the database back rolls
+back hilt's AppRole and the root of trust regional appliances unseal against.
+Write the procedure, and decide as part of it whether OpenBao's storage should
+move to an instance of its own.
+
+### Nothing alerts
+
+Logs reach CloudWatch and no alarm reads them. A task that crash-loops, a health
+check that starts failing, a wallet that runs out of gas: each is visible to
+someone looking, and none of them announces itself. The smallest set worth
+having is probably the ECS running count per service and the two wallet
+balances. Where the notification goes has to be settled first.
+
+### A stage's running cost is not written down
+
+A stage keeps a NAT gateway, an ALB, an RDS instance and six always-on Fargate
+tasks. Nobody has added it up, so there is no figure to weigh against multi-AZ
+in prod, a second non-prod stage, or leaving a sandbox stage running over a
+weekend.
+
 ## Related
 
-- [smelt#11](https://github.com/fil-forge/smelt/pull/11) — the single-VM Docker Compose
+- [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
   deployment this replaces, and the source of the key generation code.
+- [smelt#11](https://github.com/fil-forge/smelt/pull/11) — its appliance
+  registration scripts, which are the closest thing to a specification for the
+  onboarding tooling this repository still lacks.
 - [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) — regional security
   and key management, which makes this OpenBao the root of trust for
   appliances.
