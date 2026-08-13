@@ -108,7 +108,7 @@ func TestBuildsDevStage(t *testing.T) {
 		waiting.Wait()
 
 		return nil
-	}, pulumi.WithMocks("forge-central-platform", "dev", mockaws.Monitor{}))
+	}, pulumi.WithMocks("forge-central-platform", "dev", mockaws.New()))
 	if err != nil {
 		t.Fatalf("building the dev platform: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestBuildsProdStage(t *testing.T) {
 		_, err := platform.New(ctx, "platform", args)
 
 		return err
-	}, pulumi.WithMocks("forge-central-platform", "prod", mockaws.Monitor{}))
+	}, pulumi.WithMocks("forge-central-platform", "prod", mockaws.New()))
 	if err != nil {
 		t.Fatalf("building the prod platform: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestRejectsBadConfiguration(t *testing.T) {
 				_, err := platform.New(ctx, "platform", args)
 
 				return err
-			}, pulumi.WithMocks("forge-central-platform", "dev", mockaws.Monitor{}))
+			}, pulumi.WithMocks("forge-central-platform", "dev", mockaws.New()))
 			if err == nil {
 				t.Fatal("expected the run to fail, it succeeded")
 			}

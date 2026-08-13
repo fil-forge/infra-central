@@ -28,9 +28,21 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/route53"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/servicediscovery"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-
-	"github.com/fil-forge/infra-central/pulumi/internal/iamdoc"
 )
+
+// assumeRole lets ECS assume both of a service's roles.
+//
+// A literal rather than an iam.GetPolicyDocument call: it is three fixed fields,
+// and generating it would be a provider round trip per role — twelve across the six
+// services — to produce exactly these bytes.
+const assumeRole = `{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Principal": {"Service": "ecs-tasks.amazonaws.com"}
+  }]
+}`
 
 // SecretDir is where the entrypoint wrapper writes file-borne secrets. Callers
 // point their *_KEY_FILE settings at paths under it.
@@ -276,8 +288,10 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	}
 
 	// Children inherit the provider from the component, so the account guard and
-	// default tags configured on it apply without being threaded through.
+	// default tags configured on it apply without being threaded through. Invokes
+	// resolve their provider from the parent the same way.
 	child := []pulumi.ResourceOption{pulumi.Parent(component)}
+	invoke := pulumi.InvokeOption(pulumi.Parent(component))
 
 	fullName := fmt.Sprintf("fc-%s-%s", args.Stage, args.Service)
 	ssmPrefixArn := fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/forge-central/%s/%s/*", args.Region, args.AccountID, args.Stage, args.Service)
@@ -290,7 +304,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		return nil, err
 	}
 
-	roles, err := newRoles(ctx, name, fullName, ssmPrefixArn, args, child)
+	roles, err := newRoles(ctx, name, fullName, ssmPrefixArn, args, child, invoke)
 	if err != nil {
 		return nil, err
 	}
@@ -597,12 +611,10 @@ type serviceRoles struct {
 	task      *iam.Role
 }
 
-func newRoles(ctx *pulumi.Context, name, fullName, ssmPrefixArn string, args *Args, child []pulumi.ResourceOption) (*serviceRoles, error) {
-	assume := iamdoc.AssumeRole("ecs-tasks.amazonaws.com")
-
+func newRoles(ctx *pulumi.Context, name, fullName, ssmPrefixArn string, args *Args, child []pulumi.ResourceOption, invoke pulumi.InvokeOption) (*serviceRoles, error) {
 	execution, err := iam.NewRole(ctx, name+"-execution-role", &iam.RoleArgs{
 		Name:             pulumi.String(fullName + "-execution"),
-		AssumeRolePolicy: pulumi.String(assume),
+		AssumeRolePolicy: pulumi.String(assumeRole),
 	}, child...)
 	if err != nil {
 		return nil, err
@@ -618,41 +630,44 @@ func newRoles(ctx *pulumi.Context, name, fullName, ssmPrefixArn string, args *Ar
 	// The scoping that matters: /forge-central/<stage>/<service>/* and nothing
 	// else. A compromised sprue task cannot read hilt's AppRole secret_id, the
 	// delegator's transactor key, or the OpenBao root token.
-	secretsPolicy, err := iamdoc.New(
-		iamdoc.Statement{
-			Sid:       "ReadOwnParameters",
-			Actions:   []string{"ssm:GetParameters", "ssm:GetParameter"},
-			Resources: []string{ssmPrefixArn},
-		},
-		// Parameters are encrypted under the account's AWS-managed SSM key,
-		// which has no ARN to name here without a lookup, so the grant is
-		// bounded by the service that may use it. The ssm:GetParameter*
-		// statement above is what keeps a task to its own prefix; this only
-		// lets it decrypt what it may read.
-		iamdoc.Statement{
-			Sid:       "DecryptOwnParameters",
-			Actions:   []string{"kms:Decrypt"},
-			Resources: []string{"*"},
-			Condition: map[string]iamdoc.Condition{
-				"StringEquals": {"kms:ViaService": []string{"ssm." + args.Region + ".amazonaws.com"}},
+	secretsPolicy := iam.GetPolicyDocumentOutput(ctx, iam.GetPolicyDocumentOutputArgs{
+		Statements: iam.GetPolicyDocumentStatementArray{
+			iam.GetPolicyDocumentStatementArgs{
+				Sid:       pulumi.String("ReadOwnParameters"),
+				Actions:   pulumi.StringArray{pulumi.String("ssm:GetParameters"), pulumi.String("ssm:GetParameter")},
+				Resources: pulumi.StringArray{pulumi.String(ssmPrefixArn)},
+			},
+			// Parameters are encrypted under the account's AWS-managed SSM key,
+			// which has no ARN to name here without a lookup, so the grant is
+			// bounded by the service that may use it. The ssm:GetParameter*
+			// statement above is what keeps a task to its own prefix; this only
+			// lets it decrypt what it may read.
+			iam.GetPolicyDocumentStatementArgs{
+				Sid:       pulumi.String("DecryptOwnParameters"),
+				Actions:   pulumi.StringArray{pulumi.String("kms:Decrypt")},
+				Resources: pulumi.StringArray{pulumi.String("*")},
+				Conditions: iam.GetPolicyDocumentStatementConditionArray{
+					iam.GetPolicyDocumentStatementConditionArgs{
+						Test:     pulumi.String("StringEquals"),
+						Variable: pulumi.String("kms:ViaService"),
+						Values:   pulumi.StringArray{pulumi.String("ssm." + args.Region + ".amazonaws.com")},
+					},
+				},
 			},
 		},
-	).JSON()
-	if err != nil {
-		return nil, err
-	}
+	}, invoke).Json()
 
 	if _, err := iam.NewRolePolicy(ctx, name+"-execution-secrets", &iam.RolePolicyArgs{
 		Name:   pulumi.String("read-own-secrets"),
 		Role:   execution.ID(),
-		Policy: pulumi.String(secretsPolicy),
+		Policy: secretsPolicy,
 	}, child...); err != nil {
 		return nil, err
 	}
 
 	task, err := iam.NewRole(ctx, name+"-task-role", &iam.RoleArgs{
 		Name:             pulumi.String(fullName + "-task"),
-		AssumeRolePolicy: pulumi.String(assume),
+		AssumeRolePolicy: pulumi.String(assumeRole),
 	}, child...)
 	if err != nil {
 		return nil, err

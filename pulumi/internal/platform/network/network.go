@@ -10,13 +10,13 @@ package network
 
 import (
 	"fmt"
+	"net"
 
+	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/ec2"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/servicediscovery"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-
-	"github.com/fil-forge/infra-central/pulumi/internal/cidr"
 )
 
 // Args configures the network.
@@ -97,21 +97,19 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		return nil, err
 	}
 
-	// Public subnets take the first blocks, private the next: the offset by the
-	// number of AZs is what keeps the two ranges from overlapping.
+	layout, err := subnetLayout(args.VpcCIDR, len(azs))
+	if err != nil {
+		return nil, fmt.Errorf("network: %w", err)
+	}
+
 	publicSubnets := make([]*ec2.Subnet, 0, len(azs))
 	privateSubnets := make([]*ec2.Subnet, 0, len(azs))
 
 	for index, az := range azs {
-		block, err := cidr.Subnet(args.VpcCIDR, 4, index)
-		if err != nil {
-			return nil, fmt.Errorf("network: public subnet in %s: %w", az, err)
-		}
-
 		subnet, err := ec2.NewSubnet(ctx, fmt.Sprintf("%s-public-%s", name, az), &ec2.SubnetArgs{
 			VpcId:               vpc.ID(),
 			AvailabilityZone:    pulumi.String(az),
-			CidrBlock:           pulumi.String(block),
+			CidrBlock:           pulumi.String(layout.public[index]),
 			MapPublicIpOnLaunch: pulumi.Bool(true),
 			Tags:                pulumi.StringMap{"Name": pulumi.String(fmt.Sprintf("%s-public-%s", fullName, az))},
 		}, child...)
@@ -122,15 +120,10 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	}
 
 	for index, az := range azs {
-		block, err := cidr.Subnet(args.VpcCIDR, 4, index+len(azs))
-		if err != nil {
-			return nil, fmt.Errorf("network: private subnet in %s: %w", az, err)
-		}
-
 		subnet, err := ec2.NewSubnet(ctx, fmt.Sprintf("%s-private-%s", name, az), &ec2.SubnetArgs{
 			VpcId:            vpc.ID(),
 			AvailabilityZone: pulumi.String(az),
-			CidrBlock:        pulumi.String(block),
+			CidrBlock:        pulumi.String(layout.private[index]),
 			Tags:             pulumi.StringMap{"Name": pulumi.String(fmt.Sprintf("%s-private-%s", fullName, az))},
 		}, child...)
 		if err != nil {
@@ -396,4 +389,51 @@ func newSecurityGroups(ctx *pulumi.Context, name, fullName string, vpc *ec2.Vpc,
 	}
 
 	return &securityGroups{alb: alb, service: service, lambda: lambda, database: database}, nil
+}
+
+// addresses is a stage's subnet layout: one public and one private range per
+// availability zone.
+type addresses struct {
+	public  []string
+	private []string
+}
+
+// subnetLayout carves the ranges out of the VPC CIDR.
+//
+// Public subnets take the first blocks and private the next, so the offset by the
+// number of zones is what keeps the two ranges from overlapping. Four bits gives
+// /20s out of a /16, which is the shape the default CIDR is chosen for.
+//
+// The arithmetic is go-cidr's, the same library Terraform's own cidrsubnet is
+// built on, so the addresses are the ones the stage has always had. What is stated
+// here is only the layout, which is the part worth pinning.
+func subnetLayout(vpcCIDR string, zones int) (*addresses, error) {
+	_, network, err := net.ParseCIDR(vpcCIDR)
+	if err != nil {
+		return nil, fmt.Errorf("parse vpc cidr %q: %w", vpcCIDR, err)
+	}
+
+	const newBits = 4
+
+	layout := &addresses{
+		public:  make([]string, 0, zones),
+		private: make([]string, 0, zones),
+	}
+
+	for index := 0; index < zones; index++ {
+		public, err := cidr.Subnet(network, newBits, index)
+		if err != nil {
+			return nil, fmt.Errorf("public subnet %d of %q: %w", index, vpcCIDR, err)
+		}
+
+		private, err := cidr.Subnet(network, newBits, index+zones)
+		if err != nil {
+			return nil, fmt.Errorf("private subnet %d of %q: %w", index, vpcCIDR, err)
+		}
+
+		layout.public = append(layout.public, public.String())
+		layout.private = append(layout.private, private.String())
+	}
+
+	return layout, nil
 }

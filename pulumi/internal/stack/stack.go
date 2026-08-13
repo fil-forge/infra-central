@@ -1,11 +1,11 @@
-// Package stack holds the wiring every program in this project repeats: building
-// the AWS provider with its account guard, and reading typed values back out of
-// another stack's outputs.
+// Package stack holds what every program in this project has to agree on: the
+// values more than one stack names, the AWS provider with its account guard, and
+// typed reads of another stack's outputs.
 //
-// The provider is built in code rather than declared in each stack's
-// configuration so the account guard comes from the constants package. A stack
-// says which account it belongs to by name; the number it maps to is not a value
-// anyone should be able to mistype into a YAML file.
+// The values live here rather than in each stack's configuration because a literal
+// copied into several places drifts. A stack says which account it belongs to by
+// name; the number it maps to is not something anyone should be able to mistype
+// into a YAML file.
 package stack
 
 import (
@@ -13,28 +13,53 @@ import (
 
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-
-	"github.com/fil-forge/infra-central/pulumi/internal/constants"
 )
 
-// Account names which AWS account a stack applies to.
+// Organization is the Pulumi organization every stack in this project lives in. It
+// is the first segment of a fully qualified stack name, which is how the apps stack
+// addresses the platform stack it reads.
+const Organization = "Filecoin_Foundation"
+
+// PlatformProject and AppsProject are the Pulumi project names. The apps stack
+// builds a stack reference out of PlatformProject and its own stack name, so the
+// two projects have to agree on the spelling.
+const (
+	PlatformProject = "forge-central-platform"
+	AppsProject     = "forge-central-apps"
+)
+
+// ProvisionRepositoryName is the ECR repository holding the provision Lambda
+// image. A stage derives its image URL from this name plus its own account and
+// region, so the URL cannot disagree with the repository the bootstrap stack
+// created.
+const ProvisionRepositoryName = "forge-central/provision"
+
+// Account names which AWS account a stack applies to. The numbers are stated once,
+// here, because a repository full of account ids is a repository where one of them
+// is wrong.
 type Account string
 
 const (
-	// Nonprod is filone-sandbox, holding every non-prod stage.
+	// Nonprod is filone-sandbox, holding every non-prod stage and the bootstrap
+	// stacks that feed them.
 	Nonprod Account = "nonprod"
 
-	// Prod is filone-production.
+	// Prod is filone-production, holding the prod stage and its bootstrap stacks.
 	Prod Account = "prod"
+)
+
+const (
+	nonprodAccountID = "654654381893"
+	prodAccountID    = "811430801166"
 )
 
 // ID returns the account number, and rejects anything that is neither.
 func (a Account) ID() (string, error) {
 	switch a {
 	case Nonprod:
-		return constants.NonprodAccountID, nil
+		return nonprodAccountID, nil
 	case Prod:
-		return constants.ProdAccountID, nil
+		return prodAccountID, nil
 	default:
 		return "", fmt.Errorf("account is %q; it has to be %q or %q", string(a), Nonprod, Prod)
 	}
@@ -83,12 +108,6 @@ func Provider(ctx *pulumi.Context, name string, args ProviderArgs) (*aws.Provide
 	return aws.NewProvider(ctx, name, providerArgs)
 }
 
-// AccountID returns the account number a stack's Account maps to, for the callers
-// that need to build an ARN or an ECR URL rather than a provider.
-func AccountID(account Account) (string, error) {
-	return account.ID()
-}
-
 // --- reading another stack's outputs --------------------------------------
 
 // Reference is another stack's outputs, with typed readers for the shapes this
@@ -118,7 +137,7 @@ func Read(ctx *pulumi.Context, name, stackName string, opts ...pulumi.ResourceOp
 
 // Name is the fully qualified name of a stack in this project's organization.
 func Name(project, stackName string) string {
-	return fmt.Sprintf("%s/%s/%s", constants.Organization, project, stackName)
+	return fmt.Sprintf("%s/%s/%s", Organization, project, stackName)
 }
 
 // String reads a string output.

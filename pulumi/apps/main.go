@@ -12,7 +12,6 @@ import (
 
 	"github.com/fil-forge/infra-central/pulumi/internal/apps"
 	"github.com/fil-forge/infra-central/pulumi/internal/chain"
-	"github.com/fil-forge/infra-central/pulumi/internal/constants"
 	"github.com/fil-forge/infra-central/pulumi/internal/platform/storage"
 	"github.com/fil-forge/infra-central/pulumi/internal/stack"
 )
@@ -37,7 +36,7 @@ func main() {
 			return err
 		}
 
-		platform, err := stack.Read(ctx, "platform", stack.Name(constants.PlatformProject, stage))
+		platform, err := stack.Read(ctx, "platform", stack.Name(stack.PlatformProject, stage))
 		if err != nil {
 			return err
 		}

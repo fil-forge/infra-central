@@ -16,7 +16,6 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 
 	"github.com/fil-forge/infra-central/pulumi/internal/chain"
-	"github.com/fil-forge/infra-central/pulumi/internal/constants"
 	"github.com/fil-forge/infra-central/pulumi/internal/platform"
 	"github.com/fil-forge/infra-central/pulumi/internal/stack"
 )
@@ -60,7 +59,7 @@ func main() {
 			// created. Derived rather than read from that stack's outputs: a
 			// Lambda can pull only from its own account and region, so those two
 			// values are the whole address.
-			ProvisionImageRepositoryURL: fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", accountID, region, constants.ProvisionRepositoryName),
+			ProvisionImageRepositoryURL: fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", accountID, region, stack.ProvisionRepositoryName),
 			ProvisionImageDigest:        forge.Require("provisionImageDigest"),
 
 			Chain: chainConfig,

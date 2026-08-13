@@ -35,9 +35,9 @@ refers to from coming apart.
 
 | Terraform module                       | Go package                            |
 | -------------------------------------- | ------------------------------------- |
-| `modules/shared/constants`             | `internal/constants`                  |
+| `modules/shared/constants`             | `internal/stack`                      |
 | `modules/shared/ecs-service`           | `internal/ecsservice`                 |
-| `modules/ecr`                          | `internal/ecr`                        |
+| `modules/ecr`                          | `bootstrap/main.go`                   |
 | `modules/platform`                     | `internal/platform`                   |
 | `modules/platform/{network,kms,…}`     | `internal/platform/{network,kms,…}`   |
 | `modules/apps`                         | `internal/apps`                       |
@@ -47,13 +47,22 @@ Terraform `variable` with a default is a field left at its zero value; a
 `variable` with a `validation` block is a check in `New` that fails before
 anything is created.
 
-Three helpers have no Terraform counterpart because they replace things the
-language gave for free:
+Two things the interpolation language gave for free come from upstream rather than
+from this repository:
 
-- `internal/cidr` — Terraform's `cidrsubnet`.
-- `internal/iamdoc` — the `aws_iam_policy_document` data source.
-- `internal/stack` — the provider with its account guard, and typed reads of
-  another stack's outputs.
+- **`cidrsubnet`** is `github.com/apparentlymart/go-cidr`, the library Terraform's
+  own implementation is built on. `internal/platform/network` states only the
+  layout — public ranges first, private offset by the zone count — and its test
+  pins the four addresses a stage gets.
+- **`aws_iam_policy_document`** is `iam.GetPolicyDocument`, from the AWS SDK. The
+  four policies that name resources created in the same run pass those ARNs
+  straight in as inputs, so none of them needs an apply or hand-marshalled JSON.
+  Trust policies stay literals: three fixed fields are not worth a provider round
+  trip per role.
+
+`internal/stack` is the one helper with no upstream equivalent. It holds the
+provider with its account guard, the values more than one stack has to agree on,
+and typed reads of another stack's outputs.
 
 ## What each program does differently
 
@@ -68,10 +77,10 @@ a trigger on the platform workspace. The stack reference does that itself: apps
 cannot run ahead of the outputs it reads.
 
 **`allowed_account_ids` comes from code.** A stack names the account it belongs to
-— `forge-central:account: nonprod` — and `internal/stack` maps that to the number
-in `internal/constants`. The guard is still what fails the run when credentials
-point at the wrong account, but the account number is not a value anyone can
-mistype into a config file.
+— `forge-central:account: nonprod` — and `internal/stack` maps that name to the
+number. The guard is still what fails the run when credentials point at the wrong
+account, but the account number itself is not a value anyone can mistype into a
+config file.
 
 **`image.auto.tfvars` became a config value.** `make publish` writes
 `forge-central:provisionImageDigest` into `platform/Pulumi.dev.yaml`, which is
@@ -84,7 +93,13 @@ original. The RDS instance's `replace_triggered_by` became
 `ReplaceOnChanges(["dbSubnetGroupName"])`, which is the property that actually
 carries the change Terraform was working around.
 
-## Two things to know before editing
+## Three things to know before editing
+
+**Policies are asserted, not eyeballed.** Documents are rendered by the provider
+now, so `mockaws` records what reaches each `iam.RolePolicy` and
+`apps_test.go` checks that sprue's policy names its three buckets and nothing
+else, and the delegator's its two tables. Without that, a lost statement or an
+unresolved ARN would pass silently.
 
 **Sort anything that becomes JSON.** Terraform iterated maps in sorted order. Go
 does not, so an unsorted environment block or wrapper prelude would rewrite the

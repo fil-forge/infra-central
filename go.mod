@@ -3,6 +3,7 @@ module github.com/fil-forge/infra-central
 go 1.25.11
 
 require (
+	github.com/apparentlymart/go-cidr v1.1.1
 	github.com/aws/aws-lambda-go v1.54.0
 	github.com/aws/aws-sdk-go-v2 v1.43.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.36

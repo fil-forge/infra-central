@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/iam"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 
 	"github.com/fil-forge/infra-central/pulumi/internal/ecsservice"
-	"github.com/fil-forge/infra-central/pulumi/internal/iamdoc"
 )
 
 // configPath is where the entrypoint writes the generated config.
@@ -139,14 +139,21 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	child := []pulumi.ResourceOption{pulumi.Parent(component)}
 
 	// Unsealing is a direct KMS operation, so unlike the parameter-decryption
-	// grant this one carries no kms:ViaService condition.
-	sealPolicy := args.KmsKeyArn.ToStringOutput().ApplyT(func(keyArn string) (string, error) {
-		return iamdoc.New(iamdoc.Statement{
-			Sid:       "UnsealWithKMS",
-			Actions:   []string{"kms:Encrypt", "kms:Decrypt", "kms:DescribeKey"},
-			Resources: []string{keyArn},
-		}).JSON()
-	}).(pulumi.StringOutput)
+	// grant this one carries no kms:ViaService condition. The key is created in the
+	// same run, and passes straight through as an input.
+	sealPolicy := iam.GetPolicyDocumentOutput(ctx, iam.GetPolicyDocumentOutputArgs{
+		Statements: iam.GetPolicyDocumentStatementArray{
+			iam.GetPolicyDocumentStatementArgs{
+				Sid: pulumi.String("UnsealWithKMS"),
+				Actions: pulumi.StringArray{
+					pulumi.String("kms:Encrypt"),
+					pulumi.String("kms:Decrypt"),
+					pulumi.String("kms:DescribeKey"),
+				},
+				Resources: pulumi.StringArray{args.KmsKeyArn},
+			},
+		},
+	}, pulumi.InvokeOption(pulumi.Parent(component))).Json()
 
 	service, err := ecsservice.New(ctx, name+"-service", &ecsservice.Args{
 		Stage:     args.Stage,

@@ -205,10 +205,9 @@ pulumi/internal/
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
   apps/                    the six ECS services
   ecsservice/              apps, and openbao inside platform
-  constants/               account ids and project names, every stack
-  ecr/                     bootstrap only
-  chain/ cidr/ iamdoc/     values and helpers with no resources of their own
-  stack/                   the provider's account guard, and stack-output reads
+  chain/                   a stage's chain and contract configuration
+  stack/                   account ids, project names, the provider's account
+                           guard, and typed stack-output reads
   mockaws/                 the resource monitor the tests build against
 ```
 
@@ -403,7 +402,7 @@ image count starts to bother you.
 A stage needs nothing copied from the bootstrap output. It builds the image URL
 from its own account and region, which is the only registry its Lambda can pull
 from anyway; the account ids and the repository name live in
-`pulumi/internal/constants`.
+`pulumi/internal/stack`.
 
 ### Adding a region
 
@@ -427,9 +426,9 @@ the new region can pin the same digest an existing stage already runs.
 
 ### Adding an account
 
-Add the account id to `pulumi/internal/constants` and give it a name in
-`pulumi/internal/stack`, then set `forge-central:account` to that name on the new
-stack. Every stack reads its account id from the constants package, so a run with
+Add the account id and give it a name in `pulumi/internal/stack`, then set
+`forge-central:account` to that name on the new stack. Every stack reads its
+account id from that package, so a run with
 credentials for the wrong account fails at preview time rather than building a
 second working copy of the stage somewhere unexpected. The number itself is never
 written into a config file, where it could be mistyped.

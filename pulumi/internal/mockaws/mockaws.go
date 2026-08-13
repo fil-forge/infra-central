@@ -9,7 +9,9 @@
 package mockaws
 
 import (
+	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -23,14 +25,54 @@ const Region = "us-east-2"
 // with itself.
 const AccountID = "654654381893"
 
-// Monitor answers the provider calls the components make.
-type Monitor struct{}
+// Monitor answers the provider calls the components make, and records the IAM
+// policies that reach a role so a test can assert on what was actually granted.
+//
+// The recording exists because policy documents are now rendered by the provider
+// rather than in this repository. Without it, a policy could lose a statement or
+// arrive with an unresolved resource and every test would still pass.
+type Monitor struct {
+	mu       sync.Mutex
+	policies map[string]string
+}
 
-// Call answers a provider function. Only the four this project invokes are
+// New returns a monitor ready to record.
+func New() *Monitor {
+	return &Monitor{policies: map[string]string{}}
+}
+
+// Policy returns the document attached to the named iam.RolePolicy resource, and
+// whether one was created at all.
+func (m *Monitor) Policy(name string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	document, ok := m.policies[name]
+
+	return document, ok
+}
+
+// record keeps a role policy's rendered document.
+func (m *Monitor) record(name string, inputs resource.PropertyMap) {
+	policy, ok := inputs["policy"]
+	if !ok || !policy.IsString() {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.policies == nil {
+		m.policies = map[string]string{}
+	}
+	m.policies[name] = policy.StringValue()
+}
+
+// Call answers a provider function. Only the five this project invokes are
 // implemented; anything else is an error rather than an empty result, so a new
 // lookup added to the components shows up here as a failing test rather than as a
 // silently empty value.
-func (Monitor) Call(args pulumi.MockCallArgs) (resource.PropertyMap, error) {
+func (*Monitor) Call(args pulumi.MockCallArgs) (resource.PropertyMap, error) {
 	switch args.Token {
 	case "aws:index/getCallerIdentity:getCallerIdentity":
 		return resource.NewPropertyMapFromMap(map[string]interface{}{
@@ -56,6 +98,9 @@ func (Monitor) Call(args pulumi.MockCallArgs) (resource.PropertyMap, error) {
 			"zoneIds": []interface{}{"use2-az1", "use2-az2", "use2-az3"},
 		}), nil
 
+	case "aws:iam/getPolicyDocument:getPolicyDocument":
+		return policyDocument(args.Args)
+
 	case "aws:route53/getZone:getZone":
 		return resource.NewPropertyMapFromMap(map[string]interface{}{
 			"id":     "Z0TESTZONE",
@@ -70,7 +115,7 @@ func (Monitor) Call(args pulumi.MockCallArgs) (resource.PropertyMap, error) {
 
 // NewResource answers a resource registration with its inputs plus whatever
 // computed attributes the components read back.
-func (Monitor) NewResource(args pulumi.MockResourceArgs) (string, resource.PropertyMap, error) {
+func (m *Monitor) NewResource(args pulumi.MockResourceArgs) (string, resource.PropertyMap, error) {
 	outputs := args.Inputs.Copy()
 
 	id := args.Name + "-id"
@@ -82,6 +127,9 @@ func (Monitor) NewResource(args pulumi.MockResourceArgs) (string, resource.Prope
 	}
 
 	switch args.TypeToken {
+	case "aws:iam/rolePolicy:RolePolicy":
+		m.record(args.Name, args.Inputs)
+
 	case "aws:rds/instance:Instance":
 		outputs["address"] = resource.NewStringProperty(args.Name + ".mock.rds.amazonaws.com")
 		outputs["port"] = resource.NewNumberProperty(5432)
@@ -138,4 +186,35 @@ func (Monitor) NewResource(args pulumi.MockResourceArgs) (string, resource.Prope
 	}
 
 	return id, outputs, nil
+}
+
+// policyDocument renders the document the AWS provider would return, out of the
+// statements it was handed.
+//
+// Echoing the input rather than returning a fixed string is what keeps the tests
+// worth running: a policy still has to travel through the components intact to be
+// observable here, so a statement dropped or a resource left unresolved on the way
+// is still a visible failure. What is no longer checked is the provider's own
+// rendering, which is not this project's to test.
+func policyDocument(args resource.PropertyMap) (resource.PropertyMap, error) {
+	statements := []interface{}{}
+
+	if raw, ok := args["statements"]; ok && raw.IsArray() {
+		for _, statement := range raw.ArrayValue() {
+			statements = append(statements, statement.Mappable())
+		}
+	}
+
+	encoded, err := json.Marshal(map[string]interface{}{
+		"Version":   "2012-10-17",
+		"Statement": statements,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mockaws: render policy document: %w", err)
+	}
+
+	return resource.NewPropertyMapFromMap(map[string]interface{}{
+		"id":   "mock-policy-document",
+		"json": string(encoded),
+	}), nil
 }

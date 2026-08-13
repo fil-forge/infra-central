@@ -20,11 +20,11 @@ import (
 	"strings"
 
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws"
+	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/iam"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 
 	"github.com/fil-forge/infra-central/pulumi/internal/chain"
 	"github.com/fil-forge/infra-central/pulumi/internal/ecsservice"
-	"github.com/fil-forge/infra-central/pulumi/internal/iamdoc"
 )
 
 // Digests pins one image per service. A digest names one artifact and cannot move
@@ -208,6 +208,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 
 	build := &builder{
 		args:      args,
+		invoke:    pulumi.InvokeOption(pulumi.Parent(component)),
 		names:     naming{suffix: args.HostnameSuffix.ToStringOutput()},
 		region:    region.Region,
 		accountID: identity.AccountId,
@@ -274,6 +275,7 @@ type builder struct {
 	keys         string
 	plcDirectory pulumi.StringOutput
 	child        []pulumi.ResourceOption
+	invoke       pulumi.InvokeOption
 }
 
 // size returns the Fargate allocation for a service, preferring the stage's
@@ -373,21 +375,31 @@ func (b *builder) sprue(ctx *pulumi.Context) (*ecsservice.Service, error) {
 
 	b.public(&args, "sprue", 110)
 
-	// Object access, scoped to sprue's own three buckets.
+	// Object access, scoped to sprue's own three buckets. Each bucket is named
+	// twice: ListBucket acts on the bucket, the other three on the objects in it.
 	args.TaskPolicies = map[string]pulumi.StringInput{
-		"service-permissions": b.args.BucketArns.ToStringArrayOutput().ApplyT(func(arns []string) (string, error) {
-			resources := make([]string, 0, len(arns)*2)
-			resources = append(resources, arns...)
-			for _, arn := range arns {
-				resources = append(resources, arn+"/*")
-			}
+		"service-permissions": iam.GetPolicyDocumentOutput(ctx, iam.GetPolicyDocumentOutputArgs{
+			Statements: iam.GetPolicyDocumentStatementArray{
+				iam.GetPolicyDocumentStatementArgs{
+					Sid: pulumi.String("ObjectAccess"),
+					Actions: pulumi.StringArray{
+						pulumi.String("s3:GetObject"),
+						pulumi.String("s3:PutObject"),
+						pulumi.String("s3:DeleteObject"),
+						pulumi.String("s3:ListBucket"),
+					},
+					Resources: b.args.BucketArns.ToStringArrayOutput().ApplyT(func(arns []string) []string {
+						resources := make([]string, 0, len(arns)*2)
+						resources = append(resources, arns...)
+						for _, arn := range arns {
+							resources = append(resources, arn+"/*")
+						}
 
-			return iamdoc.New(iamdoc.Statement{
-				Sid:       "ObjectAccess",
-				Actions:   []string{"s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"},
-				Resources: resources,
-			}).JSON()
-		}).(pulumi.StringOutput),
+						return resources
+					}).(pulumi.StringArrayOutput),
+				},
+			},
+		}, b.invoke).Json(),
 	}
 
 	return ecsservice.New(ctx, "sprue", &args, b.child...)
@@ -541,26 +553,28 @@ func (b *builder) delegator(ctx *pulumi.Context) (*ecsservice.Service, error) {
 	b.public(&args, "delegator", 140)
 
 	args.TaskPolicies = map[string]pulumi.StringInput{
-		"service-permissions": b.args.DynamoDBTableArns.ToStringArrayOutput().ApplyT(func(arns []string) (string, error) {
-			return iamdoc.New(iamdoc.Statement{
-				Sid: "RegistryTables",
-				Actions: []string{
-					// The store describes both tables at startup and refuses to
-					// run if it cannot: with no endpoint override it takes a
-					// missing table as a sign it is pointed at the wrong account,
-					// rather than creating one.
-					"dynamodb:DescribeTable",
+		"service-permissions": iam.GetPolicyDocumentOutput(ctx, iam.GetPolicyDocumentOutputArgs{
+			Statements: iam.GetPolicyDocumentStatementArray{
+				iam.GetPolicyDocumentStatementArgs{
+					Sid: pulumi.String("RegistryTables"),
+					Actions: pulumi.StringArray{
+						// The store describes both tables at startup and refuses to
+						// run if it cannot: with no endpoint override it takes a
+						// missing table as a sign it is pointed at the wrong account,
+						// rather than creating one.
+						pulumi.String("dynamodb:DescribeTable"),
 
-					"dynamodb:GetItem",
-					"dynamodb:PutItem",
-					"dynamodb:UpdateItem",
-					"dynamodb:DeleteItem",
-					"dynamodb:Query",
-					"dynamodb:Scan",
+						pulumi.String("dynamodb:GetItem"),
+						pulumi.String("dynamodb:PutItem"),
+						pulumi.String("dynamodb:UpdateItem"),
+						pulumi.String("dynamodb:DeleteItem"),
+						pulumi.String("dynamodb:Query"),
+						pulumi.String("dynamodb:Scan"),
+					},
+					Resources: b.args.DynamoDBTableArns,
 				},
-				Resources: arns,
-			}).JSON()
-		}).(pulumi.StringOutput),
+			},
+		}, b.invoke).Json(),
 	}
 
 	return ecsservice.New(ctx, "delegator", &args, b.child...)

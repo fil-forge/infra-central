@@ -1,6 +1,7 @@
 package apps_test
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -146,7 +147,7 @@ func TestBuildsDevApps(t *testing.T) {
 		waiting.Wait()
 
 		return nil
-	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.Monitor{}))
+	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.New()))
 	if err != nil {
 		t.Fatalf("building the dev apps: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestRejectsUnpinnedImages(t *testing.T) {
 		_, err := apps.New(ctx, "apps", args)
 
 		return err
-	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.Monitor{}))
+	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.New()))
 	if err == nil {
 		t.Fatal("expected a tagged image to fail the run, it succeeded")
 	}
@@ -183,8 +184,78 @@ func TestRejectsMalformedChainOutput(t *testing.T) {
 		_, err := apps.New(ctx, "apps", args)
 
 		return err
-	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.Monitor{}))
+	}, pulumi.WithMocks("forge-central-apps", "dev", mockaws.New()))
 	if err == nil {
 		t.Fatal("expected a chain output missing filecoin_pay to fail the run, it succeeded")
+	}
+}
+
+// TestTaskPoliciesGrantExactlyTheirOwnResources is the check the move to
+// provider-rendered policy documents would otherwise have lost.
+//
+// Only sprue and the delegator get any task permissions at all; the other four run
+// with a role that grants nothing, which is deliberate. This asserts both halves,
+// and that each of the two names its own resources and no others.
+func TestTaskPoliciesGrantExactlyTheirOwnResources(t *testing.T) {
+	monitor := mockaws.New()
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		_, err := apps.New(ctx, "apps", devArgs())
+
+		return err
+	}, pulumi.WithMocks("forge-central-apps", "dev", monitor))
+	if err != nil {
+		t.Fatalf("building the dev apps: %v", err)
+	}
+
+	// The four services that should hold no task permissions whatsoever.
+	for _, service := range []string{"hilt", "swarf", "signing-service", "plc"} {
+		if document, ok := monitor.Policy(service + "-task-service-permissions"); ok {
+			t.Errorf("%s has a task policy it should not have: %s", service, document)
+		}
+	}
+
+	sprue, ok := monitor.Policy("sprue-task-service-permissions")
+	if !ok {
+		t.Fatal("sprue has no task policy; it needs one for its three buckets")
+	}
+
+	// Each bucket named twice: ListBucket acts on the bucket, the object actions
+	// on its contents. An unresolved ARN would show up here as a literal "output".
+	for _, bucket := range []string{"agent-message", "delegation", "upload-shards"} {
+		arn := "arn:aws:s3:::fc-dev-" + bucket + "-654654381893"
+		if !strings.Contains(sprue, `"`+arn+`"`) {
+			t.Errorf("sprue's policy does not grant the %s bucket itself:\n%s", bucket, sprue)
+		}
+		if !strings.Contains(sprue, `"`+arn+`/*"`) {
+			t.Errorf("sprue's policy does not grant objects in %s:\n%s", bucket, sprue)
+		}
+	}
+
+	// sprue reaches S3 and nothing else. DynamoDB belongs to the delegator.
+	if strings.Contains(sprue, "dynamodb") {
+		t.Errorf("sprue's policy reaches dynamodb:\n%s", sprue)
+	}
+
+	delegator, ok := monitor.Policy("delegator-task-service-permissions")
+	if !ok {
+		t.Fatal("the delegator has no task policy; it needs one for its two tables")
+	}
+
+	for _, table := range []string{"allow-list", "provider-info"} {
+		arn := "arn:aws:dynamodb:us-east-2:654654381893:table/fc-dev-delegator-" + table
+		if !strings.Contains(delegator, `"`+arn+`"`) {
+			t.Errorf("the delegator's policy does not grant the %s table:\n%s", table, delegator)
+		}
+	}
+
+	// DescribeTable is load-bearing: the store describes both tables at startup
+	// and refuses to run if it cannot.
+	if !strings.Contains(delegator, "dynamodb:DescribeTable") {
+		t.Errorf("the delegator's policy omits DescribeTable, which it needs at startup:\n%s", delegator)
+	}
+
+	if strings.Contains(delegator, "s3:") {
+		t.Errorf("the delegator's policy reaches s3:\n%s", delegator)
 	}
 }
