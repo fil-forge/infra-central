@@ -691,6 +691,18 @@ stage](#smoke-testing-a-stage).
 Deliberate compromises and open questions. Some need a change outside this
 repository; the rest are work that has not been done here yet.
 
+### CI checks
+
+Create GitHub Actions to run `make check` and `make test` for every pull request.
+
+Configure GitHub Branch Protection rules to require passing CI checks + Terraform speculative
+preview before a PR can be merged.
+
+### Automated post-deploy checks
+
+After Terraform applies changes, run the smoke tests to verify that the stage is up and running
+correctly.
+
 ### Onboarding a regional appliance has no tooling
 
 Everything the central services need is minted and wired by an apply. The first
