@@ -63,6 +63,58 @@ SSM parameter paths; both spellings refer to the same service.
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                        |
 | **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                           |
 
+## What each service needs
+
+| Service              | Port | Health         | Postgres | Other                        |
+| -------------------- | ---- | -------------- | -------- | ---------------------------- |
+| sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
+| hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
+| swarf                | 8080 | `/health`      | yes      | SSE firehose endpoint        |
+| delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
+| piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
+| plc                  | 3000 | `/_health`     | yes      | internal only                |
+
+Two more names appear in the parameter store: **indexer** and **etracker**. They
+are not deployed, and they get identities anyway, because the delegator
+validates two UCAN proofs at startup that must be signed by their keys, exactly
+as in smelt. Both are expected to become real services, so their keys are kept
+rather than discarded, which is also what lets the proofs be re-signed after a
+rotation.
+
+### Sharp edges
+
+These each cost an afternoon to rediscover.
+
+- **hilt and swarf bind `127.0.0.1` by default.** Without an explicit
+  `HILT_SERVER_HOST` / `SWARF_SERVER_HOST` the health check can never pass.
+- **sprue, hilt and swarf generate an ephemeral identity key when none is
+  supplied**, silently changing their DID on every restart. Supplying the key
+  is mandatory, not an optimisation.
+- **hilt and swarf accept the identity key only as a file path**, and the
+  delegator's UCAN proofs are file-only too (the inline variant panics). ECS
+  injects secrets as environment variables, so the `ecs-service` module wraps
+  the entrypoint to write them out before exec'ing the process.
+- **Health paths disagree**: `/health`, `/healthcheck` and `/_health` all appear.
+- **Migrations run in-process** via goose for sprue, hilt, swarf and plc.
+  Concurrent starts race on the goose lock, so services run at
+  `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
+- **No service exposes Prometheus metrics.** Observability is JSON logs on
+  stdout, collected by CloudWatch into `/forge-central/<stage>/<service>`, and
+  the provision Lambda into `/aws/lambda/fc-<stage>-provision`. Both are kept
+  for 30 days by default.
+- **swarf's `/revocations/:since` is a long-lived SSE stream**, so the ALB idle
+  timeout is raised well above its 60-second default.
+- **did:web resolution goes over the public internet.** hilt resolves sprue at
+  `https://sprue.<stage>.forge-sandbox.fil.one/.well-known/did.json`, so a task in a private
+  subnet reaches the public ALB back out through the NAT gateway.
+- **Every plan warns that `failure_threshold` is deprecated.** Expected, and the
+  alternatives are worse: AWS fixed the Cloud Map custom health check wait at
+  one 30-second interval and deprecated the parameter, but leaving it out makes
+  the provider create the service with no custom health config at all, after
+  which every plan schedules a replacement that lands in the same state. The
+  comment in `terraform/modules/shared/ecs-service/routing.tf` has the full
+  story and tracks the upstream issues that would end the warning.
+
 ## Repository layout
 
 ```
