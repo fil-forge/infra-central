@@ -86,6 +86,64 @@ terraform/
     prod/platform/   prod/apps/                    committed, no workspaces yet
 ```
 
+## DNS
+
+`fil.one` is served by Cloudflare and has no Route53 zone. One subdomain per AWS
+account is delegated to Route53, and every stage in that account writes records
+inside the zone it was given.
+
+```
+Cloudflare zone fil.one
+  ├── NS forge-sandbox  ──►  Route53 zone forge-sandbox.fil.one  (non-prod account)
+  │                            ├── sprue.dev.forge-sandbox.fil.one
+  │                            ├── ssm.dev.forge-sandbox.fil.one
+  │                            └── …any future stage, same zone
+  └── NS forge          ──►  Route53 zone forge.fil.one          (production account)
+                               ├── sprue.forge.fil.one
+                               └── ssm.forge.fil.one
+```
+
+**Adding a stage requires no change to the DNS project.** That is the property
+the layout is built around, and it is what forces two suffixes rather than one.
+
+A delegation has to cover every stage in its account, so two accounts need two
+delegation points. They cannot be nested: `sandbox.forge.fil.one` would have to
+be delegated from the `forge.fil.one` zone, which lives in the production
+account, putting non-prod DNS inside prod and requiring a prod change for every
+non-prod stage. Sibling names under `fil.one` keep the accounts independent.
+
+Production carries no stage label, because it has a zone to itself:
+`sprue.forge.fil.one`. Non-prod stages take a label inside the shared sandbox
+zone: `sprue.dev.forge-sandbox.fil.one`.
+
+Two per-stage settings follow, and this is where they diverge:
+
+- **`zone_name`** is the delegated Route53 zone records are written into. Every
+  non-prod stage shares `forge-sandbox.fil.one`.
+- **`hostname_suffix`** is what that stage's hostnames end with, which for
+  non-prod includes the stage label.
+
+The delegation itself lives in
+[fil-one/infrastructure](https://github.com/fil-one/infrastructure) and is added
+once per workspace: an `aws_route53_zone` for the delegated name, plus a
+Cloudflare `NS` record carrying that zone's four name servers, named
+`forge-sandbox` in the non-prod workspace and `forge` in the prod one.
+
+Those records are created with `proxied = false`, which matters: these hostnames
+serve `did:web` documents and terminate their own TLS at the ALB, so Cloudflare
+must not sit in front of them.
+
+**Certificates belong here, not in the fil-one/infrastructure project.**
+
+The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
+records into the delegated zone, and waits for validation. Two reasons it
+cannot be one central certificate:
+
+- An ALB needs its certificate in the ALB's own region. A `us-east-1`
+  certificate, which is what CloudFront requires, cannot be attached.
+- A wildcard covers exactly one label, so `*.forge-sandbox.fil.one` does not
+  match `sprue.dev.forge-sandbox.fil.one`. Each stage needs its own.
+
 ## Runbook
 
 ### Prerequisites
@@ -287,6 +345,20 @@ never starts and runc reports only the variable's name. The delegator's two
 proofs are therefore stored base64-encoded and decoded on the way to the file,
 which is what `secret_files_base64` on `modules/shared/ecs-service` is for.
 hilt's proof is a `base64+gzip` container, already text, and travels as it is.
+
+### Rotating hilt's OpenBao credential
+
+```bash
+aws ssm delete-parameter --name /forge-central/dev/hilt/vault-secret-id
+```
+
+Then force the vault phase to run again. There is no way to do that from a
+remote run yet — see [Forcing a provision phase to
+re-run](#forcing-a-provision-phase-to-re-run).
+
+The vault phase also self-heals: if a stored `secret_id` no longer
+authenticates, because OpenBao's storage was rebuilt underneath it, the next run
+replaces it rather than leaving hilt unable to start.
 
 ## Development
 
