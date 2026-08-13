@@ -6,7 +6,8 @@
 # variables, while hilt and swarf accept their identity key only as a file path
 # and the delegator's UCAN proofs are file-only in current code. Rather than
 # mounting a volume or shipping a sidecar, the container writes what it needs to
-# a tmpfs at startup and then execs the real process.
+# a tmpfs at startup and then execs the real process. A binary secret arrives
+# base64-encoded, because an environment variable cannot carry a NUL byte.
 #
 # The IAM scoping is per service, not per stage. Each execution role can read
 # only /forge-central/<stage>/<service>/*, so a compromised sprue task cannot
@@ -30,13 +31,20 @@ locals {
   # format() rather than interpolation because these are *shell* variable
   # references: the container expands $IDENTITY_PEM at startup, Terraform must
   # not try to. %% is a literal percent for printf.
-  file_writes = [
-    for env_var, filename in var.secret_files :
-    format("printf '%%s' \"$%s\" > %s/%s && chmod 400 %s/%s",
-    env_var, local.secret_dir, filename, local.secret_dir, filename)
-  ]
+  file_writes = concat(
+    [
+      for env_var, filename in var.secret_files :
+      format("printf '%%s' \"$%s\" > %s/%s && chmod 400 %s/%s",
+      env_var, local.secret_dir, filename, local.secret_dir, filename)
+    ],
+    [
+      for env_var, filename in var.secret_files_base64 :
+      format("printf '%%s' \"$%s\" | base64 -d > %s/%s && chmod 400 %s/%s",
+      env_var, local.secret_dir, filename, local.secret_dir, filename)
+    ],
+  )
 
-  wrapper_prelude = length(var.secret_files) > 0 ? join(" && ", concat(
+  wrapper_prelude = length(local.file_writes) > 0 ? join(" && ", concat(
     [format("umask 077 && mkdir -p %s", local.secret_dir)],
     local.file_writes,
   )) : ""

@@ -420,8 +420,29 @@ issuer key was freshly minted. smelt tracks the same dependency, skipping a
 committed proof unless one of the keys behind it was regenerated that run.
 
 The practical consequence: you cannot verify a proof by regenerating it and
-diffing. Only the framing is reproducible — raw codecs are written bare,
-textual container codecs end with a newline — and that is what the tests pin.
+diffing. Only the framing is reproducible, and that is what the tests pin: a
+textual container is stored as `ucantool` writes it, trailing newline included,
+while a bare DAG-CBOR delegation is stored base64-encoded.
+
+### Why the delegator's proofs are stored base64
+
+Every proof reaches its consumer as an environment variable that the task's
+entrypoint writes to a file, and an environment variable cannot carry a NUL
+byte. A bare DAG-CBOR delegation is binary and contains them, so the container
+never starts and runc reports only the variable's name. The delegator's two
+proofs are therefore stored base64-encoded and decoded on the way to the file,
+which is what `secret_files_base64` on `modules/ecs-service` is for. hilt's
+proof is a `base64+gzip` container, already text, and travels as it is.
+
+A stage seeded before this needs both parameters replaced, because the seed
+phase leaves an existing proof alone:
+
+```bash
+aws ssm delete-parameter --name /forge-central/dev/delegator/indexing-service-proof
+aws ssm delete-parameter --name /forge-central/dev/delegator/egress-tracking-proof
+```
+
+Then force the seed phase to run again, as when rotating an identity.
 
 ### Rotating hilt's OpenBao credential
 

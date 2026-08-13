@@ -294,7 +294,9 @@ module "delegator" {
     DELEGATOR_EGRESS_PROOF            = "${local.ssm}/delegator/egress-tracking-proof"
   }
 
-  secret_files = {
+  # Both proofs are bare DAG-CBOR, so they are stored base64-encoded: their raw
+  # bytes contain NULs, which an environment variable cannot carry.
+  secret_files_base64 = {
     DELEGATOR_INDEXING_PROOF = "indexing-service-proof.txt"
     DELEGATOR_EGRESS_PROOF   = "egress-tracking-proof.txt"
   }

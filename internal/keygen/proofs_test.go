@@ -1,8 +1,11 @@
 package keygen
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
+
+	"github.com/fil-forge/ucantone/ucan/delegation"
 )
 
 func testDIDs(t *testing.T) map[string]string {
@@ -80,45 +83,57 @@ func TestIssueProofIsNotReproducible(t *testing.T) {
 	}
 }
 
-// ucantool's CLI writes textual container codecs with a trailing newline and
-// raw codecs without one. The framing is the one part of a proof that *is*
-// reproducible, and consumers depend on it.
+// A textual container is stored as ucantool's CLI writes it, trailing newline
+// included. The framing is the one part of a proof that *is* reproducible, and
+// consumers depend on it.
 func TestIssueProofFollowsTheCLINewlineRule(t *testing.T) {
 	issuer, err := GenerateIdentity()
 	if err != nil {
 		t.Fatalf("GenerateIdentity: %v", err)
 	}
 
-	cases := map[string]struct {
-		proofName    string
-		wantsNewline bool
-	}{
-		"raw delegation, read by the delegator": {
-			proofName:    "indexing-service-proof",
-			wantsNewline: false,
-		},
-		"base64+gzip container, read by hilt": {
-			proofName:    "upload-proof",
-			wantsNewline: true,
-		},
+	out, err := IssueProof(issuer.PrivatePEM, proofsByName(t)["upload-proof"])
+	if err != nil {
+		t.Fatalf("IssueProof: %v", err)
 	}
 
-	proofs := map[string]Proof{}
+	if !strings.HasSuffix(out, "\n") {
+		t.Error("the base64+gzip container hilt reads has no trailing newline")
+	}
+}
+
+// A bare DAG-CBOR delegation is binary, and it travels to the delegator through
+// an environment variable, which cannot carry a NUL byte. Storing it verbatim
+// leaves the task unable to start at all, with runc naming the variable and
+// nothing else, so it is stored base64-encoded instead.
+func TestIssueProofEncodesABinaryDelegation(t *testing.T) {
+	issuer, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+
+	out, err := IssueProof(issuer.PrivatePEM, proofsByName(t)["indexing-service-proof"])
+	if err != nil {
+		t.Fatalf("IssueProof: %v", err)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(out)
+	if err != nil {
+		t.Fatalf("stored proof is not base64: %v", err)
+	}
+	if _, err := delegation.Decode(decoded); err != nil {
+		t.Errorf("the delegator cannot parse what the base64 decodes to: %v", err)
+	}
+}
+
+func proofsByName(t *testing.T) map[string]Proof {
+	t.Helper()
+
+	byName := map[string]Proof{}
 	for _, proof := range Proofs(testDIDs(t)) {
-		proofs[proof.Name] = proof
+		byName[proof.Name] = proof
 	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			out, err := IssueProof(issuer.PrivatePEM, proofs[tc.proofName])
-			if err != nil {
-				t.Fatalf("IssueProof: %v", err)
-			}
-			if got := strings.HasSuffix(out, "\n"); got != tc.wantsNewline {
-				t.Errorf("trailing newline = %v, want %v", got, tc.wantsNewline)
-			}
-		})
-	}
+	return byName
 }
 
 func TestIssueProofRejectsAKeyItCannotRead(t *testing.T) {

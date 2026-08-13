@@ -61,6 +61,8 @@ variable "secret_files" {
     Needed because hilt and swarf accept their identity key only as a path, and
     the delegator's UCAN proofs are file-only in current code. Every key here
     must also appear in `secrets`, and setting this requires shell_command.
+
+    Use secret_files_base64 for a value whose bytes are not text.
   EOT
   type        = map(string)
   default     = {}
@@ -71,14 +73,33 @@ variable "secret_files" {
   }
 }
 
+variable "secret_files_base64" {
+  description = <<-EOT
+    As secret_files, for a parameter stored base64-encoded: the wrapper decodes
+    it on the way to the file.
+
+    This is how a binary secret travels at all. ECS injects every secret as an
+    environment variable, and an environment variable cannot hold a NUL byte:
+    runc refuses to create the container and reports only the variable's name.
+    The delegator's two UCAN proofs are bare DAG-CBOR, so they take this path.
+  EOT
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for env_var in keys(var.secret_files_base64) : contains(keys(var.secrets), env_var)])
+    error_message = "Every secret_files_base64 key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+}
+
 variable "shell_command" {
-  description = "Command to exec, as a shell string. Required when secret_files is set, because the wrapper replaces the image's entrypoint. Null uses the image's own entrypoint and command."
+  description = "Command to exec, as a shell string. Required when either secret_files variable is set, because the wrapper replaces the image's entrypoint. Null uses the image's own entrypoint and command."
   type        = string
   default     = null
 
   validation {
-    condition     = length(var.secret_files) == 0 || var.shell_command != null
-    error_message = "secret_files replaces the image entrypoint with a wrapper, so shell_command must say what to exec afterwards."
+    condition     = (length(var.secret_files) + length(var.secret_files_base64)) == 0 || var.shell_command != null
+    error_message = "Writing a secret to a file replaces the image entrypoint with a wrapper, so shell_command must say what to exec afterwards."
   }
 }
 
