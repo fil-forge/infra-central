@@ -569,6 +569,49 @@ digests, dev included: HCP applies dev on every commit to `main`, and a rolling
 tag would make what dev runs depend on when a task last restarted rather than on
 what was merged.
 
+### Confirming nothing was regenerated
+
+The most important check after any apply. Read `created_parameters` from the
+run's outputs in HCP, or from a shell:
+
+```bash
+terraform -chdir=terraform/envs/dev/platform output created_parameters
+```
+
+Empty means every key already existed and was reused. A non-empty list after
+the first apply of a stage means something was minted; find out what before
+assuming a wallet is intact.
+
+### Smoke-testing a stage
+
+```bash
+make smoke STAGE=dev
+```
+
+Every public service is checked over public HTTPS, needing no AWS credentials.
+A 200 from the health path covers the whole ingress route in one request: the
+Route53 record, the wildcard certificate, the listener rule, the target group
+and a task passing its container health check.
+
+The second check is the one health cannot make. sprue, hilt and swarf mint an
+ephemeral identity when no key is supplied and report themselves healthy either
+way, so `/.well-known/did.json` is read and its `id` compared against
+`did:web:<hostname>`. A mismatch means the service is running an identity
+nothing has registered against.
+
+The script reads `hostname_suffix` from the stage's
+`platform/terraform.tfvars`, so it needs no Terraform state and no TFE token.
+Services are probed concurrently: a task that accepts the connection and never
+replies waits out the whole timeout, and several of those in sequence is a
+minute of nothing.
+
+Two gaps it names in its own output rather than passing over:
+
+- **plc** has no public hostname, so nothing here reaches it.
+- **piri-signing-service** takes a `did:web` but serves no document at it. It is
+  the only service no other service addresses by DID, so nothing resolves it
+  today.
+
 ### Rotating a service identity
 
 Delete the parameter:
@@ -648,6 +691,121 @@ stage](#smoke-testing-a-stage).
 Deliberate compromises and open questions. Some need a change outside this
 repository; the rest are work that has not been done here yet.
 
+### CI checks
+
+Create GitHub Actions to run `make check` and `make test` for every pull request.
+
+Configure GitHub Branch Protection rules to require passing CI checks + Terraform speculative
+preview before a PR can be merged.
+
+### Automated post-deploy checks
+
+After Terraform applies changes, run the smoke tests to verify that the stage is up and running
+correctly.
+
+### Onboarding a regional appliance has no tooling
+
+Everything the central services need is minted and wired by an apply. The first
+Piri/Ingot appliance pointed at a stage needs five more things, and this
+repository provides none of them. Until it does, an appliance cannot finish
+`piri init`: it fails at the approval step with `403`, and if it gets past that,
+uploads fail with `CandidateUnavailable` and hilt rejects every tenant in the
+region.
+
+**Three registration writes.**
+
+These are runtime state, not configuration, so no
+apply creates them. smelt does each one from the operator's machine against the
+box; the equivalents here have no home yet.
+
+| What                                                                             | Where it lands                    | Without it                                                                                                 |
+| -------------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| The appliance's DID on the delegator's allow list                                | `fc-<stage>-delegator-allow-list` | `piri init` step 4 calls `/registrar/request-approval`, which refuses any DID not on the list with a `403` |
+| `provider register <did> <url> <proof>` plus `provider weight set` against sprue | sprue's database                  | uploads fail with `CandidateUnavailable: no storage providers available`                                   |
+| `provider add <did> <region>` against hilt                                       | hilt's database                   | hilt rejects tenant creation for the region and every `/s3/*` invocation ingot makes                       |
+
+smelt ([smelt#11](https://github.com/fil-forge/smelt/pull/11)) implements these
+as `staging-allowlist-piri`, `staging-register-piri` and `staging-register-ingot`,
+and its runbook is the best statement of the ordering and the failure modes.
+
+**Two proofs, one in each direction.**
+
+`keygen.Proofs` deliberately issues three of smelt's five, and the seed phase
+could not issue the other two even if it wanted to, because both involve a key
+that does not exist when a stage is brought up:
+
+- `piri-0-proof` — signed by the appliance's own identity key, audience sprue,
+  granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
+  `/pdp/info`. Central never holds that key, so this proof arrives from the
+  appliance and is handed to sprue as the third argument of `provider register`.
+- `hilt-ingot-s3-proof` — signed by hilt, audience ingot's `did:key`, granting
+  `/s3/request/authorize` and the four `/s3/bucket/*` commands. Central holds
+  hilt's key, but ingot has no did:web and its `did:key` is not known until the
+  appliance is provisioned, so this one is issued on demand with the appliance's
+  DID as input and returned to it.
+
+That asymmetry is the shape of the missing tool: onboarding is a request
+carrying the appliance's two DIDs and its public URL.
+
+**There is no shell to run the admin CLIs in.**
+
+smelt reaches sprue and hilt with `docker compose exec`. Here both run as
+Fargate tasks in private subnets and `enable_execute_command` is not set on any
+service, so `aws ecs execute-command` does not work either. Three ways out:
+
+- turn ECS Exec on and accept a documented human path into a task
+- add a Lambda alongside `provision` that performs the writes and issues the hilt proof, reusing its
+  SSM access to read hilt's identity;
+- or expose the admin operations over the ALB behind authentication, which is the largest change and
+  the only one that also serves a self-service future.
+
+The delegator's allow list is the exception and can be written today. Its table
+takes a single `did` string as the hash key, so an operator with credentials for
+the account writes the item directly without going near a task, once the item
+shape the delegator reads has been confirmed against its store package.
+
+**Where this belongs is the open question.**
+
+The appliance knows its own DIDs and its operator runs its bootstrap, which argues for the appliance
+pulling. Every write lands in central's tables and databases, and central holds the key that signs
+the proof going back, which argues for the authority staying here. The likely answer is both halves:
+the appliance presents its DIDs and URL, and tooling in this repository performs the three writes
+and returns the proof. Deciding that before the first appliance arrives is cheaper than discovering
+it during one.
+
+### hilt should authenticate to OpenBao with AWS IAM auth
+
+hilt currently uses AppRole with a `secret_id` delivered through SSM. That works
+and the credential is IAM-scoped to hilt's own parameter prefix, but it is still
+a long-lived shared secret that has to be stored, rotated and kept in step with
+OpenBao.
+
+The right mechanism is OpenBao's AWS IAM auth method: the task signs an
+`sts:GetCallerIdentity` request with its task-role credentials, and the role is
+bound to that role ARN. No shared secret is distributed at all, nothing needs
+rotating, and identity derives from the task role itself.
+
+It needs a change in hilt: `HILT_VAULT_HASHICORP_AUTH_METHOD` accepts only
+`approle` or `token` today, so its vault package needs the new auth method plus
+the config value to select it.
+
+Note that CIDR binding does not substitute for this. A Fargate task has no
+stable address, so `token_bound_cidrs` on the VPC's private subnets separates
+the VPC from the internet but not hilt from sprue. It is applied as a coarse
+control, not as the identity boundary.
+
+### Publish the provision image from CI
+
+Terraform changes reach dev on merge, but the image the Lambda runs does not.
+`make publish` is still run by hand from a developer machine with credentials for
+the target account, and the digest it writes has to be committed before a run
+will pick it up.
+
+A workflow on merge to `main` that publishes the image and commits the digest
+would close the last manual step. Ordering needs care: the commit carrying the
+new digest is what triggers the deploy, so the workflow has to publish before it
+writes, and write only what it published.
+
 ### Forcing a provision phase to re-run
 
 `aws_lambda_invocation` re-invokes only when its input changes, which is what
@@ -661,6 +819,72 @@ let an operator change a workspace variable and start a run, which is probably
 the answer, but it puts a value that means "re-run the thing that mints wallets"
 one text field away from anyone with write access to the workspace. Worth
 deciding deliberately.
+
+### Deploy service changes from their own repositories
+
+Today a service is deployed by editing `image_digests` here. It should instead
+happen when a commit lands on the service's own `main`.
+
+The missing piece is a `repository_dispatch` from each service's publish
+workflow into this one, carrying the service name and the digest it just pushed,
+which commits that digest to the dev stage. The commit is what deploys, so dev
+stays visible in git rather than in a workspace variable nobody reads.
+
+Prod stays manual either way: a promotion is a digest copied deliberately, and a
+reviewable diff is the point.
+
+### OpenBao runs without an audit log
+
+Nothing records who read or wrote which secret. The provision Lambda used to
+enable a `file` device pointed at stdout, so the audit log landed in the task's
+CloudWatch log group, but OpenBao 2.x rejects audit devices created over the
+API: a file device writes to an arbitrary path and a socket device to an
+arbitrary socket, which it treats as an operator's decision rather than an API
+caller's.
+
+The replacement is an `audit` stanza in the server config, which
+`modules/platform/openbao` already renders at task start. Two things need
+checking before it goes in. A device that cannot write makes OpenBao reject
+requests, so stdout under Fargate has to be confirmed as a sink that never
+blocks or fills. And declarative stanzas were not applied at first boot in
+2.5.0-beta
+([openbao#2168](https://github.com/openbao/openbao/issues/2168)), so 2.6.0 needs
+verifying against a fresh instance rather than one that has been through a
+`SIGHUP`.
+
+### OpenBao's availability target is open
+
+Under [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) a regional
+appliance cannot boot while central OpenBao is unreachable, though steady-state
+regional reads never call it. This deployment runs a single task against a
+multi-AZ database, so a task replacement is a short outage on the boot path
+only. Raising it needs `ha_enabled` in the storage stanza; whether that is
+warranted is the RFC's own open question.
+
+### There is no restore procedure for RDS
+
+Backups run: seven days of automated snapshots by default, one in dev, and a
+final snapshot on delete unless a stage sets `skip_final_snapshot`. Nothing says
+how to use them. A restore is also more than the services' data, because
+OpenBao's storage lives in the same instance: rolling the database back rolls
+back hilt's AppRole and the root of trust regional appliances unseal against.
+Write the procedure, and decide as part of it whether OpenBao's storage should
+move to an instance of its own.
+
+### Nothing alerts
+
+Logs reach CloudWatch and no alarm reads them. A task that crash-loops, a health
+check that starts failing, a wallet that runs out of gas: each is visible to
+someone looking, and none of them announces itself. The smallest set worth
+having is probably the ECS running count per service and the two wallet
+balances. Where the notification goes has to be settled first.
+
+### A stage's running cost is not written down
+
+A stage keeps a NAT gateway, an ALB, an RDS instance and six always-on Fargate
+tasks. Nobody has added it up, so there is no figure to weigh against multi-AZ
+in prod, a second non-prod stage, or leaving a sandbox stage running over a
+weekend.
 
 ## Related
 
