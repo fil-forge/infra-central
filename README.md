@@ -886,6 +886,21 @@ tasks. Nobody has added it up, so there is no figure to weigh against multi-AZ
 in prod, a second non-prod stage, or leaving a sandbox stage running over a
 weekend.
 
+### Storoku cannot host this deployment yet
+
+Moving these workspaces to [Storoku](https://github.com/storacha/storoku) was
+assessed and does not work today: it models one public HTTP service per
+deployment, and this stage runs seven on a shared ALB, cluster and database, with
+secrets minted outside Terraform into SSM. Nothing here can be handed over in
+place, because Storoku would rebuild it under different names, in a different
+state backend, with secrets in a different store.
+
+[docs/storoku-migration.md](docs/storoku-migration.md) has the resource mapping,
+the blockers, and the eight upstream changes that would close them. The first
+three — multi-service deployments, shared ingress, and SSM-backed secrets — are
+the prerequisites; the rest follow. Raise those with the Storoku maintainers
+before writing any deployment code here.
+
 ## Related
 
 - [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
@@ -896,3 +911,6 @@ weekend.
 - [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) — regional security
   and key management, which makes this OpenBao the root of trust for
   appliances.
+- [storacha/storoku](https://github.com/storacha/storoku) — Storacha's
+  deployment generator, assessed for this repository in
+  [docs/storoku-migration.md](docs/storoku-migration.md).
