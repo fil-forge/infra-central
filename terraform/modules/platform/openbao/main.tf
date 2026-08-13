@@ -49,7 +49,7 @@ locals {
 }
 
 module "service" {
-  source = "../ecs-service"
+  source = "../../shared/ecs-service"
 
   stage      = var.stage
   service    = "openbao"

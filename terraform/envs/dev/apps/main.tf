@@ -44,7 +44,7 @@ provider "aws" {
 }
 
 module "constants" {
-  source = "../../../modules/constants"
+  source = "../../../modules/shared/constants"
 }
 
 variable "region" {

@@ -42,7 +42,7 @@ locals {
 # --- sprue ---------------------------------------------------------------
 
 module "sprue" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "sprue"
@@ -126,7 +126,7 @@ data "aws_iam_policy_document" "sprue" {
 # --- hilt ----------------------------------------------------------------
 
 module "hilt" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "hilt"
@@ -200,7 +200,7 @@ module "hilt" {
 # --- swarf ---------------------------------------------------------------
 
 module "swarf" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "swarf"
@@ -252,7 +252,7 @@ module "swarf" {
 # --- delegator -----------------------------------------------------------
 
 module "delegator" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "delegator"
@@ -349,7 +349,7 @@ data "aws_iam_policy_document" "delegator" {
 # --- signing service -----------------------------------------------------
 
 module "signing_service" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "signing-service"
@@ -395,7 +395,7 @@ module "signing_service" {
 # --- plc directory -------------------------------------------------------
 
 module "plc" {
-  source = "../ecs-service"
+  source = "../shared/ecs-service"
 
   stage      = var.stage
   service    = "plc"

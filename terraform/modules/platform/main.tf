@@ -22,21 +22,21 @@ locals {
 }
 
 module "network" {
-  source = "../network"
+  source = "./network"
 
   stage    = var.stage
   vpc_cidr = var.vpc_cidr
 }
 
 module "kms" {
-  source = "../kms"
+  source = "./kms"
 
   stage                   = var.stage
   deletion_window_in_days = var.protect_stateful_resources ? 30 : 7
 }
 
 module "database" {
-  source = "../database"
+  source = "./database"
 
   stage             = var.stage
   subnet_ids        = module.network.private_subnet_ids
@@ -51,7 +51,7 @@ module "database" {
 }
 
 module "storage" {
-  source = "../storage"
+  source = "./storage"
 
   stage                  = var.stage
   force_destroy          = !var.protect_stateful_resources
@@ -59,7 +59,7 @@ module "storage" {
 }
 
 module "ingress" {
-  source = "../ingress"
+  source = "./ingress"
 
   stage               = var.stage
   zone_name           = var.zone_name
@@ -79,7 +79,7 @@ resource "aws_ecs_cluster" "this" {
 }
 
 module "provision" {
-  source = "../provision"
+  source = "./provision"
 
   stage      = var.stage
   region     = local.region
@@ -117,7 +117,7 @@ resource "aws_lambda_invocation" "seed" {
 }
 
 module "openbao" {
-  source = "../openbao"
+  source = "./openbao"
 
   stage      = var.stage
   region     = local.region

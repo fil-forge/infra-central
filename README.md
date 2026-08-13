@@ -189,7 +189,7 @@ make publish STAGE=dev
 A stage needs nothing copied from the bootstrap output. It builds the image URL
 from its own account and region, which is the only registry its Lambda can pull
 from anyway; the account ids and the repository name live in
-`terraform/modules/constants`.
+`terraform/modules/shared/constants`.
 
 ### Adding a region
 
@@ -211,10 +211,11 @@ the new region can pin the same digest an existing stage already runs.
 ### Adding an account
 
 Copy a `bootstrap/<account>/` directory, point the new copy's provider at the
-account id it belongs to, and add that id to `terraform/modules/constants` if it
-is not there yet. Every root reads its account id from that module, so an apply
-run with credentials for the wrong account fails at plan time rather than
-building a second working copy of the stage somewhere unexpected.
+account id it belongs to, and add that id to
+`terraform/modules/shared/constants` if it is not there yet. Every root reads
+its account id from that module, so an apply run with credentials for the wrong
+account fails at plan time rather than building a second working copy of the
+stage somewhere unexpected.
 
 ### Bringing up a stage
 
@@ -431,8 +432,8 @@ entrypoint writes to a file, and an environment variable cannot carry a NUL
 byte. A bare DAG-CBOR delegation is binary and contains them, so the container
 never starts and runc reports only the variable's name. The delegator's two
 proofs are therefore stored base64-encoded and decoded on the way to the file,
-which is what `secret_files_base64` on `modules/ecs-service` is for. hilt's
-proof is a `base64+gzip` container, already text, and travels as it is.
+which is what `secret_files_base64` on `modules/shared/ecs-service` is for.
+hilt's proof is a `base64+gzip` container, already text, and travels as it is.
 
 A stage seeded before this needs both parameters replaced, because the seed
 phase leaves an existing proof alone:
@@ -475,12 +476,13 @@ scripts/smoke-test.sh    checks a deployed stage over public HTTPS
 # Infra configuration
 terraform/
   modules/
-    network/  database/  storage/  ingress/  kms/    building blocks
-    provision/  openbao/  ecs-service/
-    platform/                                        composes the above
+    platform/                                        VPC, RDS, OpenBao, ingress
+      network/  database/  storage/  ingress/        building blocks, used
+      kms/  provision/  openbao/                     only by platform
     apps/                                            the six services
+    shared/ecs-service/                              apps, and platform's openbao
+    shared/constants/                                account ids, shared literals
     ecr/                                             forge-central/provision repo
-    constants/                                       account ids, shared literals
   envs/
     bootstrap/<account>/<region>/                    one workspace per registry
     dev/platform/    dev/apps/
@@ -587,6 +589,25 @@ Both roots stay short because `modules/platform` and `modules/apps` hold the
 wiring. That is the point of the split: a stage's root says what differs, and
 nothing else can drift between stages.
 
+The module tree mirrors that split, so each workspace can name the directories
+it depends on:
+
+```
+terraform/modules/
+  platform/                everything the platform workspace builds
+    main.tf                the wiring, calling the seven below
+    network/ kms/ database/ storage/ ingress/ provision/ openbao/
+  apps/                    the six ECS services
+  shared/                  used by more than one workspace
+    ecs-service/           apps, and openbao inside platform
+    constants/             every workspace, bootstrap included
+  ecr/                     bootstrap only
+```
+
+A module used by exactly one workspace lives under that workspace's composite
+module. `shared/` holds the two that genuinely cross the boundary. Adding a
+module therefore never means editing a workspace's trigger patterns.
+
 Chain configuration lives in the **platform** workspace and the apps workspace
 reads it from there, so a stage has one set of contract addresses rather than
 two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
@@ -615,9 +636,15 @@ Then, in the copy:
      supplies to every workspace in the project. Nothing else authenticates to
      AWS: the run assumes the role through OIDC and the credentials expire with
      it.
-   - Trigger patterns covering the stage's own directory and
-     `terraform/modules/**/*`. Without the second one, a module change queues no
-     plan and the stage drifts from the repository without saying so.
+   - Trigger patterns covering the stage's own directory, the composite module
+     the workspace uses, and the shared modules. On `platform`:
+     `terraform/envs/staging/platform/**/*`,
+     `terraform/modules/platform/**/*`, `terraform/modules/shared/**/*`. On
+     `apps`, the same three with `apps` in place of `platform`. Without the
+     module patterns, a module change queues no plan and the stage drifts from
+     the repository without saying so. Pointing them at
+     `terraform/modules/**/*` instead works but plans both workspaces on every
+     module change.
    - On `apps`, a run trigger on the stage's `platform` workspace, so it never
      plans against outputs an in-flight `platform` run is about to change. Also
      turn on **Auto-apply run triggers**, which is a separate setting from
@@ -813,10 +840,11 @@ arbitrary socket, which it treats as an operator's decision rather than an API
 caller's.
 
 The replacement is an `audit` stanza in the server config, which
-`modules/openbao` already renders at task start. Two things need checking before
-it goes in. A device that cannot write makes OpenBao reject requests, so stdout
-under Fargate has to be confirmed as a sink that never blocks or fills. And
-declarative stanzas were not applied at first boot in 2.5.0-beta
+`modules/platform/openbao` already renders at task start. Two things need
+checking before it goes in. A device that cannot write makes OpenBao reject
+requests, so stdout under Fargate has to be confirmed as a sink that never
+blocks or fills. And declarative stanzas were not applied at first boot in
+2.5.0-beta
 ([openbao#2168](https://github.com/openbao/openbao/issues/2168)), so 2.6.0 needs
 verifying against a fresh instance rather than one that has been through a
 `SIGHUP`.

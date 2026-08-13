@@ -27,7 +27,7 @@
 # immutable, with an exclusion filter for any rolling tag a stage follows.
 
 module "constants" {
-  source = "../constants"
+  source = "../shared/constants"
 }
 
 resource "aws_ecr_repository" "provision" {
