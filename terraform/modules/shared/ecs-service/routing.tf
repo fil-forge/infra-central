@@ -100,6 +100,16 @@ resource "aws_service_discovery_service" "this" {
   # none where the configuration declares one, and every plan schedules another
   # replacement that lands in the same state. The deprecation warning is the
   # price of a service that stops being recreated on every apply.
+  #
+  # The deprecation comes from AWS: Cloud Map fixed the custom health check
+  # wait at one 30-second interval and deprecated FailureThreshold in the API,
+  # and provider v6.0.0 mirrored that, promising removal in the next major
+  # version. Until the provider stops warning on the value AWS forces anyway
+  # (https://github.com/hashicorp/terraform-provider-aws/issues/44285) or lets
+  # the argument go without replacing the service
+  # (https://github.com/hashicorp/terraform-provider-aws/pull/43428), the
+  # warning stays. The deprecation itself is documented per
+  # https://github.com/hashicorp/terraform-provider-aws/issues/44291.
   health_check_custom_config {
     failure_threshold = 1
   }

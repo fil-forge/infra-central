@@ -79,6 +79,19 @@ These each cost an afternoon to rediscover.
 - **did:web resolution goes over the public internet.** hilt resolves sprue at
   `https://sprue.<stage>.forge-sandbox.fil.one/.well-known/did.json`, so a task in a private
   subnet reaches the public ALB back out through the NAT gateway.
+- **Every plan warns that `failure_threshold` is deprecated.** Expected, and
+  the alternatives are worse. AWS fixed the Cloud Map custom health check wait
+  at one 30-second interval and deprecated the parameter, but leaving it out
+  makes the provider create the service with no custom health config at all,
+  after which every plan schedules a replacement that lands in the same state.
+  The comment in `terraform/modules/shared/ecs-service/routing.tf` has the
+  full story. The warning goes away when the provider stops warning on the
+  value AWS forces anyway
+  ([#44285](https://github.com/hashicorp/terraform-provider-aws/issues/44285))
+  or lets the argument go without replacing the service
+  ([PR #43428](https://github.com/hashicorp/terraform-provider-aws/pull/43428));
+  [#44291](https://github.com/hashicorp/terraform-provider-aws/issues/44291)
+  got the deprecation documented.
 
 ## What survives a destroy
 
