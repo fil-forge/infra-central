@@ -361,6 +361,14 @@ func (d *deps) storeConnectionStrings(ctx context.Context, databases []dbinit.Da
 
 		// plc takes credentials as a JSON blob rather than a URL, and wants the
 		// port as a string.
+		//
+		// sslmode is no-verify rather than require because plc reaches Postgres
+		// through node-postgres, which verifies the server certificate against
+		// Node's own trust store. That store carries no Amazon RDS root, and the
+		// image has no bundle to point NODE_EXTRA_CA_CERTS at, so require fails
+		// the handshake. The connection is still encrypted, which is what the
+		// instance's rds.force_ssl demands; leaving sslmode out altogether makes
+		// RDS reject the connection with a pg_hba error naming no other cause.
 		if db.Name == "plc" {
 			creds, err := json.Marshal(map[string]string{
 				"username": db.Name,
@@ -368,6 +376,7 @@ func (d *deps) storeConnectionStrings(ctx context.Context, databases []dbinit.Da
 				"host":     d.cfg.DBHost,
 				"port":     fmt.Sprintf("%d", d.cfg.DBPort),
 				"database": db.Name,
+				"sslmode":  "no-verify",
 			})
 			if err != nil {
 				return fmt.Errorf("encode plc credentials: %w", err)
