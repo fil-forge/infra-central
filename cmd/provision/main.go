@@ -23,6 +23,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
@@ -87,6 +88,17 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config: %w", err)
+	}
+
+	deps := &deps{
+		cfg:     cfg,
+		store:   ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
+		secrets: secretsmanager.NewFromConfig(awsCfg),
+	}
+
 	// Every log line here announces the step about to start, never the one
 	// that just finished. A phase fails by hanging at least as often as it
 	// fails by returning an error, and the last line of a hung invocation
@@ -97,8 +109,10 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	slog.Info("starting phase", "phase", req.Phase, "stage", cfg.Stage)
 
 	switch req.Phase {
+	case "vault":
+		return deps.vault(ctx)
 	default:
-		return nil, fmt.Errorf("unknown phase %q; no phase is wired yet", req.Phase)
+		return nil, fmt.Errorf("unknown phase %q; want \"vault\"", req.Phase)
 	}
 }
 
