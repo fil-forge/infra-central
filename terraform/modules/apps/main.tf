@@ -329,6 +329,11 @@ data "aws_iam_policy_document" "delegator" {
     sid = "RegistryTables"
 
     actions = [
+      # The store describes both tables at startup and refuses to run if it
+      # cannot: with no endpoint override it takes a missing table as a sign
+      # it is pointed at the wrong account, rather than creating one.
+      "dynamodb:DescribeTable",
+
       "dynamodb:GetItem",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
