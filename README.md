@@ -32,17 +32,17 @@ appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to unseal at boo
 
 ## Architecture decisions
 
-| Decision                                        | Why                                                                                                                                                                                                                     |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                             |
+| Decision                                        | Why                                                                                                                                                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                     |
 | **SSM Parameter Store, per-service prefixes**   | Each task execution role reads only `/forge-central/<stage>/<service>/*`. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. smelt's 1Password item is all-or-nothing by comparison. |
-| **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                           |
-| **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                       |
+| **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                   |
+| **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                               |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                      |
-| **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                |
-| **Two workspaces per stage**                    | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                    |
-| **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                   |
+| **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                        |
+| **Two workspaces per stage**                    | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                            |
+| **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                        |
+| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                           |
 
 ## What each service needs
 
@@ -155,8 +155,7 @@ AWS credentials are never stored in a workspace. Each run assumes an IAM role
 in the target account through HCP's OIDC federation, and the credentials expire
 with the run.
 
-Prod is not set up yet. It will get the same two workspaces with auto-apply off,
-so a commit to `main` queues a plan an operator confirms.
+Prod is not set up yet.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
@@ -281,27 +280,11 @@ That runs three transactions, the same ones as smelt's
 3. `FilecoinPay.setOperatorApproval(USDFC, FWSS, true, rate, lockup, period)` —
    let warm storage lock it up
 
-**The signing happens inside the provision Lambda, in AWS.** smelt reads the
-payer key out of 1Password and signs with `cast` on the operator's machine;
-doing that here would pull a funded key onto a laptop, which is the property
-this deployment exists to protect. The script only invokes the Lambda.
+**The signing happens inside the `provision` Lambda, in AWS.**
 
-It invokes twice. The first call reads the chain and prints what it would do,
-signing nothing. You then confirm, and the second call broadcasts:
-
-```
-  Payer:          0x1B90…61ED
-  Wallet balance: 10 USDFC
-  Account funds:  0 USDFC
-
-Transactions to broadcast:
-  - approve: let FilecoinPay pull 3 USDFC from 0x1B90…61ED
-  - deposit: credit 3 USDFC to the payer's FilecoinPay account
-  - setOperatorApproval: let 0x0c68…6424 lock up to 3 USDFC at 0.1 USDFC/epoch
-
-These transactions move real funds and cannot be undone.
-Type 'fund' to proceed:
-```
+The script invokes the Lambda twice. The first call reads the chain and prints
+what it would do, signing nothing. You then confirm, and the second call
+broadcasts.
 
 Amounts default to smelt's, which stay under the faucet's daily cap. Override
 them per run:
@@ -448,16 +431,6 @@ proofs are therefore stored base64-encoded and decoded on the way to the file,
 which is what `secret_files_base64` on `modules/shared/ecs-service` is for.
 hilt's proof is a `base64+gzip` container, already text, and travels as it is.
 
-A stage seeded before this needs both parameters replaced, because the seed
-phase leaves an existing proof alone:
-
-```bash
-aws ssm delete-parameter --name /forge-central/dev/delegator/indexing-service-proof
-aws ssm delete-parameter --name /forge-central/dev/delegator/egress-tracking-proof
-```
-
-Then force the seed phase to run again, as when rotating an identity.
-
 ### Rotating hilt's OpenBao credential
 
 ```bash
@@ -539,7 +512,8 @@ Two per-stage settings follow, and this is where they diverge:
 - **`hostname_suffix`** is what that stage's hostnames end with, which for
   non-prod includes the stage label.
 
-The delegation lives in the DNS project, added once per workspace:
+The delegation lives in [fil-one/infrastructure](https://github.com/fil-one/infrastructure)
+project, added once per workspace:
 
 ```hcl
 # non-prod workspace
@@ -562,10 +536,11 @@ with the same pair named `forge` in the prod workspace.
 `proxied = false` matters: these hostnames serve `did:web` documents and
 terminate their own TLS at the ALB, so Cloudflare must not sit in front of them.
 
-**Certificates belong here, not in the DNS project.** The `ingress` module
-issues `*.<hostname_suffix>`, writes the DNS validation records into the
-delegated zone, and waits for validation. Two reasons it cannot be one central
-certificate:
+**Certificates belong here, not in the fil-one/infrastructure project.**
+
+The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
+records into the delegated zone, and waits for validation. Two reasons it
+cannot be one central certificate:
 
 - An ALB needs its certificate in the ALB's own region. A `us-east-1`
   certificate, which is what CloudFront requires, cannot be attached.
@@ -576,15 +551,19 @@ certificate:
 
 A stage is a directory pair under `terraform/envs/`, backed by two HCP
 workspaces. Everything is namespaced by the stage name, so stages coexist in one
-AWS account without colliding: `fc-<stage>-*` resources,
-`/forge-central/<stage>/*` parameters, and
-`<service>.<stage>.forge-sandbox.fil.one` hostnames.
+AWS account without colliding:
+
+- `fc-<stage>-*` resources
+- `/forge-central/<stage>/*` parameters
+- `<service>.<stage>.forge-sandbox.fil.one` hostnames
 
 `fc` is short for forge-central, this repository's own deployment (as opposed to
 deployments of regional nodes). It is kept short because a target group name is
 capped at 32 characters, and `<prefix>-<stage>-signing-service` has to fit
 inside it. Only AWS resource names abbreviate; paths and namespaces spell
 forge-central out, since nothing there is close to a length limit.
+
+Files:
 
 ```
 envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
@@ -663,10 +642,7 @@ Then, in the copy:
      turn on **Auto-apply run triggers**, which is a separate setting from
      auto-apply: without it, a `platform`-only change queues an `apps` plan that
      waits for someone to confirm it.
-   - On `apps`, a sensitive `TFE_TOKEN` environment variable holding a team
-     token that can read the `platform` workspace's state outputs. `tfe_outputs`
-     reads them through the API as the tfe provider, and remote state sharing
-     does not cover that path, so the token is what makes the read work.
+   - On `platform`, allow state sharing with `apps`.
 5. Start the first run by hand from **Actions → Start new run**. Merges take it
    from there.
 
@@ -709,24 +685,27 @@ repository provides none of them. Until it does, an appliance cannot finish
 uploads fail with `CandidateUnavailable` and hilt rejects every tenant in the
 region.
 
-**Three registration writes.** These are runtime state, not configuration, so no
+**Three registration writes.**
+
+These are runtime state, not configuration, so no
 apply creates them. smelt does each one from the operator's machine against the
 box; the equivalents here have no home yet.
 
-| What | Where it lands | Without it |
-| ---- | -------------- | ---------- |
-| The appliance's DID on the delegator's allow list | `fc-<stage>-delegator-allow-list` | `piri init` step 4 calls `/registrar/request-approval`, which refuses any DID not on the list with a `403` |
-| `provider register <did> <url> <proof>` plus `provider weight set` against sprue | sprue's database | uploads fail with `CandidateUnavailable: no storage providers available` |
-| `provider add <did> <region>` against hilt | hilt's database | hilt rejects tenant creation for the region and every `/s3/*` invocation ingot makes |
+| What                                                                             | Where it lands                    | Without it                                                                                                 |
+| -------------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| The appliance's DID on the delegator's allow list                                | `fc-<stage>-delegator-allow-list` | `piri init` step 4 calls `/registrar/request-approval`, which refuses any DID not on the list with a `403` |
+| `provider register <did> <url> <proof>` plus `provider weight set` against sprue | sprue's database                  | uploads fail with `CandidateUnavailable: no storage providers available`                                   |
+| `provider add <did> <region>` against hilt                                       | hilt's database                   | hilt rejects tenant creation for the region and every `/s3/*` invocation ingot makes                       |
 
-smelt implements these as `staging-allowlist-piri`, `staging-register-piri` and
-`staging-register-ingot`, and its runbook is the best statement of the ordering
-and the failure modes.
+smelt ([smelt#11](https://github.com/fil-forge/smelt/pull/11)) implements these
+as `staging-allowlist-piri`, `staging-register-piri` and `staging-register-ingot`,
+and its runbook is the best statement of the ordering and the failure modes.
 
-**Two proofs, one in each direction.** `keygen.Proofs` deliberately issues three
-of smelt's five, and the seed phase could not issue the other two even if it
-wanted to, because both involve a key that does not exist when a stage is
-brought up:
+**Two proofs, one in each direction.**
+
+`keygen.Proofs` deliberately issues three of smelt's five, and the seed phase
+could not issue the other two even if it wanted to, because both involve a key
+that does not exist when a stage is brought up:
 
 - `piri-0-proof` — signed by the appliance's own identity key, audience sprue,
   granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
@@ -739,32 +718,33 @@ brought up:
   DID as input and returned to it.
 
 That asymmetry is the shape of the missing tool: onboarding is a request
-carrying the appliance's two DIDs and its public URL, not another idempotent
-phase that mints from nothing.
+carrying the appliance's two DIDs and its public URL.
 
-**There is no shell to run the admin CLIs in.** smelt reaches sprue and hilt
-with `docker compose exec`. Here both run as Fargate tasks in private subnets
-and `enable_execute_command` is not set on any service, so
-`aws ecs execute-command` does not work either. Three ways out, none of them chosen: turn ECS Exec on and
-accept a documented human path into a task; add a Lambda alongside `provision`
-that performs the writes and issues the hilt proof, reusing its SSM access to
-read hilt's identity; or expose the admin operations over the ALB behind
-authentication, which is the largest change and the only one that also serves a
-self-service future.
+**There is no shell to run the admin CLIs in.**
+
+smelt reaches sprue and hilt with `docker compose exec`. Here both run as
+Fargate tasks in private subnets and `enable_execute_command` is not set on any
+service, so `aws ecs execute-command` does not work either. Three ways out:
+
+- turn ECS Exec on and accept a documented human path into a task
+- add a Lambda alongside `provision` that performs the writes and isues the hilt proof, reusing its
+  SSM access to read hilt's identity;
+- or expose the admin operations over the ALB behind authentication, which is the largest change and
+  the only one that also serves a self-service future.
 
 The delegator's allow list is the exception and can be written today. Its table
 takes a single `did` string as the hash key, so an operator with credentials for
 the account writes the item directly without going near a task, once the item
 shape the delegator reads has been confirmed against its store package.
 
-**Where this belongs is the open question.** The appliance knows its own DIDs
-and its operator runs its bootstrap, which argues for the appliance pulling.
-Every write lands in central's tables and databases, and central holds the key
-that signs the proof going back, which argues for the authority staying here. The
-likely answer is both halves: the appliance presents its DIDs and URL, and
-tooling in this repository performs the three writes and returns the proof.
-Deciding that before the first appliance arrives is cheaper than discovering it
-during one.
+**Where this belongs is the open question.**
+
+The appliance knows its own DIDs and its operator runs its bootstrap, which argues for the appliance
+pulling. Every write lands in central's tables and databases, and central holds the key that signs
+the proof going back, which argues for the authority staying here. The likely answer is both halves:
+the appliance presents its DIDs and URL, and tooling in this repository performs the three writes
+and returns the proof. Deciding that before the first appliance arrives is cheaper than discovering
+it during one.
 
 ### hilt should authenticate to OpenBao with AWS IAM auth
 
@@ -786,23 +766,6 @@ Note that CIDR binding does not substitute for this. A Fargate task has no
 stable address, so `token_bound_cidrs` on the VPC's private subnets separates
 the VPC from the internet but not hilt from sprue. It is applied as a coarse
 control, not as the identity boundary.
-
-### ucantool needs an importable delegation API
-
-The provision Lambda cannot generate the delegator's and hilt's startup proofs
-until `ucantool`'s `delegate` logic is callable as a library. Today it lives in
-`package cmd` behind cobra flag globals, and the CLI takes the issuer key as a
-file path, which would mean writing private keys to `/tmp` to use it.
-
-Nothing is blocked: there is no `internal/` package in the way and every
-cryptographic step is already exported ucantone API. The work is a move, not a
-rewrite. The proposal is a `pkg/ucandelegate` taking a signer or PEM bytes, a
-`pkg/ucanctn` for the codec mapping currently duplicated in two files, and
-`cmd/delegate.go` reduced to a flag binder.
-
-One behaviour has to survive exactly: the CLI writes textual container codecs
-with a trailing newline and raw codecs without, and smelt's committed proof
-files reflect that.
 
 ### Publish the provision image from CI
 
@@ -873,7 +836,7 @@ warranted is the RFC's own open question.
 
 ## Related
 
-- [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
+- [smelt#11](https://github.com/fil-forge/smelt/pull/11) — the single-VM Docker Compose
   deployment this replaces, and the source of the key generation code.
 - [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) — regional security
   and key management, which makes this OpenBao the root of trust for
