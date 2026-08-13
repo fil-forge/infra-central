@@ -1,9 +1,10 @@
 # The object and key-value stores two services need, replacing smelt's MinIO
 # and local DynamoDB.
 #
-# Sprue reaches S3 through its task role rather than static credentials, so its
-# storage.s3.endpoint stays empty and the AWS default credential chain applies.
-# That removes the MinIO root user and password from the design entirely.
+# Sprue reaches S3 through its task role rather than static credentials: the
+# apps module sets its storage.s3.endpoint empty, so the AWS default credential
+# chain applies. That removes the MinIO root user and password from the design
+# entirely.
 
 locals {
   name = "fc-${var.stage}"

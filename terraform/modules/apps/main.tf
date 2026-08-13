@@ -74,9 +74,14 @@ module "sprue" {
 
     SPRUE_STORAGE_TYPE = "postgres"
 
-    # No endpoint means the AWS default credential chain, so S3 is reached
-    # through the task role and there are no static keys anywhere. This is what
-    # replaces smelt's MinIO root user and password.
+    # An empty endpoint means real S3: the AWS default credential chain applies,
+    # so the bucket is reached through the task role and there are no static
+    # keys anywhere. This is what replaces smelt's MinIO root user and password.
+    #
+    # It has to be set rather than left out. sprue defaults the endpoint to
+    # http://minio:9000, and a task inheriting that default resolves bucket
+    # names against a host that does not exist in the VPC.
+    SPRUE_STORAGE_S3_ENDPOINT             = ""
     SPRUE_STORAGE_S3_REGION               = local.region
     SPRUE_STORAGE_S3_AGENT_MESSAGE_BUCKET = var.bucket_names["agent-message"]
     SPRUE_STORAGE_S3_DELEGATION_BUCKET    = var.bucket_names["delegation"]
