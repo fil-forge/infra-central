@@ -53,6 +53,11 @@ resource "aws_db_instance" "this" {
   auto_minor_version_upgrade   = true
   performance_insights_enabled = var.performance_insights_enabled
 
+  # Stated rather than left to the provider, so neither a console change nor a
+  # default moving underneath us can put the instance on paid retention. Null
+  # when the feature is off, which is what the API expects.
+  performance_insights_retention_period = var.performance_insights_enabled ? 7 : null
+
   tags = { Name = local.name }
 
   lifecycle {

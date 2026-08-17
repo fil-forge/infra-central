@@ -60,6 +60,15 @@ variable "skip_final_snapshot" {
 }
 
 variable "performance_insights_enabled" {
-  type    = bool
-  default = false
+  description = <<-EOT
+    Performance Insights on the instance. On by default: at the seven-day
+    retention pinned in main.tf it is free, Postgres has no instance-class
+    restriction on it, and this is a shared instance where "which service is
+    holding the connections" is otherwise guesswork.
+
+    AWS folded the Performance Insights console into CloudWatch Database
+    Insights in 2026. These parameters still drive it and still bill the same.
+  EOT
+  type        = bool
+  default     = true
 }
