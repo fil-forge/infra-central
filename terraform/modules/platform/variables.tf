@@ -67,6 +67,18 @@ variable "protect_stateful_resources" {
   default     = true
 }
 
+variable "az_count" {
+  description = "Availability zones the stage spans. Two is the minimum RDS multi-AZ and the ALB require. Read the network module's variable of the same name before changing this on a stage that exists: it is a create-time decision, and getting it wrong replaces the database."
+  type        = number
+  default     = 2
+}
+
+variable "nat_gateway_per_az" {
+  description = "One NAT gateway per availability zone instead of a single shared one. Removes the stage's one egress point of failure at roughly az_count times the cost, and unlike az_count is safe to change on a live stage."
+  type        = bool
+  default     = false
+}
+
 variable "openbao_image" {
   type    = string
   default = "openbao/openbao:2.6.0"

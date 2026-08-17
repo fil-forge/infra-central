@@ -24,8 +24,10 @@ locals {
 module "network" {
   source = "./network"
 
-  stage    = var.stage
-  vpc_cidr = var.vpc_cidr
+  stage              = var.stage
+  vpc_cidr           = var.vpc_cidr
+  az_count           = var.az_count
+  nat_gateway_per_az = var.nat_gateway_per_az
 }
 
 module "kms" {
