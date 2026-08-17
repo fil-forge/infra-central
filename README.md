@@ -886,6 +886,39 @@ tasks. Nobody has added it up, so there is no figure to weigh against multi-AZ
 in prod, a second non-prod stage, or leaving a sandbox stage running over a
 weekend.
 
+### Database passwords are static and per-service
+
+The seed phase mints one Postgres password per service and leaves it in SSM,
+where it stays until somebody rotates it by hand. RDS IAM authentication would
+replace each one with a token minted from the task role and good for fifteen
+minutes, so there would be no standing database credential to store, distribute
+or leak. It is not a Terraform-only change: the roles need `rds_iam` granted,
+the services need to assemble a DSN at startup rather than read a finished one
+from SSM, and each driver needs checking for whether it can refresh a token
+under a connection pool that outlives it.
+
+### Postgres TLS rides on an engine default
+
+Connections are encrypted because RDS Postgres 16 ships `rds.force_ssl=1` and
+the instance uses the default parameter group, which pins nothing. A parameter
+group owned here, saying so explicitly, would survive that default changing
+under a future engine upgrade. Note what it would not buy: the services connect
+with `sslmode=require`, and plc with `no-verify`, which encrypts without
+checking who is on the other end. Certificate verification means shipping the
+RDS bundle and moving to `verify-full`, which is work in each service rather
+than here.
+
+### The database shares subnets with the services it serves
+
+RDS sits in the same private subnets as every task and the provision Lambda.
+The separation is entirely the security group's: 5432 admits the service group
+and the Lambda group, and nothing else. That is a real control but a single one,
+where dedicated subnets with no route out would make the boundary structural.
+Moving a live instance is not possible — a new subnet group replaces it, and
+this instance is OpenBao's storage — so this is either a decision taken when the
+next stage is built from scratch, or it is the paragraph that says the existing
+arrangement was chosen rather than overlooked.
+
 ## Related
 
 - [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
