@@ -30,3 +30,9 @@ variable "deletion_protection" {
   type    = bool
   default = true
 }
+
+variable "access_log_retention_days" {
+  description = "How long ALB access logs are kept. Longer than the service logs on purpose: these are what an investigation starts from, and an incident is often noticed well after the request that caused it."
+  type        = number
+  default     = 90
+}

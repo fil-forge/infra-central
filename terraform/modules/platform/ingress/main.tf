@@ -34,6 +34,16 @@ resource "aws_lb" "this" {
   # sends is affected.
   drop_invalid_header_fields = true
 
+  access_logs {
+    bucket  = aws_s3_bucket.access_logs.id
+    enabled = true
+  }
+
+  # Turning access logs on makes ELB test-write to the bucket immediately, which
+  # fails unless the policy granting it is already in place. Referencing the
+  # bucket does not order that on its own.
+  depends_on = [aws_s3_bucket_policy.access_logs]
+
   tags = { Name = local.name }
 }
 
