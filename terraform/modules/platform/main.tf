@@ -58,6 +58,7 @@ module "storage" {
   stage                  = var.stage
   force_destroy          = !var.protect_stateful_resources
   point_in_time_recovery = var.protect_stateful_resources
+  deletion_protection    = var.protect_stateful_resources
 }
 
 module "ingress" {
