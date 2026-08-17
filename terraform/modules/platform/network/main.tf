@@ -24,6 +24,8 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_region" "current" {}
+
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -134,6 +136,24 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private[var.nat_gateway_per_az ? index(local.azs, each.key) : 0].id
+}
+
+# Sprue's bucket traffic would otherwise leave through the NAT gateway: metered
+# by the gigabyte, and an odd dependency of an upload on the egress path. A
+# gateway endpoint costs nothing and keeps it inside AWS. Attached to the public
+# table too, which is free and covers anything ever placed there.
+#
+# This does not fight the inline route blocks above. The provider ignores
+# endpoint-managed (vpce-) routes when it reads a route table, which is only
+# true of the gateway association below — writing the same route as an
+# aws_route resource would collide with the authoritative inline sets.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.${data.aws_region.current.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = concat([aws_route_table.public.id], aws_route_table.private[*].id)
+
+  tags = { Name = "${local.name}-s3" }
 }
 
 # Private DNS for service-to-service calls that do not need a public identity:
