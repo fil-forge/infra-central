@@ -119,4 +119,8 @@ module "platform" {
   openbao_max_parallel = 24
 
   container_insights = true
+
+  # Two static addresses an appliance operator can allowlist once, and an edge
+  # that takes a flood before the load balancer does. Dev has neither need.
+  enable_global_accelerator = true
 }
