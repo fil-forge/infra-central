@@ -27,6 +27,13 @@ resource "aws_lb" "this" {
 
   enable_deletion_protection = var.deletion_protection
 
+  # A header whose name is not valid HTTP is dropped rather than passed on.
+  # This closes the request-smuggling class where the ALB and the service
+  # behind it disagree about where one request ends and the next begins.
+  # Underscores stay legal, so nothing the services or a did:web resolver
+  # sends is affected.
+  drop_invalid_header_fields = true
+
   tags = { Name = local.name }
 }
 
