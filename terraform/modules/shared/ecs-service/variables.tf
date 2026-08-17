@@ -199,3 +199,20 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "tmp_size_mib" {
+  description = <<-EOT
+    Size of the /tmp tmpfs, the container's only writable path. The default
+    covers what the entrypoint wrapper puts there — a few identity keys, the
+    delegator's two proofs, OpenBao's rendered config — which together are
+    kilobytes.
+
+    Raise it for a service that needs real scratch space. Note the failure is
+    not always at startup: a service that buffers to /tmp under load hits
+    ENOSPC when it fills, not when it boots. tmpfs pages count against the
+    task's memory limit as they are used, not when the mount is created, so
+    the cap is what a runaway writer hits rather than a reservation.
+  EOT
+  type        = number
+  default     = 10
+}

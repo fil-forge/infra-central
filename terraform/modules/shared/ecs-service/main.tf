@@ -6,8 +6,9 @@
 # variables, while hilt and swarf accept their identity key only as a file path
 # and the delegator's UCAN proofs are file-only in current code. Rather than
 # mounting a volume or shipping a sidecar, the container writes what it needs to
-# a tmpfs at startup and then execs the real process. A binary secret arrives
-# base64-encoded, because an environment variable cannot carry a NUL byte.
+# the /tmp tmpfs at startup and then execs the real process. A binary secret
+# arrives base64-encoded, because an environment variable cannot carry a NUL
+# byte.
 #
 # The IAM scoping is per service, not per stage. Each execution role can read
 # only /forge-central/<stage>/<service>/*, so a compromised sprue task cannot
@@ -19,13 +20,12 @@ locals {
   # Every file-borne secret lands in one directory, so the path is a single
   # known one rather than something derived from the caller's filenames.
   #
-  # Under /tmp because that is the only directory an image is relied on to
-  # leave world-writable. A Fargate ephemeral volume mounts root-owned with no
-  # uid or gid option, so mounting one here would lock out every container that
-  # does not run as root, and the delegator and the signing service both end
-  # their images with USER nobody. The container filesystem carries the same
-  # AES-256 encryption and dies with the task either way, so the volume bought
-  # nothing the write into /tmp does not already have.
+  # Under /tmp because the task definition mounts a tmpfs there, which is what
+  # lets the root filesystem be read-only. Secrets written to it live in memory
+  # and never touch the task's ephemeral disk. An ephemeral volume could not do
+  # this job: volumes mount root-owned with no uid or gid option, and the
+  # delegator and the signing service both end their images with USER nobody,
+  # whereas a tmpfs takes mode=1777 and stays writable for them.
   secret_dir = "/tmp/forge"
 
   # format() rather than interpolation because these are *shell* variable
@@ -86,6 +86,22 @@ resource "aws_ecs_task_definition" "this" {
           containerPort = var.container_port
           protocol      = "tcp"
         }]
+
+        # Nothing writes to the image. The only writable path is the tmpfs
+        # below, which is memory-backed, size-capped and gone when the task is,
+        # so neither a compromised process nor a careless one can leave
+        # anything behind on disk. mode=1777 because Fargate mounts a tmpfs
+        # root-owned and two of the images run as USER nobody; the sticky bit
+        # keeps it from being a shared scratch space between them.
+        readonlyRootFilesystem = true
+
+        linuxParameters = {
+          tmpfs = [{
+            containerPath = "/tmp"
+            size          = var.tmp_size_mib
+            mountOptions  = ["mode=1777"]
+          }]
+        }
 
         environment = [
           for key, value in var.environment : { name = key, value = value }
