@@ -9,8 +9,15 @@
 locals {
   name = "fc-${var.stage}"
 
-  # Two AZs is the minimum RDS multi-AZ and the ALB both require.
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  # Two AZs is the minimum RDS multi-AZ and the ALB both require; a stage that
+  # wants to survive losing one sets az_count higher. Read that variable's
+  # description before changing it on a stage that already exists.
+  azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+
+  # NAT gateways and private route tables are index-aligned: table N routes
+  # through gateway N, which lives in AZ N. With nat_gateway_per_az off there
+  # is one of each and every private subnet points at index 0.
+  nat_count = var.nat_gateway_per_az ? var.az_count : 1
 }
 
 data "aws_availability_zones" "available" {
@@ -46,25 +53,31 @@ resource "aws_subnet" "private" {
 
   vpc_id            = aws_vpc.this.id
   availability_zone = each.key
-  cidr_block        = cidrsubnet(var.vpc_cidr, 4, each.value + length(local.azs))
+  cidr_block        = cidrsubnet(var.vpc_cidr, 4, each.value + var.az_count)
 
   tags = { Name = "${local.name}-private-${each.key}" }
 }
 
-# One NAT gateway rather than one per AZ. It is a single point of failure for
-# egress and roughly halves the standing cost; raising it to one per AZ is a
-# per-stage decision rather than a rewrite.
+# How many NAT gateways a stage runs is nat_gateway_per_az's decision: one
+# shared gateway is a single point of failure for egress at roughly half the
+# standing cost, one per AZ survives losing a zone. The names below keep their
+# unsuffixed form in the shared layout so a stage that has never turned this on
+# sees no churn.
 resource "aws_eip" "nat" {
+  count = local.nat_count
+
   domain = "vpc"
-  tags   = { Name = "${local.name}-nat" }
+  tags   = { Name = var.nat_gateway_per_az ? "${local.name}-nat-${local.azs[count.index]}" : "${local.name}-nat" }
 }
 
 resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[local.azs[0]].id
+  count = local.nat_count
+
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[local.azs[count.index]].id
   depends_on    = [aws_internet_gateway.this]
 
-  tags = { Name = local.name }
+  tags = { Name = var.nat_gateway_per_az ? "${local.name}-${local.azs[count.index]}" : local.name }
 }
 
 resource "aws_route_table" "public" {
@@ -79,14 +92,34 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table" "private" {
+  count = local.nat_count
+
   vpc_id = aws_vpc.this.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this.id
+    nat_gateway_id = aws_nat_gateway.this[count.index].id
   }
 
-  tags = { Name = "${local.name}-private" }
+  tags = { Name = var.nat_gateway_per_az ? "${local.name}-private-${local.azs[count.index]}" : "${local.name}-private" }
+}
+
+# These three were single resources when every stage shared one NAT gateway.
+# Pinning the existing objects to index 0 keeps a stage that is already up from
+# tearing its egress path down and back up to gain a count.
+moved {
+  from = aws_eip.nat
+  to   = aws_eip.nat[0]
+}
+
+moved {
+  from = aws_nat_gateway.this
+  to   = aws_nat_gateway.this[0]
+}
+
+moved {
+  from = aws_route_table.private
+  to   = aws_route_table.private[0]
 }
 
 resource "aws_route_table_association" "public" {
@@ -100,7 +133,7 @@ resource "aws_route_table_association" "private" {
   for_each = aws_subnet.private
 
   subnet_id      = each.value.id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[var.nat_gateway_per_az ? index(local.azs, each.key) : 0].id
 }
 
 # Private DNS for service-to-service calls that do not need a public identity:
