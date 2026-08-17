@@ -95,6 +95,16 @@ module "platform" {
 
   chain = var.chain
 
+  # Three availability zones with a NAT gateway in each, where dev accepts two
+  # and a single shared gateway. Appliances depend on this stage being
+  # reachable, so losing a zone must not cost it egress.
+  #
+  # az_count is fixed when the stage is created. Changing it later renumbers
+  # the private subnets and replaces the database along with them; see the
+  # network module's variable description before touching it.
+  az_count           = 3
+  nat_gateway_per_az = true
+
   db_instance_class        = "db.t4g.small"
   db_allocated_storage     = 50
   db_multi_az              = true
