@@ -79,6 +79,12 @@ variable "nat_gateway_per_az" {
   default     = false
 }
 
+variable "enable_global_accelerator" {
+  description = "Front the ALB with Global Accelerator for static anycast addresses and edge termination. Worth its standing charge on a stage regional appliances dial into, not on one nothing does."
+  type        = bool
+  default     = false
+}
+
 variable "openbao_image" {
   type    = string
   default = "openbao/openbao:2.6.0"

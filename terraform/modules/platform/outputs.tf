@@ -40,12 +40,16 @@ output "listener_arn" {
   value = module.ingress.listener_arn
 }
 
+# Still named for the load balancer, because that is the name the apps
+# workspace reads them by through tfe_outputs. On a stage running Global
+# Accelerator they carry the accelerator instead, and every service alias
+# follows without the apps module knowing the difference.
 output "alb_dns_name" {
-  value = module.ingress.dns_name
+  value = module.ingress.public_dns_name
 }
 
 output "alb_zone_id" {
-  value = module.ingress.zone_id
+  value = module.ingress.public_zone_id
 }
 
 output "route53_zone_id" {

@@ -64,12 +64,13 @@ module "storage" {
 module "ingress" {
   source = "./ingress"
 
-  stage               = var.stage
-  zone_name           = var.zone_name
-  hostname_suffix     = var.hostname_suffix
-  public_subnet_ids   = module.network.public_subnet_ids
-  security_group_id   = module.network.alb_security_group_id
-  deletion_protection = var.protect_stateful_resources
+  stage                     = var.stage
+  zone_name                 = var.zone_name
+  hostname_suffix           = var.hostname_suffix
+  public_subnet_ids         = module.network.public_subnet_ids
+  security_group_id         = module.network.alb_security_group_id
+  deletion_protection       = var.protect_stateful_resources
+  enable_global_accelerator = var.enable_global_accelerator
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -142,8 +143,8 @@ module "openbao" {
   listener_arn      = module.ingress.listener_arn
   listener_priority = 100
   route53_zone_id   = module.ingress.route53_zone_id
-  alb_dns_name      = module.ingress.dns_name
-  alb_zone_id       = module.ingress.zone_id
+  alb_dns_name      = module.ingress.public_dns_name
+  alb_zone_id       = module.ingress.public_zone_id
 
   namespace_id   = module.network.namespace_id
   namespace_name = module.network.namespace_name
