@@ -42,3 +42,9 @@ variable "nat_gateway_per_az" {
   type        = bool
   default     = false
 }
+
+variable "flow_log_retention_days" {
+  description = "How long VPC flow logs are kept. They are the only record of traffic a security group dropped, which is worth having for longer than a debugging session but is not an audit artifact."
+  type        = number
+  default     = 30
+}

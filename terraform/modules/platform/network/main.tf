@@ -156,6 +156,24 @@ resource "aws_vpc_endpoint" "s3" {
   tags = { Name = "${local.name}-s3" }
 }
 
+# Flow logs answer the question a security group never does: what was dropped.
+# Every debugging session that ends in "the group was right after all" started
+# without them.
+resource "aws_cloudwatch_log_group" "flow_logs" {
+  name              = "/forge-central/${var.stage}/vpc-flow-logs"
+  retention_in_days = var.flow_log_retention_days
+}
+
+resource "aws_flow_log" "this" {
+  vpc_id               = aws_vpc.this.id
+  traffic_type         = "ALL"
+  log_destination_type = "cloud-watch-logs"
+  log_destination      = aws_cloudwatch_log_group.flow_logs.arn
+  iam_role_arn         = aws_iam_role.flow_logs.arn
+
+  tags = { Name = local.name }
+}
+
 # Private DNS for service-to-service calls that do not need a public identity:
 # plc, which smelt also keeps unrouted, and OpenBao's internal address for hilt.
 resource "aws_service_discovery_private_dns_namespace" "internal" {
