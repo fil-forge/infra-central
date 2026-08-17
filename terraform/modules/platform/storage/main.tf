@@ -60,9 +60,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 # The delegator's two tables. It uses no Postgres at all, and creates neither
 # table itself, so both have to exist before it starts.
 resource "aws_dynamodb_table" "allow_list" {
-  name         = "${local.name}-delegator-allow-list"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "did"
+  name                        = "${local.name}-delegator-allow-list"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "did"
+  deletion_protection_enabled = var.deletion_protection
 
   attribute {
     name = "did"
@@ -77,9 +78,10 @@ resource "aws_dynamodb_table" "allow_list" {
 }
 
 resource "aws_dynamodb_table" "provider_info" {
-  name         = "${local.name}-delegator-provider-info"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "provider"
+  name                        = "${local.name}-delegator-provider-info"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "provider"
+  deletion_protection_enabled = var.deletion_protection
 
   attribute {
     name = "provider"

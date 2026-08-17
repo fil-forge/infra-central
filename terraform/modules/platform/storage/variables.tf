@@ -8,6 +8,12 @@ variable "force_destroy" {
   default     = false
 }
 
+variable "deletion_protection" {
+  description = "Refuse DeleteTable on the delegator's tables. Same trade as point_in_time_recovery: continuous backups make a wrong write recoverable, this makes the table itself hard to lose in the first place, and a stage meant to be thrown away wants neither."
+  type        = bool
+  default     = true
+}
+
 variable "point_in_time_recovery" {
   description = "Continuous backups on the delegator's tables. The allow list gates which storage providers may register, so losing it costs a re-approval of every provider; a stage that is meant to be thrown away does not pay for that."
   type        = bool
