@@ -15,8 +15,6 @@
 #   auth       hilt gets an AppRole scoped to its own mount, not the root token.
 
 locals {
-  name = "fc-${var.stage}-openbao"
-
   config_path = "/tmp/forge/openbao.hcl"
 
   # Written by the entrypoint rather than baked into the image because the
