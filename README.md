@@ -845,6 +845,10 @@ deployed by editing `image_digests` here.
 
 The receiver accepts all six service names, so wiring one up is a dispatch step
 in its publish workflow plus the `fil-forge-bot` credentials in that repository.
+It only accepts dispatches made as that app, and the `source_repo` in the
+payload has to be the repository the service is published from, so the required
+`client_payload` is `service`, `digest` and `source_repo`; `commit`, `pr_url`
+and `run_url` are provenance links the commit message uses when present.
 
 Prod stays manual either way: a promotion is a digest copied deliberately, and a
 reviewable diff is the point.

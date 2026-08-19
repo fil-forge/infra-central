@@ -28,11 +28,24 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Not GITHUB_TOKEN: a pull request it opens does not trigger workflows, so
+      # the checks auto-merge waits on would never start. Minted before the
+      # request is validated because the actor check below needs the app's slug.
+      - name: Mint fil-forge-bot token
+        id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.FORGE_BOT_APP_ID }}
+          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
       # client_payload is untrusted input: every field reaches the shell through
       # env, never through ${{ }} interpolation into a script body.
       - name: Validate the request
         id: req
         env:
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          APP_SLUG: ${{ steps.bot.outputs.app-slug }}
           SERVICE: ${{ github.event.client_payload.service || inputs.service }}
           DIGEST: ${{ github.event.client_payload.digest || inputs.digest }}
           SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
@@ -41,8 +54,15 @@ jobs:
           RUN_URL: ${{ github.event.client_payload.run_url }}
         run: |
           set -euo pipefail
+          # The repository each service publishes from, mirroring the ghcr.io
+          # paths in terraform/modules/apps/main.tf.
           case "$SERVICE" in
-            sprue|hilt|swarf|delegator|signing_service|plc) ;;
+            sprue)           publisher=fil-forge/sprue ;;
+            hilt)            publisher=fil-forge/hilt ;;
+            swarf)           publisher=fil-forge/swarf ;;
+            delegator)       publisher=fil-forge/delegator ;;
+            signing_service) publisher=fil-forge/piri-signing-service ;;
+            plc)             publisher=fil-forge/did-method-plc ;;
             *) echo "::error::unknown service '$SERVICE'"; exit 1 ;;
           esac
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
@@ -59,6 +79,23 @@ jobs:
               || { echo "::error::malformed url '$url'"; exit 1; }
           done
 
+          # The commit message links to $SOURCE_REPO/commit/$COMMIT, so the two
+          # fields are only meaningful together.
+          [[ -z "$COMMIT" || -n "$SOURCE_REPO" ]] \
+            || { echo "::error::commit given without source_repo"; exit 1; }
+
+          if [ "$EVENT" = repository_dispatch ]; then
+            # Anyone holding a token with write access here can dispatch. This
+            # is the boundary that keeps that to the publish workflows.
+            [ "$ACTOR" = "${APP_SLUG}[bot]" ] \
+              || { echo "::error::dispatch from '$ACTOR', expected ${APP_SLUG}[bot]"; exit 1; }
+            # Every publisher shares that one app installation, so the payload
+            # is self-reported and this pairing catches a misconfigured publish
+            # workflow rather than a lying one.
+            [ "$SOURCE_REPO" = "$publisher" ] \
+              || { echo "::error::$SERVICE is published from $publisher, not '$SOURCE_REPO'"; exit 1; }
+          fi
+
           {
             echo "service=$SERVICE"
             echo "digest=$DIGEST"
@@ -68,15 +105,6 @@ jobs:
             echo "run_url=$RUN_URL"
             echo "branch=bot/bump-$SERVICE-image-dev"
           } >> "$GITHUB_OUTPUT"
-
-      # Not GITHUB_TOKEN: a pull request it opens does not trigger workflows, so
-      # the checks auto-merge waits on would never start.
-      - name: Mint fil-forge-bot token
-        id: bot
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.FORGE_BOT_APP_ID }}
-          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
