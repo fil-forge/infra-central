@@ -168,6 +168,21 @@ its account id from that module, so an apply run with credentials for the wrong
 account fails at plan time rather than building a second working copy of the
 stage somewhere unexpected.
 
+### Iterating on the provision Lambda
+
+```bash
+make publish STAGE=dev
+```
+
+That writes the new digest into the stage's `image.auto.tfvars`, so there is no
+line to edit by hand. **Commit that file and merge it.** The stage plans in HCP,
+which sees only what is in version control, so a digest left on your machine is
+applied nowhere.
+
+Promoting the same image to prod will be a copy of that digest into
+`terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
+change is ready rather than as a side effect of a build.
+
 ## Development
 
 ```bash
