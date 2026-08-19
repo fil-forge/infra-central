@@ -1,12 +1,13 @@
-# The provision Lambda and its two phased invocations.
+# The provision Lambda.
 #
 # This is where every secret in the stage is born. Terraform invokes the
 # function and receives DIDs, wallet addresses and database names; the private
 # keys behind them are written straight to SSM and never cross this boundary.
 #
-# Two phases because the dependency is circular: OpenBao stores its data in
-# Postgres, so its database must exist before it starts, but it must be running
-# before it can be configured.
+# The function runs in two phases because the dependency is circular: OpenBao
+# stores its data in Postgres, so its database must exist before it starts, but
+# it must be running before it can be configured. Terraform drives both phases
+# from the calling root; see the note at the end of this file.
 
 locals {
   name = "fc-${var.stage}-provision"
