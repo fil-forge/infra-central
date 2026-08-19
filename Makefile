@@ -12,11 +12,14 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
+# AWS_ACCOUNT and its derivatives expand lazily so that only the targets that
+# reference them (publish, login) call the AWS CLI; `make test` and `make
+# check` stay offline.
 AWS_REGION  ?= us-east-2
 AWS_ACCOUNT ?= $(shell aws sts get-caller-identity --query Account --output text)
 ECR_REPO    ?= forge-central/provision
-ECR_HOST    := $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
-IMAGE       := $(ECR_HOST)/$(ECR_REPO)
+ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
+IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 
 # Where `make publish` records the digest. The file is committed: the stage
 # plans in HCP, which sees only what is in version control. Prod pins its digest
@@ -49,6 +52,7 @@ publish: login builder
 	  if [[ -z "$$digest" || "$$digest" == "null" ]]; then \
 	    echo "no digest in $(METADATA); did the push succeed?" >&2; exit 1; \
 	  fi; \
+	  mkdir -p $(dir $(TFVARS)); \
 	  printf 'provision_image_digest = "%s"\n' "$$digest" > $(TFVARS); \
 	  echo; \
 	  echo "  image  $(IMAGE)@$$digest"; \
