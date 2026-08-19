@@ -109,10 +109,12 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	slog.Info("starting phase", "phase", req.Phase, "stage", cfg.Stage)
 
 	switch req.Phase {
+	case "seed":
+		return deps.seed(ctx)
 	case "vault":
 		return deps.vault(ctx)
 	default:
-		return nil, fmt.Errorf("unknown phase %q; want \"vault\"", req.Phase)
+		return nil, fmt.Errorf("unknown phase %q; want \"seed\" or \"vault\"", req.Phase)
 	}
 }
 

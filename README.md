@@ -183,6 +183,39 @@ Promoting the same image to prod will be a copy of that digest into
 `terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
 change is ready rather than as a side effect of a build.
 
+### Rotating a service identity
+
+Delete the parameter:
+
+```bash
+aws ssm delete-parameter --name /forge-central/dev/swarf/identity
+```
+
+Then force the seed phase to run again. A plain run will not do it: the phase is
+an `aws_lambda_invocation`, which re-invokes only when its input changes, and
+deleting a parameter changes nothing Terraform can see. See [Forcing a provision
+phase to re-run](#forcing-a-provision-phase-to-re-run).
+
+The new DID appears in `service_dids`, and the rotation also refreshes
+`/forge-central/<stage>/<service>/identity.did`, which holds the same value for
+anyone reading it without decryption rights. Anything that had registered the
+old DID has to be told about the new one, which is why this is a deliberate act
+rather than something an apply does on its own.
+
+Rotating an identity that _signs_ a proof — sprue, indexer or etracker —
+re-issues that proof automatically in the same apply, because the old
+delegation would no longer verify against a key that does not exist.
+
+#### Why the delegator's proofs are stored base64
+
+Every proof reaches its consumer as an environment variable that the task's
+entrypoint writes to a file, and an environment variable cannot carry a NUL
+byte. A bare DAG-CBOR delegation is binary and contains them, so the container
+never starts and runc reports only the variable's name. The delegator's two
+proofs are therefore stored base64-encoded and decoded on the way to the file,
+which is what `secret_files_base64` on `modules/shared/ecs-service` is for.
+hilt's proof is a `base64+gzip` container, already text, and travels as it is.
+
 ## Development
 
 ```bash
