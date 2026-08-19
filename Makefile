@@ -4,7 +4,10 @@ test:
 
 .PHONY: check
 check:
-	gofmt -l internal
+	@unformatted=$$(gofmt -l internal); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed for:"; echo "$$unformatted"; exit 1; \
+	fi
 	go vet ./...
 	go test ./...
 	terraform -chdir=terraform fmt -check -recursive
