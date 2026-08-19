@@ -281,9 +281,13 @@ module "delegator" {
     # Both proofs must be files: the inline variants panic in current code.
     REGISTRAR_DELEGATOR_INDEXING_SERVICE_PROOF_FILE        = "${local.keys}/indexing-service-proof.txt"
     REGISTRAR_DELEGATOR_EGRESS_TRACKING_SERVICE_PROOF_FILE = "${local.keys}/egress-tracking-proof.txt"
-    REGISTRAR_DELEGATOR_INDEXING_SERVICE_WEB_DID           = var.indexer_did
-    REGISTRAR_DELEGATOR_EGRESS_TRACKING_SERVICE_DID        = var.etracker_did
-    REGISTRAR_DELEGATOR_UPLOAD_SERVICE_DID                 = local.did.sprue
+
+    # The indexing service is `_WEB_DID` where its neighbours are `_DID`. The
+    # delegator's config struct spells the keys that way, so the asymmetry is
+    # upstream's, and renaming either one here would drop the value.
+    REGISTRAR_DELEGATOR_INDEXING_SERVICE_WEB_DID    = var.indexer_did
+    REGISTRAR_DELEGATOR_EGRESS_TRACKING_SERVICE_DID = var.etracker_did
+    REGISTRAR_DELEGATOR_UPLOAD_SERVICE_DID          = local.did.sprue
 
     REGISTRAR_CONTRACT_CHAIN_CLIENT_ENDPOINT     = var.chain.rpc_url
     REGISTRAR_CONTRACT_PAYMENTS_CONTRACT_ADDRESS = var.chain.contracts.filecoin_pay
