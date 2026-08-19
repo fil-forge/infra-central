@@ -8,10 +8,6 @@
 
 data "aws_caller_identity" "current" {}
 
-# Log delivery in this region comes from the ELB service account rather than a
-# service principal, so the bucket policy names an account ARN.
-data "aws_elb_service_account" "this" {}
-
 resource "aws_s3_bucket" "access_logs" {
   # Account suffix for global uniqueness, matching the storage module's buckets.
   bucket = "${local.name}-alb-logs-${data.aws_caller_identity.current.account_id}"
@@ -59,15 +55,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
   }
 }
 
+# The account ID in the resource path is the whole point of the path: the log
+# delivery principal is shared by every load balancer in the region, so a policy
+# allowing writes anywhere under the bucket would let a load balancer in someone
+# else's account log into ours. AWS documents this path form and documents no
+# condition key to use in its place, and an undocumented condition the delivery
+# service does not send would fail the same silent way a rejected encryption
+# setting does.
 data "aws_iam_policy_document" "access_logs" {
   statement {
     sid       = "ALBLogDelivery"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.access_logs.arn}/*"]
+    resources = ["${aws_s3_bucket.access_logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
 
     principals {
-      type        = "AWS"
-      identifiers = [data.aws_elb_service_account.this.arn]
+      type        = "Service"
+      identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
     }
   }
 }
