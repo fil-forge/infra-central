@@ -25,8 +25,27 @@ locals {
   # request from a push to main. Matched with StringEquals rather than a
   # wildcard: `repo:<owner>/<repo>:*` would make the two roles interchangeable
   # and defeat the split above.
-  plan_subject  = "repo:${var.repository}:pull_request"
-  apply_subject = "repo:${var.repository}:ref:refs/heads/main"
+  #
+  # Two accepted values per role, not one, because GitHub mints the repo segment
+  # of that claim in either of two shapes. A repository created, renamed or
+  # transferred after 2026-07-15 gets the immutable shape, which carries the
+  # owner and repository ids: `repo:<owner>@<owner_id>/<repo>@<repo_id>`. Older
+  # ones keep the plain `repo:<owner>/<repo>`. A trust policy naming only the
+  # plain shape fails on a new repository with AWS's one opaque message for
+  # every trust failure, "Not authorized to perform sts:AssumeRoleWithWebIdentity",
+  # which says nothing about which condition did not match. Listing both means a
+  # repository moving between the two shapes does not lock its own CI out.
+  #
+  # A values list is an OR, so this widens what each role accepts by exactly one
+  # string and keeps the plan/apply split intact.
+  plan_subjects = [
+    "repo:${var.repository}:pull_request",
+    "${var.repository_subject_prefix}:pull_request",
+  ]
+  apply_subjects = [
+    "repo:${var.repository}:ref:refs/heads/main",
+    "${var.repository_subject_prefix}:ref:refs/heads/main",
+  ]
 
   state_bucket_arn = "arn:aws:s3:::${var.state_bucket_name}"
 }
@@ -49,7 +68,7 @@ data "aws_iam_policy_document" "plan_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.plan_subject]
+      values   = local.plan_subjects
     }
   }
 }
@@ -72,7 +91,7 @@ data "aws_iam_policy_document" "apply_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.apply_subject]
+      values   = local.apply_subjects
     }
   }
 }

@@ -38,9 +38,15 @@ module "ecr" {
 module "github_actions_iam" {
   source = "../../../../modules/github-actions-iam"
 
-  repository        = "fil-forge/infra-central"
-  account_id        = module.constants.prod_account_id
-  state_bucket_name = module.tfstate.bucket_name
+  repository = "fil-forge/infra-central"
+
+  # Read from the repository, not composed from its name: GitHub mints the
+  # repo segment of the sub claim with owner and repository ids for a
+  # repository created after 2026-07-15, and this one was. See the variable's
+  # description for the command that prints it.
+  repository_subject_prefix = "repo:fil-forge@280998881/infra-central@1331266425"
+  account_id                = module.constants.prod_account_id
+  state_bucket_name         = module.tfstate.bucket_name
 
   state_key_prefixes = ["prod"]
 }

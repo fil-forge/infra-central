@@ -3,6 +3,17 @@ variable "repository" {
   type        = string
 }
 
+variable "repository_subject_prefix" {
+  description = <<-EOT
+    The `repo:` segment of the `sub` claim GitHub actually mints for this repository, without the trailing event part. Either `repo:<owner>/<repo>` or, for a repository created, renamed or transferred after 2026-07-15, the immutable `repo:<owner>@<owner_id>/<repo>@<repo_id>`.
+
+    Read it rather than composing it, because which shape a repository gets is not derivable from its name:
+
+        gh api /repos/<owner>/<repo>/actions/oidc/customization/sub -q .sub_claim_prefix
+  EOT
+  type        = string
+}
+
 variable "state_bucket_name" {
   description = "The state bucket these roles get access to, from the tfstate module's output. Both roles are granted this bucket and no other."
   type        = string
