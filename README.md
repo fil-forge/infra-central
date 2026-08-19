@@ -105,13 +105,13 @@ forge-central out, since nothing there is close to a length limit.
 Files:
 
 ```
-envs/<stage>/platform/     VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps workspace
   image.auto.tfvars        committed, written by `make publish`
 
-envs/<stage>/apps/         the six ECS services
+terraform/envs/<stage>/apps/       the six ECS services
   main.tf                  reads platform outputs via tfe_outputs
   terraform.tfvars         committed: image digests
 ```
