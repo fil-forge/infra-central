@@ -74,6 +74,17 @@ func TestEVMWalletSerializationRoundTrips(t *testing.T) {
 	}
 }
 
+// A piri wallet file with the wrong Type (e.g. a BLS "secp256k1" mixup) must
+// be rejected outright rather than silently treated as a delegated key.
+func TestParseEVMWalletPiriHexRejectsWrongWalletType(t *testing.T) {
+	walletJSON := `{"Type":"bls","PrivateKey":"` +
+		strings.Repeat("A", 43) + `="}`
+	_, err := ParseEVMWalletPiriHex(hex.EncodeToString([]byte(walletJSON)))
+	if err == nil || !strings.Contains(err.Error(), `unexpected wallet type "bls"`) {
+		t.Errorf("err = %v, want an unexpected-wallet-type error", err)
+	}
+}
+
 // The four vectors published with EIP-55 itself. These pin the keccak-based
 // capitalisation, which is the part of address rendering that fails silently:
 // a wrong-case address still looks like an address.
