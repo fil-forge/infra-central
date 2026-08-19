@@ -28,6 +28,11 @@ func (d *deps) vault(ctx context.Context) (*Response, error) {
 	if d.cfg.OpenBaoAddr == "" {
 		return nil, fmt.Errorf("FORGE_OPENBAO_ADDR is required for the vault phase")
 	}
+	// Refuse to run without CIDR bounds rather than silently create an AppRole
+	// whose secret_id authenticates from anywhere.
+	if len(d.cfg.PrivateCIDRs) == 0 {
+		return nil, fmt.Errorf("FORGE_PRIVATE_CIDRS is required for the vault phase")
+	}
 
 	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
 	if err != nil {
