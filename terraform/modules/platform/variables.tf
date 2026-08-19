@@ -86,8 +86,9 @@ variable "enable_global_accelerator" {
 }
 
 variable "openbao_image" {
-  type    = string
-  default = "openbao/openbao:2.6.0"
+  description = "OpenBao image, pinned by digest so a replacement task can never pull different bytes. The openbao module requires the digest."
+  type        = string
+  default     = "openbao/openbao:2.6.0@sha256:900bb64d0671cd1d82b693c56206f7263b582445f3a3bb6ba6e5213f524a6653"
 }
 
 variable "openbao_max_parallel" {
