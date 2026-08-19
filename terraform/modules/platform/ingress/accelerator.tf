@@ -56,12 +56,11 @@ resource "aws_globalaccelerator_endpoint_group" "this" {
     client_ip_preservation_enabled = true
   }
 
-  # A TCP check, not HTTP. The listener answers 404 to any hostname it does not
-  # recognise, which is the correct behaviour and which an HTTP check would read
-  # as the whole load balancer being unhealthy. Whether a given service is
-  # healthy stays the target groups' question.
-  health_check_protocol         = "TCP"
-  health_check_port             = 443
-  health_check_interval_seconds = 30
-  threshold_count               = 3
+  # No health check settings here: Global Accelerator ignores them for a load
+  # balancer endpoint and takes the load balancer's health from its target
+  # groups, counting the ALB healthy only while every target group has a healthy
+  # target. So one broken service marks the whole endpoint unhealthy — which
+  # costs nothing in this shape, because an endpoint group with no healthy
+  # endpoint left routes to all of them rather than dropping traffic, and this
+  # group holds the one ALB.
 }
