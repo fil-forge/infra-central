@@ -8,7 +8,11 @@ hostname_suffix = "forge.fil.one"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish` prints the line to paste here.
-provision_image_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+#
+# The sentinel is deliberate: a syntactically valid digest would read as a real
+# pin and fail late, while this one fails the plan against the provision
+# module's validation, which names the command to run.
+provision_image_digest = "REPLACE_ME"
 
 # Filecoin mainnet.
 #
