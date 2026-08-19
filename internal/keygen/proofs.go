@@ -95,6 +95,10 @@ func Proofs(did map[string]string) []Proof {
 // API would mean writing a private key to the Lambda's /tmp to satisfy a
 // signature.
 func IssueProof(issuerPEM []byte, proof Proof) (string, error) {
+	if err := validateProof(proof); err != nil {
+		return "", err
+	}
+
 	result, err := ucandelegate.IssueFromPEM(issuerPEM, ucandelegate.Request{
 		IssuerDIDWeb:   proof.issuerDID,
 		Audience:       proof.audience,
@@ -118,4 +122,25 @@ func IssueProof(issuerPEM []byte, proof Proof) (string, error) {
 		return "", fmt.Errorf("encode %s proof: %w", proof.Name, err)
 	}
 	return out.String(), nil
+}
+
+// validateProof rejects a proof with a missing DID or command list before it
+// reaches ucandelegate, where a zero-value field would surface as an opaque
+// parse error. The usual cause is a did map handed to Proofs without an entry
+// for every service.
+func validateProof(proof Proof) error {
+	missing := ""
+	switch {
+	case proof.issuerDID == "":
+		missing = "issuer DID"
+	case proof.audience == "":
+		missing = "audience DID"
+	case proof.subject == "":
+		missing = "subject DID"
+	case len(proof.commands) == 0:
+		missing = "commands"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%s proof for %s: missing %s", proof.Name, proof.Consumer, missing)
 }

@@ -5,14 +5,14 @@
 // because HCP Terraform executes outside the VPC and cannot reach RDS. The
 // Lambda is attached to the private subnets, so it can.
 //
-// The loop is smelt's, and its two properties are worth keeping: creation is
-// conditional, so re-running is harmless, while the password is applied
-// unconditionally, so a rotated secret takes effect without anyone dropping a
-// role.
+// Creation is conditional, so re-running is harmless, while the password is
+// applied unconditionally, so a rotated secret takes effect without anyone
+// dropping a role.
 package dbinit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -20,6 +20,7 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Database is one service's Postgres tenancy. Role name and database name are
@@ -61,7 +62,9 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 		return fmt.Errorf("check role: %w", err)
 	}
 	if !roleExists {
-		if _, err := conn.Exec(ctx, `CREATE ROLE `+quotedName+` WITH LOGIN`); err != nil {
+		// A concurrent run can create the role between the check and here;
+		// duplicate_object means the desired state is reached, not a failure.
+		if _, err := conn.Exec(ctx, `CREATE ROLE `+quotedName+` WITH LOGIN`); err != nil && !isDuplicate(err) {
 			return fmt.Errorf("create role: %w", err)
 		}
 	}
@@ -86,7 +89,7 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 		// implicit transaction.
 		if _, err := conn.Exec(ctx,
 			`CREATE DATABASE `+quotedName+` OWNER `+quotedName,
-		); err != nil {
+		); err != nil && !isDuplicate(err) {
 			return fmt.Errorf("create database: %w", err)
 		}
 	}
@@ -94,9 +97,15 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 	return nil
 }
 
+// isDuplicate reports whether err is Postgres saying the role or database
+// already exists: duplicate_object (42710) or duplicate_database (42P04).
+func isDuplicate(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "42710" || pgErr.Code == "42P04")
+}
+
 // DSN renders a service's connection string. TLS is required: RDS terminates
-// it, and unlike smelt's single-VM deployment the traffic crosses a subnet
-// boundary here.
+// it, and the traffic crosses a subnet boundary.
 func DSN(host string, port int, db Database) string {
 	return connectionString(host, port, db.Name, db.Name, db.Password)
 }

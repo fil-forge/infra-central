@@ -11,6 +11,10 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// piriWalletType is the Type field of the Filecoin wallet JSON that piri
+// expects; secp256k1 keys with EVM addresses are "delegated" (f4) wallets.
+const piriWalletType = "delegated"
+
 // EVMWallet is a freshly-generated secp256k1 key pair. These are real, random
 // keys because they transact against Filecoin, so unlike the local dev stack
 // they cannot be derived from Anvil's publicly known accounts.
@@ -78,6 +82,9 @@ func ParseEVMWalletPiriHex(stored string) (*EVMWallet, error) {
 	if err := json.Unmarshal(raw, &wallet); err != nil {
 		return nil, fmt.Errorf("decode wallet JSON: %w", err)
 	}
+	if wallet.Type != piriWalletType {
+		return nil, fmt.Errorf("unexpected wallet type %q (want %q)", wallet.Type, piriWalletType)
+	}
 	keyBytes, err := base64.StdEncoding.DecodeString(wallet.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("decode wallet private key base64: %w", err)
@@ -117,8 +124,8 @@ func (w *EVMWallet) Hex0x() string {
 // piri's --wallet-file expects:
 // hex({"Type":"delegated","PrivateKey":"<base64 of raw key bytes>"}).
 func (w *EVMWallet) PiriWalletHex() string {
-	walletJSON := fmt.Sprintf(`{"Type":"delegated","PrivateKey":"%s"}`,
-		base64.StdEncoding.EncodeToString(w.priv))
+	walletJSON := fmt.Sprintf(`{"Type":%q,"PrivateKey":"%s"}`,
+		piriWalletType, base64.StdEncoding.EncodeToString(w.priv))
 	return hex.EncodeToString([]byte(walletJSON))
 }
 

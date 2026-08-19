@@ -1,5 +1,4 @@
-// Package ssmstore holds every secret this project generates, replacing the
-// 1Password item that smelt's staging keygen writes to.
+// Package ssmstore holds every secret this project generates.
 //
 // Two rules govern everything here.
 //
@@ -31,9 +30,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
+// api is the slice of the SSM client this package uses, split out so tests can
+// substitute a fake.
+type api interface {
+	GetParameter(ctx context.Context, in *ssm.GetParameterInput, optFns ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+	PutParameter(ctx context.Context, in *ssm.PutParameterInput, optFns ...func(*ssm.Options)) (*ssm.PutParameterOutput, error)
+}
+
 // Store reads and writes one stage's parameters.
 type Store struct {
-	client *ssm.Client
+	client api
 	stage  string
 }
 
@@ -73,8 +79,11 @@ func (s *Store) ensure(
 	generate func() (string, error),
 ) (value string, created bool, err error) {
 	path := s.Path(service, name)
+	// Decryption applies only to SecureStrings; asking for it on a plain
+	// String would couple public reads to KMS for no reason.
+	decrypt := paramType == types.ParameterTypeSecureString
 
-	existing, found, err := s.get(ctx, path, true)
+	existing, found, err := s.get(ctx, path, decrypt)
 	if err != nil {
 		return "", false, err
 	}
@@ -91,7 +100,7 @@ func (s *Store) ensure(
 		// Another concurrent invocation won the race. Its value is now
 		// authoritative; ours is discarded unused.
 		if isAlreadyExists(err) {
-			existing, _, readErr := s.get(ctx, path, true)
+			existing, _, readErr := s.get(ctx, path, decrypt)
 			if readErr != nil {
 				return "", false, readErr
 			}

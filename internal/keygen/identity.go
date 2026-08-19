@@ -21,7 +21,8 @@ import (
 //
 // The two private serializations exist because the services disagree: hilt and
 // swarf read a PEM file, while the delegator and signing service take the
-// multibase form inline as an environment variable.
+// multibase form inline as an environment variable. Unifying the formats is
+// tracked in https://linear.app/filecoin-foundation/issue/FIL-1061.
 //
 // There is no public-key serialization because no service asks for one. The
 // DID carries the public key, and a consumer that needs the raw bytes decodes
