@@ -63,7 +63,7 @@ module "service" {
   security_group_id = var.security_group_id
 
   secrets = {
-    OPENBAO_POSTGRES_DSN = "${var.ssm_prefix}/postgres-dsn"
+    OPENBAO_POSTGRES_DSN = "arn:aws:ssm:${var.region}:${var.account_id}:parameter${var.ssm_prefix}/postgres-dsn"
   }
 
   # TLS terminates at the ALB, so the listener above is plaintext inside the
