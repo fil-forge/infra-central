@@ -97,7 +97,7 @@ output "service_dids" {
 }
 
 output "wallet_addresses" {
-  description = "Wallet name to EIP-55 address. These are the accounts to fund with tFIL and USDFC."
+  description = "Wallet name to EIP-55 address. These are the accounts to fund with FIL — tFIL on Calibration — and USDFC."
   value       = try(local.seed.addresses, {})
 }
 

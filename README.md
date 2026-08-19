@@ -86,6 +86,64 @@ terraform/
     prod/platform/   prod/apps/                    committed, no workspaces yet
 ```
 
+## Stages
+
+A stage is a directory pair under `terraform/envs/`, backed by two HCP
+workspaces. Everything is namespaced by the stage name, so stages coexist in one
+AWS account without colliding:
+
+- `fc-<stage>-*` resources
+- `/forge-central/<stage>/*` parameters
+- `<service>.<stage>.forge-sandbox.fil.one` hostnames
+
+`fc` is short for forge-central, this repository's own deployment (as opposed to
+deployments of regional nodes). It is kept short because a target group name is
+capped at 32 characters, and `<prefix>-<stage>-signing-service` has to fit
+inside it. Only AWS resource names abbreviate; paths and namespaces spell
+forge-central out, since nothing there is close to a length limit.
+
+Files:
+
+```
+terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+  main.tf                  module "platform" plus what this stage overrides
+  terraform.tfvars         committed, non-secret: DNS, chain, contracts
+  outputs.tf               re-exported for the apps workspace
+  image.auto.tfvars        committed, written by `make publish`
+
+terraform/envs/<stage>/apps/       the six ECS services
+  main.tf                  reads platform outputs via tfe_outputs
+  terraform.tfvars         committed: image digests
+```
+
+Both roots stay short because `modules/platform` and `modules/apps` hold the
+wiring. That is the point of the split: a stage's root says what differs, and
+nothing else can drift between stages.
+
+The module tree mirrors that split, so each workspace can name the directories
+it depends on:
+
+```
+terraform/modules/
+  platform/                everything the platform workspace builds
+    main.tf                the wiring, calling the seven below
+    network/ kms/ database/ storage/ ingress/ provision/ openbao/
+  apps/                    the six ECS services
+  shared/                  used by more than one workspace
+    ecs-service/           apps, and openbao inside platform
+    constants/             every workspace, bootstrap included
+  ecr/                     bootstrap only
+```
+
+A module used by exactly one workspace lives under that workspace's composite
+module. `shared/` holds the two that genuinely cross the boundary. Adding a
+module therefore never means editing a workspace's trigger patterns in HCP
+web console.
+
+Chain configuration lives in the **platform** workspace and the apps workspace
+reads it from there, so a stage has one set of contract addresses rather than
+two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
+
 ## DNS
 
 `fil.one` is served by Cloudflare and has no Route53 zone. One subdomain per AWS
@@ -194,6 +252,33 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
 - **[Foundry](https://getfoundry.sh)'s `cast`**, only to read chain balances by
   hand. Nothing in the deploy path needs it.
 
+### How each part is deployed
+
+| Part                   | How it is deployed                                  |
+| ---------------------- | --------------------------------------------------- |
+| `bootstrap` workspaces | `terraform apply` run locally, always               |
+| provision image        | `make publish` run locally, pushed to ECR by hand   |
+| dev `platform`, `apps` | HCP applies every commit to `main`, no confirmation |
+
+The dev stage deploys itself. Both of its workspaces are connected to this
+repository, track `main`, and have auto-apply on, so a merge reaches dev without
+anyone running Terraform. Plans and applies execute on HCP's runners rather than
+on a laptop, which is what keeps a deploy from depending on which Terraform or
+provider version an operator happens to have installed.
+
+`apps` reads `platform` outputs through `tfe_outputs`, so ordering matters:
+`platform` applies first and a run trigger starts `apps` afterwards. A merge
+that touched only one of them runs only that one.
+
+AWS credentials are never stored in a workspace. Each run assumes an IAM role
+in the target account through HCP's OIDC federation, and the credentials expire
+with the run.
+
+Prod is not deployed yet: `terraform/envs/prod/` is committed, but its two HCP
+workspaces have not been created.
+
+See [Planned work](#planned-work) for the manual steps that remain.
+
 ### First time in an account and region
 
 The bootstrap workspaces are always applied locally. They run rarely, once per
@@ -263,6 +348,70 @@ account id it belongs to, and add that id to
 its account id from that module, so an apply run with credentials for the wrong
 account fails at plan time rather than building a second working copy of the
 stage somewhere unexpected.
+
+### Adding a stage
+
+```bash
+cp -r terraform/envs/dev terraform/envs/staging
+```
+
+Then, in the copy:
+
+1. Set the workspace names in both `cloud` blocks to
+   `forge-central-staging-{platform,apps}`.
+2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
+   default tag in both roots.
+3. In `platform/terraform.tfvars`, set `hostname_suffix` to
+   `staging.forge-sandbox.fil.one` and leave `zone_name` alone: the zone is
+   already delegated and shared by every non-prod stage, so the DNS project
+   needs no change. Point the `chain` block at the network this stage
+   transacts against.
+4. Create the two HCP workspaces with those names and working directories, in
+   Remote execution mode, connected to this repository and tracking `main`.
+   They belong to the `Filecoin_Foundation` organization, in the `FilOne`
+   project. Each needs:
+   - `TFC_AWS_PROVIDER_AUTH` and `TFC_AWS_RUN_ROLE_ARN`, which a variable set
+     supplies to every workspace in the project. Nothing else authenticates to
+     AWS: the run assumes the role through OIDC and the credentials expire with
+     it.
+   - Trigger patterns covering the stage's own directory, the composite module
+     the workspace uses, and the shared modules. On `platform`:
+     `terraform/envs/staging/platform/**/*`,
+     `terraform/modules/platform/**/*`, `terraform/modules/shared/**/*`. On
+     `apps`, the same three with `apps` in place of `platform`. Without the
+     module patterns, a module change queues no plan and the stage drifts from
+     the repository without saying so. Pointing them at
+     `terraform/modules/**/*` instead works but plans both workspaces on every
+     module change.
+   - On `apps`, a run trigger on the stage's `platform` workspace, so it never
+     plans against outputs an in-flight `platform` run is about to change. Also
+     turn on **Auto-apply run triggers**, which is a separate setting from
+     auto-apply: without it, a `platform`-only change queues an `apps` plan that
+     waits for someone to confirm it.
+   - On `platform`, allow state sharing with `apps`.
+5. Start the first run by hand from **Actions → Start new run**. Merges take it
+   from there.
+
+Prod will differ from dev inside `main.tf` rather than by being a different
+shape: multi-AZ database, deletion protection on, a larger OpenBao connection
+budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
+is promoted rather than written by whatever was built last.
+
+### Bringing up a stage
+
+Merge the stage's directories to `main`. The `platform` workspace applies the
+VPC, RDS, OpenBao and the secrets; its run trigger then starts `apps`, which
+applies the six services.
+
+The first `platform` apply is slow: it waits for the OpenBao task's cold start
+before it can initialise it, inside a synchronous Lambda call that Lambda caps at
+15 minutes. If it times out there, start the run again — the seed phase
+regenerates nothing that already exists, which is what protects funded wallets.
+
+A new stage's first run usually needs starting by hand, from **Actions → Start
+new run** in the workspace: the workspace is created after its config has already
+landed, so there is no later push for HCP to react to. Everything after that
+arrives on `main`.
 
 ### Funding the wallets
 

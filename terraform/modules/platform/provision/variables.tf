@@ -16,7 +16,7 @@ variable "image_repository_url" {
 }
 
 variable "image_digest" {
-  description = "Manifest digest written by `make publish`, e.g. sha256:abc... Dev reads it from a gitignored image.auto.tfvars; prod commits it."
+  description = "Manifest digest written by `make publish`, e.g. sha256:abc... Dev reads it from the committed image.auto.tfvars that command writes; prod pins it in terraform.tfvars."
   type        = string
 
   validation {
