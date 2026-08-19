@@ -88,7 +88,7 @@ func WaitForUnsealed(ctx context.Context, client *api.Client) error {
 		default:
 			return nil
 		}
-		slog.Info("openbao is not serving yet", "attempt", attempt, "reason", lastErr)
+		slog.Info("openbao is not ready yet", "attempt", attempt, "reason", lastErr)
 
 		select {
 		case <-ctx.Done():
