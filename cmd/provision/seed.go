@@ -14,7 +14,7 @@ import (
 	"github.com/fil-forge/infra-central/internal/keygen"
 )
 
-// identityServices each get an Ed25519 service identity.
+// List of services that need an Ed25519 service identity.
 //
 // indexer and etracker are not deployed today. They exist because the delegator
 // validates two UCAN proofs at startup that must be signed by them, exactly as
@@ -38,15 +38,18 @@ var identityServices = []string{
 // Only these two get the multibase copy. It is the same private key in a second
 // encoding, so writing it for a service that reads the PEM would leave a
 // duplicate of live signing material to guard and to rotate for no reader.
+//
+// See https://linear.app/filecoin-foundation/issue/FIL-1061
 var multibaseServices = map[string]bool{
 	"delegator":       true,
 	"signing-service": true,
 }
 
-// databaseServices each get a Postgres role and database of the same name on
-// the shared instance. openbao is here because it stores its data in Postgres
-// rather than on a volume, which is what lets it survive task replacement.
-var databaseServices = []string{
+// databaseConsumers are the services that each get a Postgres role and
+// database of the same name on the shared instance. openbao is here because it
+// stores its data in Postgres rather than on a volume, which is what lets it
+// survive task replacement.
+var databaseConsumers = []string{
 	"sprue",
 	"hilt",
 	"swarf",
@@ -104,7 +107,7 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		return nil, err
 	}
 
-	slog.Info("ensuring database passwords", "databases", len(databaseServices))
+	slog.Info("ensuring database passwords", "databases", len(databaseConsumers))
 	databases, err := d.seedDatabasePasswords(ctx, resp)
 	if err != nil {
 		return nil, err
@@ -271,7 +274,18 @@ func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
 			return fmt.Errorf("parse stored wallet %s/%s: %w", spec.service, spec.name, err)
 		}
 
-		if err := d.store.PutPublic(ctx, spec.service, spec.name+".address", w.Address); err != nil {
+		// Like the identity DID, the address derives deterministically from
+		// the stored key, so it only needs a write when the key is new. A
+		// rotated key (deleted and re-minted) takes the overwrite branch,
+		// which keeps the published address matching the wallet behind it.
+		if created {
+			err = d.store.PutPublic(ctx, spec.service, spec.name+".address", w.Address)
+		} else {
+			_, _, err = d.store.EnsurePublic(ctx, spec.service, spec.name+".address", func() (string, error) {
+				return w.Address, nil
+			})
+		}
+		if err != nil {
 			return err
 		}
 
@@ -307,8 +321,8 @@ func (d *deps) seedRandomSecrets(ctx context.Context, resp *Response) error {
 }
 
 func (d *deps) seedDatabasePasswords(ctx context.Context, resp *Response) ([]dbinit.Database, error) {
-	databases := make([]dbinit.Database, 0, len(databaseServices))
-	for _, service := range databaseServices {
+	databases := make([]dbinit.Database, 0, len(databaseConsumers))
+	for _, service := range databaseConsumers {
 		password, created, err := d.store.EnsureSecret(ctx, service, "postgres-password", keygen.RandomHex)
 		if err != nil {
 			return nil, fmt.Errorf("ensure postgres password for %s: %w", service, err)
