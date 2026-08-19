@@ -69,7 +69,7 @@ SSM parameter paths; both spellings refer to the same service.
 | -------------------- | ---- | -------------- | -------- | ---------------------------- |
 | sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
 | hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
-| swarf                | 8080 | `/health`      | yes      | SSE firehose endpoint        |
+| swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
 | delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
 | piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
 | plc                  | 3000 | `/_health`     | yes      | internal only                |
