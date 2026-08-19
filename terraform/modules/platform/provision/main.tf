@@ -29,6 +29,14 @@ resource "aws_lambda_function" "this" {
   timeout     = 600
   memory_size = 512
 
+  # Naming the log group here rather than letting AWS create it on the first
+  # invocation is what makes the retention setting stick: an auto-created group
+  # keeps logs forever, and the resource below then collides with it.
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.this.name
+  }
+
   vpc_config {
     subnet_ids         = var.subnet_ids
     security_group_ids = [var.security_group_id]
