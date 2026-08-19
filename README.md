@@ -144,6 +144,44 @@ cannot be one central certificate:
 - A wildcard covers exactly one label, so `*.forge-sandbox.fil.one` does not
   match `sprue.dev.forge-sandbox.fil.one`. Each stage needs its own.
 
+## What survives a destroy
+
+**`terraform destroy` deletes no parameter this project generates.** The
+provision Lambda creates them, so Terraform has no record of them and never
+removes them. An accidental destroy therefore cannot burn a funded wallet or
+invalidate a DID that storage providers have already registered against.
+
+They also stay readable, which takes deliberate arrangement. SecureStrings are
+encrypted under the account's AWS-managed SSM key rather than the stage's own
+customer-managed key. The stage's key is destroyed with the stage, and a key in
+PendingDeletion stops serving decryption at once, so tying the parameters to it
+would leave every secret unreadable the moment the stage came down and would
+fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
+nothing else, and what it protects is meant to die with the stage: OpenBao's
+storage sits in the same RDS instance and goes at the same time.
+
+So **a destroyed and recreated stage silently comes back with its previous
+identities and wallets.** That is usually what you want, and it is occasionally
+a surprise, so check before assuming a rebuilt stage is fresh:
+
+```bash
+aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
+  --query 'Parameters[].Name' --output text
+```
+
+To retire a stage, delete the parameters after the destroy, having first
+confirmed the wallets hold no funds:
+
+```bash
+# Check the balances first. This is not reversible.
+aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
+aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
+
+aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
+  --query 'Parameters[].Name' --output text \
+  | xargs -n 10 aws ssm delete-parameters --names
+```
+
 ## Runbook
 
 ### Prerequisites
@@ -336,6 +374,22 @@ Rotating an identity that _signs_ a proof — sprue, indexer or etracker —
 re-issues that proof automatically in the same apply, because the old
 delegation would no longer verify against a key that does not exist.
 
+#### Why proofs are not rewritten every apply
+
+A UCAN delegation is public but not reproducible: ucantone mints a random
+16-byte nonce per delegation, so signing the same request twice produces
+different bytes and a different CID. Rewriting on every apply would churn the
+parameter and invalidate anything holding the previous delegation.
+
+So proofs are written once and then left alone, and re-issued only when their
+issuer key was freshly minted. smelt tracks the same dependency, skipping a
+committed proof unless one of the keys behind it was regenerated that run.
+
+The practical consequence: you cannot verify a proof by regenerating it and
+diffing. Only the framing is reproducible, and that is what the tests pin: a
+textual container is stored as `ucantool` writes it, trailing newline included,
+while a bare DAG-CBOR delegation is stored base64-encoded.
+
 #### Why the delegator's proofs are stored base64
 
 Every proof reaches its consumer as an environment variable that the task's
@@ -370,6 +424,25 @@ make test
 Both run offline against no deployed stage, which is why `make smoke` is
 separate: it needs a stage to be up. See [Smoke-testing a
 stage](#smoke-testing-a-stage).
+
+## Planned work
+
+Deliberate compromises and open questions. Some need a change outside this
+repository; the rest are work that has not been done here yet.
+
+### Forcing a provision phase to re-run
+
+`aws_lambda_invocation` re-invokes only when its input changes, which is what
+`seed_trigger` and `vault_trigger` in `modules/platform` exist for. Rotating an
+identity or hilt's OpenBao credential needs one of them bumped.
+
+Neither is reachable today. The stage roots do not expose them, and a VCS-driven
+run takes no `-var` flags, so the only way to bump one is to edit
+`envs/<stage>/platform/main.tf` and merge. Exposing both as root variables would
+let an operator change a workspace variable and start a run, which is probably
+the answer, but it puts a value that means "re-run the thing that mints wallets"
+one text field away from anyone with write access to the workspace. Worth
+deciding deliberately.
 
 ## Related
 
