@@ -68,3 +68,10 @@ resource "aws_db_instance" "this" {
     replace_triggered_by = [aws_db_subnet_group.this]
   }
 }
+
+# RDS reports the encrypting key by ID, while an IAM policy naming it in
+# resources needs the ARN. The data source accepts either form, so this keeps
+# working if RDS changes what it reports.
+data "aws_kms_key" "master_secret" {
+  key_id = aws_db_instance.this.master_user_secret[0].kms_key_id
+}

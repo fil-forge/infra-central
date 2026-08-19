@@ -100,7 +100,7 @@ module "provision" {
   db_host                      = module.database.address
   db_port                      = module.database.port
   db_master_secret_arn         = module.database.master_secret_arn
-  db_master_secret_kms_key_arn = module.database.master_secret_kms_key_id
+  db_master_secret_kms_key_arn = module.database.master_secret_kms_key_arn
 
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
