@@ -71,6 +71,7 @@ trap 'rm -f "$errors"' EXIT
 while IFS= read -r group; do
   echo
   echo "--- ${group} ---"
+  echo "aws logs tail '$group' --since '$SINCE' --format short"
   # tail exits non-zero when the group has no events in the window, which is
   # not a failure worth aborting the whole sweep for. Anything it writes to
   # stderr is reported below instead, so an AccessDenied or a wrong region does
