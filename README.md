@@ -465,6 +465,16 @@ new run** in the workspace: the workspace is created after its config has alread
 landed, so there is no later push for HCP to react to. Everything after that
 arrives on `main`.
 
+### A personal sandbox stage
+
+Stage names are not limited to dev and prod. A sandbox stage in **Local**
+execution mode runs Terraform on your machine with only state in HCP, which is
+the fastest loop for iterating on the provision Lambda: no commit, no merge, no
+run to wait for. What it costs is everything the dev stage gets from HCP —
+speculative plans on pull requests, applies that cannot disagree with `main`,
+and a Terraform and provider version that is the same for everyone. Use it to
+iterate, not to host anything anyone depends on.
+
 ### Funding the wallets
 
 The seed phase mints two secp256k1 wallets and reports their addresses. Both
@@ -551,6 +561,13 @@ applied nowhere.
 Promoting the same image to prod will be a copy of that digest into
 `terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
 change is ready rather than as a side effect of a build.
+
+### Deploying a service
+
+Change its digest in the stage's `image_digests` and merge. Every stage pins
+digests, dev included: HCP applies dev on every commit to `main`, and a rolling
+tag would make what dev runs depend on when a task last restarted rather than on
+what was merged.
 
 ### Rotating a service identity
 
