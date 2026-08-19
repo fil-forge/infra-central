@@ -1,0 +1,181 @@
+name: Check and deploy
+
+# Every pull request is checked and planned; every push to main is checked and
+# applied. Both halves live in one workflow because `make check` belongs in the
+# same dependency graph as the deploy: a change that fails gofmt should never
+# reach AWS.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Serializes whole runs per ref. Two merges to main must not apply at once — they
+# would contend for the state lock and one would fail halfway — and a force-push
+# to a pull request should not leave two plans racing either.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# The deploy jobs below differ only in root, command and role. The two plans are a
+# matrix; the two applies cannot be, because apply-apps needs apply-platform and a
+# matrix has no way to make one instance wait on another. What would otherwise
+# drift between the two apply copies is hoisted here.
+env:
+  # Pinned rather than latest. What deploys must not change because a new release
+  # landed between two merges.
+  TOFU_VERSION: 1.12.5
+  AWS_REGION: us-east-2
+  # Describes infrastructure and reads no data, because a pull request chooses
+  # what the plan jobs run. See modules/github-actions-iam.
+  PLAN_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-plan
+  APPLY_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-apply
+
+jobs:
+  # gofmt, go vet, go test and tofu fmt. No AWS credentials: everything in
+  # `make check` runs offline against no deployed stage, which is what lets it
+  # gate the jobs that do have credentials.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - run: make check
+
+  # Both roots are planned at once, because neither can see the other's proposed
+  # changes anyway: apps reads the *last applied* platform state through
+  # terraform_remote_state, not this pull request's platform plan. A pull request
+  # that changes a platform output apps consumes therefore shows its real apps
+  # plan only after platform applies. Working around that would mean planning
+  # apps against a platform plan that has not been applied and may never be,
+  # which is a worse thing to show a reviewer than a slightly stale one.
+  #
+  # Skipped for pull requests from forks, which get no OIDC token. `check` still
+  # runs, so a fork's pull request is not unreviewable.
+  plan:
+    # Set explicitly, so the two instances report as `plan-platform` and
+    # `plan-apps` rather than as GitHub's default `plan (dev/platform)`. A branch
+    # protection rule has to name its required checks literally, and the flat
+    # names are the ones worth typing.
+    name: plan-${{ matrix.name }}
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to request the OIDC token the role is assumed with. Without it
+      # the credentials step fails with a token error rather than a permissions
+      # one.
+      id-token: write
+    strategy:
+      # One root's plan failing should not cancel the other's: a reviewer wants
+      # both results, not the first failure.
+      fail-fast: false
+      matrix:
+        include:
+          - name: platform
+            root: dev/platform
+          - name: apps
+            root: dev/apps
+    defaults:
+      run:
+        working-directory: terraform/envs/${{ matrix.root }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-plan-${{ github.run_id }}
+
+      - run: tofu init -input=false
+
+      # A lock timeout rather than failing the moment the lock is held: the state
+      # lock is an S3 object, and one left behind by a killed run is worth
+      # waiting on briefly before a human gets involved.
+      - run: tofu plan -input=false -lock-timeout=5m
+
+  # apply-apps waits for apply-platform because apps reads platform's state and
+  # must not plan against outputs an in-flight platform apply is about to change.
+  #
+  # Both run on every push, even one that touched only apps. Filtering by path
+  # would skip the untouched root, but every such filter has to name the modules
+  # the root depends on as well as the root itself, and a module added without a
+  # matching filter silently stops being deployed. An extra empty plan costs about
+  # a minute and removes that failure mode.
+  apply-platform:
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/dev/platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-${{ github.run_id }}
+
+      - run: tofu init -input=false
+
+      # -auto-approve, and the log is the audit trail: apply prints the whole plan
+      # to stdout before it changes anything, so the run shows exactly what it
+      # did. dev deploys on merge, which is the point; a gated apply is what prod
+      # will want instead.
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+  apply-apps:
+    if: github.event_name == 'push'
+    needs: apply-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/dev/apps
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-${{ github.run_id }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m

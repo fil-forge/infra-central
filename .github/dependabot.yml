@@ -1,0 +1,55 @@
+# Dependency update pull requests, for the two things here that have versions
+# somebody else controls: the actions the workflows run, and the Go modules the
+# provision Lambda is built from.
+#
+# No commit-message prefix on either. Dependabot's default subject is "Bump X
+# from A to B", which already matches this repository's imperative, unprefixed
+# style; a `ci:` or `chore:` prefix would make its commits the only ones in the
+# log wearing one.
+version: 2
+
+updates:
+  # The workflows pin every action to a commit SHA, which is the only reference
+  # an action cannot move underneath us — a tag can be repointed at new code by
+  # whoever owns the action. The cost is that a pin never updates itself, not
+  # even for a security fix, so something has to open that pull request. This is
+  # that something.
+  #
+  # Weekly, and grouped into one pull request: these are build-time tooling with
+  # no runtime coupling to each other, so reviewing them together costs nothing
+  # and reviewing them apart costs four rounds of CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "09:00"
+      timezone: America/New_York
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Go modules for cmd/provision and internal/. One go.mod, at the root.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/New_York
+    groups:
+      # Five of the twelve direct dependencies are AWS SDK modules, and they
+      # release in lockstep several times a week. Ungrouped they would be most of
+      # the noise; grouped they are one routine pull request. Everything else
+      # stays ungrouped on purpose — go-ethereum, pgx and the OpenBao client are
+      # the ones that can actually break the Lambda, and each deserves its own
+      # diff to read.
+      #
+      # Three patterns because the module paths are three different depths and
+      # the documentation does not say whether `*` crosses a `/`. Guessing wrong
+      # fails silently, as ungrouped pull requests rather than an error.
+      aws-sdk:
+        patterns:
+          - github.com/aws/*
+          - github.com/aws/*/*
+          - github.com/aws/*/*/*

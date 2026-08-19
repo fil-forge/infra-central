@@ -1,4 +1,5 @@
-# Re-exported wholesale so the apps workspace can read them through tfe_outputs.
+# Re-exported wholesale so the apps root can read them through
+# terraform_remote_state.
 
 output "platform" {
   value = {

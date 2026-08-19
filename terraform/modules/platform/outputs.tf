@@ -2,7 +2,7 @@ locals {
   seed = jsondecode(aws_lambda_invocation.seed.result)
 }
 
-# --- Consumed by the apps workspace through tfe_outputs ---
+# --- Consumed by the apps root through terraform_remote_state ---
 
 output "stage" {
   value = var.stage
@@ -41,7 +41,7 @@ output "listener_arn" {
 }
 
 # Still named for the load balancer, because that is the name the apps
-# workspace reads them by through tfe_outputs. On a stage running Global
+# root reads them by. On a stage running Global
 # Accelerator they carry the accelerator instead, and every service alias
 # follows without the apps module knowing the difference.
 output "alb_dns_name" {

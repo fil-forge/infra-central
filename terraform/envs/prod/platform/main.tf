@@ -5,27 +5,9 @@
 # provision image digest is pinned in terraform.tfvars, copied from dev when a
 # change is promoted rather than written by whatever was built last.
 #
-# The workspace does not exist yet. It will apply nothing without an operator
-# confirming the plan, unlike dev.
-
-terraform {
-  required_version = ">= 1.15"
-
-  cloud {
-    organization = "Filecoin_Foundation"
-
-    workspaces {
-      name = "forge-central-prod-platform"
-    }
-  }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-  }
-}
+# Not deployed, and no workflow applies it. dev is applied on every push to main;
+# prod will want a gated job, and its tfvars still carry REPLACE_ME contract
+# addresses, so a plan here fails by design.
 
 provider "aws" {
   region = var.region

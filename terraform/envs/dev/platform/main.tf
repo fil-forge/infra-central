@@ -1,26 +1,9 @@
 # Dev platform: VPC, RDS, S3, DynamoDB, ALB, OpenBao and the provision Lambda.
 #
-# HCP applies this workspace on every commit to main, then a run trigger starts
-# envs/dev/apps, which reads its outputs.
-
-terraform {
-  required_version = ">= 1.15"
-
-  cloud {
-    organization = "Filecoin_Foundation"
-
-    workspaces {
-      name = "forge-central-dev-platform"
-    }
-  }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-  }
-}
+# .github/workflows/check-and-deploy.yml applies this root on every push to main, then
+# applies envs/dev/apps, which reads its state. The two are ordered by a `needs:`
+# edge between the jobs, because apps must not plan against outputs an in-flight
+# platform apply is about to change.
 
 provider "aws" {
   region = var.region
