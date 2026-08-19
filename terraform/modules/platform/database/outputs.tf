@@ -11,6 +11,7 @@ output "master_secret_arn" {
   value       = aws_db_instance.this.master_user_secret[0].secret_arn
 }
 
-output "master_secret_kms_key_id" {
-  value = aws_db_instance.this.master_user_secret[0].kms_key_id
+output "master_secret_kms_key_arn" {
+  description = "Key encrypting the master secret. Named in the provision Lambda's kms:Decrypt statement."
+  value       = data.aws_kms_key.master_secret.arn
 }
