@@ -77,7 +77,13 @@ variable "openbao_address" {
 }
 
 variable "private_cidrs" {
-  description = "VPC private subnets, used to bound hilt's AppRole token."
+  description = <<-EOT
+    VPC private subnets, used to bound hilt's AppRole token.
+
+    The vault phase requires them and fails when the list is empty, so an
+    unbounded credential cannot be minted by omission. The default is empty
+    because a stage that never runs that phase has no use for the value.
+  EOT
   type        = list(string)
   default     = []
 }
