@@ -24,7 +24,7 @@ locals {
   config = <<-HCL
     storage "postgresql" {
       connection_url = "$OPENBAO_POSTGRES_DSN"
-      max_parallel   = ${var.max_parallel}
+      max_parallel   = "${var.max_parallel}"
       ha_enabled     = "false"
     }
 
@@ -43,7 +43,14 @@ locals {
     ui            = ${var.enable_ui}
   HCL
 
-  shell_command = "bao server -config=${local.config_path}"
+  # exec, via dumb-init, because setting shell_command replaces the image
+  # entrypoint with /bin/sh -c. Without exec, bao runs as a child of that shell
+  # and never sees the SIGTERM ECS sends, so a deployment ends in a forced kill
+  # once the stop timeout expires — expensive with desired_count = 1. dumb-init
+  # is what upstream's entrypoint runs as PID 1 (`#!/usr/bin/dumb-init /bin/sh`)
+  # to forward signals and reap children; the rest of that entrypoint only fills
+  # in dev-mode flags and drops a root privilege this image never holds.
+  shell_command = "exec dumb-init bao server -config=${local.config_path}"
 }
 
 module "service" {
