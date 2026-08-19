@@ -569,6 +569,22 @@ digests, dev included: HCP applies dev on every commit to `main`, and a rolling
 tag would make what dev runs depend on when a task last restarted rather than on
 what was merged.
 
+For dev, hilt does this itself. Its publish workflow dispatches a
+`bump-deployed-image` event carrying the digest it just pushed, and
+[`bump-deployed-image.yml`](.github/workflows/bump-deployed-image.yml) opens a
+pull request that changes the one line, with auto-merge enabled so the deploy
+lands as soon as the required checks pass. Those pull requests come from the
+`fil-forge-bot` GitHub App on the branch `bot/bump-<service>-image-dev`, one
+branch per service, so a second publish updates the open request instead of
+stacking a stale one beside it.
+
+The same workflow bumps any of the six services on demand:
+
+```bash
+gh workflow run bump-deployed-image.yml -R fil-forge/infra-central \
+  -f service=sprue -f digest="$(crane digest ghcr.io/fil-forge/sprue:main)"
+```
+
 ### Confirming nothing was regenerated
 
 The most important check after any apply. Read `created_parameters` from the
@@ -820,15 +836,15 @@ the answer, but it puts a value that means "re-run the thing that mints wallets"
 one text field away from anyone with write access to the workspace. Worth
 deciding deliberately.
 
-### Deploy service changes from their own repositories
+### Deploy the remaining services from their own repositories
 
-Today a service is deployed by editing `image_digests` here. It should instead
-happen when a commit lands on the service's own `main`.
+hilt already does this: its publish workflow dispatches the digest it pushed and
+[`bump-deployed-image.yml`](.github/workflows/bump-deployed-image.yml) commits it
+to the dev stage. sprue, swarf, delegator, signing_service and plc are still
+deployed by editing `image_digests` here.
 
-The missing piece is a `repository_dispatch` from each service's publish
-workflow into this one, carrying the service name and the digest it just pushed,
-which commits that digest to the dev stage. The commit is what deploys, so dev
-stays visible in git rather than in a workspace variable nobody reads.
+The receiver accepts all six service names, so wiring one up is a dispatch step
+in its publish workflow plus the `fil-forge-bot` credentials in that repository.
 
 Prod stays manual either way: a promotion is a digest copied deliberately, and a
 reviewable diff is the point.
