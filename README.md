@@ -679,7 +679,7 @@ replaces it rather than leaving hilt unable to start.
 
 ```bash
 make check   # gofmt, go vet, go test, terraform fmt
-make test
+make test    # go test alone, for the inner loop
 ```
 
 Both run offline against no deployed stage, which is why `make smoke` is
@@ -693,7 +693,7 @@ repository; the rest are work that has not been done here yet.
 
 ### CI checks
 
-Create GitHub Actions to run `make check` and `make test` for every pull request.
+Create GitHub Actions to run `make check` for every pull request.
 
 Configure GitHub Branch Protection rules to require passing CI checks + Terraform speculative
 preview before a PR can be merged.
@@ -730,9 +730,9 @@ and its runbook is the best statement of the ordering and the failure modes.
 
 **Two proofs, one in each direction.**
 
-`keygen.Proofs` deliberately issues three of smelt's five, and the seed phase
-could not issue the other two even if it wanted to, because both involve a key
-that does not exist when a stage is brought up:
+The provision Lambda deliberately issues three of the five proofs that smelt
+issues. The seed phase could not issue the other two even if it wanted to,
+because both involve a key that does not exist when a stage is brought up:
 
 - `piri-0-proof` — signed by the appliance's own identity key, audience sprue,
   granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
