@@ -11,9 +11,24 @@ variable "account_id" {
 }
 
 variable "image" {
-  description = "OpenBao image. 2.6.x is the series fil-one/RFC#21 benchmarked."
+  description = <<-EOT
+    OpenBao image, pinned by digest. 2.6.x is the series fil-one/RFC#21
+    benchmarked.
+
+    The digest for the same reason this project's own images are deployed by
+    digest: a task ECS replaces at three in the morning has to pull the bytes
+    the stage was reviewed against, and a tag repointed upstream must not be
+    able to change that. The validation is here because the default is only the
+    default, and a caller passing a bare tag would reintroduce the problem
+    silently.
+  EOT
   type        = string
-  default     = "openbao/openbao:2.6.0"
+  default     = "openbao/openbao:2.6.0@sha256:900bb64d0671cd1d82b693c56206f7263b582445f3a3bb6ba6e5213f524a6653"
+
+  validation {
+    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.image))
+    error_message = "The OpenBao image must be pinned by digest, as openbao/openbao:<version>@sha256:<digest>. A mutable tag lets a replacement task run bytes nobody reviewed."
+  }
 }
 
 variable "port" {
