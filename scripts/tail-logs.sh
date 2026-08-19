@@ -26,10 +26,16 @@ if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
   STAGE="$1"; shift
 fi
 
+# Without this, `set -u` turns a trailing `--lines` into an "unbound variable"
+# abort, which says nothing about what the caller got wrong.
+require_value() {
+  [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 2; }
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --lines)   LINES="$2"; shift 2 ;;
-    --since)   SINCE="$2"; shift 2 ;;
+    --lines)   require_value "$@"; LINES="$2"; shift 2 ;;
+    --since)   require_value "$@"; SINCE="$2"; shift 2 ;;
     -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -39,10 +45,12 @@ command -v aws >/dev/null || { echo "ERROR: aws CLI not found in PATH" >&2; exit
 
 list_groups() {
   local prefix="$1"
+  # A query matching nothing prints a literal `None`, which would otherwise be
+  # tailed as if it were a log group.
   aws logs describe-log-groups \
     --log-group-name-prefix "$prefix" \
     --query 'logGroups[].logGroupName' \
-    --output text | tr '\t' '\n' | sed '/^$/d' | sort
+    --output text | tr '\t' '\n' | sed -e '/^None$/d' -e '/^$/d' | sort
 }
 
 groups="$(list_groups "/forge-central/${STAGE}/")"
@@ -57,15 +65,23 @@ fi
 
 echo "=== Logs for the ${STAGE} stage (last ${LINES} lines per service, since ${SINCE}) ==="
 
+errors="$(mktemp)"
+trap 'rm -f "$errors"' EXIT
+
 while IFS= read -r group; do
   echo
   echo "--- ${group} ---"
   # tail exits non-zero when the group has no events in the window, which is
-  # not a failure worth aborting the whole sweep for.
-  lines="$(aws logs tail "$group" --since "$SINCE" --format short 2>/dev/null | tail -n "$LINES" || true)"
-  if [ -z "$lines" ]; then
-    echo "  (no events in the last ${SINCE})"
-  else
+  # not a failure worth aborting the whole sweep for. Anything it writes to
+  # stderr is reported below instead, so an AccessDenied or a wrong region does
+  # not read as an empty log group.
+  lines="$(aws logs tail "$group" --since "$SINCE" --format short 2>"$errors" | tail -n "$LINES" || true)"
+  if [ -n "$lines" ]; then
     printf '%s\n' "$lines"
+  elif [ ! -s "$errors" ]; then
+    echo "  (no events in the last ${SINCE})"
+  fi
+  if [ -s "$errors" ]; then
+    sed 's/^/  /' "$errors" >&2
   fi
 done <<<"$groups"
