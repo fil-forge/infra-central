@@ -30,7 +30,7 @@ output "service_dids" {
 }
 
 output "wallet_addresses" {
-  description = "Fund these with tFIL, and the payer with USDFC."
+  description = "Fund these with FIL, and the payer with USDFC."
   value       = module.platform.wallet_addresses
 }
 
