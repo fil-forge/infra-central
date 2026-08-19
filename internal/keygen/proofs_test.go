@@ -136,6 +136,35 @@ func proofsByName(t *testing.T) map[string]Proof {
 	return byName
 }
 
+// A did map missing a service silently zero-values the DIDs Proofs fills in,
+// and ucandelegate would report only an opaque parse error. IssueProof names
+// the empty field instead.
+func TestIssueProofRejectsAMalformedProof(t *testing.T) {
+	issuer, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+
+	breakages := map[string]func(*Proof){
+		"missing issuer DID":   func(p *Proof) { p.issuerDID = "" },
+		"missing audience DID": func(p *Proof) { p.audience = "" },
+		"missing subject DID":  func(p *Proof) { p.subject = "" },
+		"missing commands":     func(p *Proof) { p.commands = nil },
+	}
+
+	for want, breakProof := range breakages {
+		t.Run(want, func(t *testing.T) {
+			proof := Proofs(testDIDs(t))[0]
+			breakProof(&proof)
+
+			_, err := IssueProof(issuer.PrivatePEM, proof)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("got error %v, want one containing %q", err, want)
+			}
+		})
+	}
+}
+
 func TestIssueProofRejectsAKeyItCannotRead(t *testing.T) {
 	proof := Proofs(testDIDs(t))[0]
 
