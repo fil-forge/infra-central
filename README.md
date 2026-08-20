@@ -135,7 +135,8 @@ scripts/smoke-test.sh    checks a deployed stage over public HTTPS
 terraform/
   modules/                                         the wiring; see Stages below
   envs/                                            one directory per root module
-    bootstrap/<account>/<region>/                  state bucket, registry, CI roles
+    bootstrap/<account>/account/                   state bucket, CI roles
+    bootstrap/<account>/<region>/                  the image registry
     dev/platform/    dev/apps/                     applied on every push to main
     prod/platform/   prod/apps/                    committed, not deployed yet
 
@@ -193,9 +194,9 @@ terraform/modules/
   shared/                  used by more than one root
     ecs-service/           apps, and openbao inside platform
     constants/             every root, bootstrap included
-  ecr/                     bootstrap only
-  tfstate/                 bootstrap only: the state bucket
-  github-actions-iam/      bootstrap only: the two CI roles
+  ecr/                     regional bootstrap only
+  tfstate/                 account bootstrap only: the state bucket
+  github-actions-iam/      account bootstrap only: the two CI roles
 ```
 
 A module used by exactly one root lives under that root's composite module.
@@ -351,30 +352,39 @@ pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
 
-Prod is not deployed yet: `terraform/envs/prod/` is committed and its bootstrap has
-never been applied. No workflow names it, because its `terraform.tfvars` still
-carries `REPLACE_ME` contract addresses.
+Prod is not deployed yet: `terraform/envs/prod/` is committed and neither of its
+bootstrap roots has ever been applied. No workflow names it, because its
+`terraform.tfvars` still carries `REPLACE_ME` contract addresses.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
 ### First time in an account and region
 
-The bootstrap roots are always applied locally. They run rarely, once per account
-and region, and they create the three things everything else depends on, so there
-is nothing for a pipeline to trigger on and no earlier apply to create their
-state:
+The bootstrap roots are always applied locally. They run rarely, they create the
+things everything else depends on, and so there is nothing for a pipeline to
+trigger on and no earlier apply to have created their state.
 
-- the **state bucket** every other root in the account keeps its state in,
-- `forge-central/provision`, the **ECR repository** for the provision Lambda image,
-- the two **CI roles** GitHub Actions assumes to plan and apply the stages.
+They come in two kinds, and the split is what keeps the second region cheap:
 
-The state bucket is the awkward one: this root's own backend points at it, so the
-first apply in a fresh account cannot use that backend. Run it against a local
-backend once, then move its state into the bucket it just created. `.gitignore`
-already ignores `*_override.tf`, so the override cannot be committed by accident:
+- `bootstrap/<account>/account/` — the **state bucket** every other root in the
+  account keeps its state in, and the two **CI roles** GitHub Actions assumes to
+  plan and apply the stages. One per account. A bucket name is global and IAM is
+  not regional, so a second region must not create these again.
+- `bootstrap/<account>/<region>/` — `forge-central/provision`, the **ECR
+  repository** for the provision Lambda image. One per account *and* region:
+  Lambda pulls an image only from ECR in the same region as the function, and a
+  pull from another account needs a repository policy this project does not
+  create. Stages sharing an account and region share the repository and pin
+  different digests.
+
+The account root is the awkward one: its own backend points at the bucket it
+creates, so the first apply in a fresh account cannot use that backend. Run it
+against a local backend once, then move its state into the bucket it just made.
+`.gitignore` already ignores `*_override.tf`, so the override cannot be committed
+by accident:
 
 ```bash
-cd terraform/envs/bootstrap/nonprod/us-east-2
+cd terraform/envs/bootstrap/nonprod/account
 
 printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
 tofu init
@@ -384,20 +394,20 @@ rm backend_override.tf
 tofu init -migrate-state             # local state moves into the bucket
 rm -f terraform.tfstate terraform.tfstate.backup
 
-tofu apply                           # the registry and the CI roles
+tofu apply                           # the CI roles
 ```
 
 Note the two role ARNs it prints. `.github/workflows/check-and-deploy.yml` names them
 literally, so if they differ from what is there, the workflow needs updating.
 
-Every root after this one is ordinary: its backend block points at a bucket that
-now exists, so `tofu init` is all it takes.
+Every root after this one is ordinary — its backend block points at a bucket that
+now exists — including the regional bootstrap beside it:
 
-There is one bootstrap directory per account and region, each with its own state
-key and its own repository: ECR repositories are regional, Lambda
-pulls an image only from ECR in the same region as the function, and a pull from
-another account needs a repository policy this project does not create. Stages
-sharing an account and region share the repository and pin different digests.
+```bash
+cd ../us-east-2
+tofu init
+tofu apply                           # the image registry
+```
 
 Every image this project publishes to ECR lives under the `forge-central/`
 prefix, one repository per image. Per-image repositories are what make per-image
@@ -430,10 +440,26 @@ from anyway; the account ids and the repository name live in
 cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonprod/us-west-2
 ```
 
-Change the region in three places in the copy: the `region` in the provider block,
-the `region` in the `backend "s3"` block in `versions.tofu`, and its `key`
-(`bootstrap/us-west-2.tfstate`). The bucket stays as it is — one per account, not
-per region. Then apply it with the procedure above and fill the repository:
+Change two things in the copy: the `region` in the provider block, and the `key`
+in the `backend "s3"` block in `versions.tofu` (`bootstrap/us-west-2.tfstate`).
+
+Leave the backend's `region` at `us-east-2`. It names the region the *state
+bucket* is in, not the region this root deploys into, and the bucket is one per
+account — created by `bootstrap/nonprod/account/`, which a regional copy does not
+touch. Pointing it at `us-west-2` makes `tofu init` fail against a bucket that is
+sitting right there.
+
+Nothing else needs changing, and nothing needs deleting: the account-scoped
+resources are not in this directory to begin with. So there is no bootstrap dance
+here — `tofu init` works immediately, because the bucket already exists:
+
+```bash
+cd terraform/envs/bootstrap/nonprod/us-west-2
+tofu init
+tofu apply
+```
+
+Then fill the repository:
 
 ```bash
 make publish STAGE=<stage> AWS_REGION=us-west-2
@@ -444,12 +470,16 @@ the new region can pin the same digest an existing stage already runs.
 
 ### Adding an account
 
-Copy a `bootstrap/<account>/` directory, point the new copy's provider at the
-account id it belongs to, and add that id to
-`terraform/modules/shared/constants` if it is not there yet. Every root reads
-its account id from that module, so an apply run with credentials for the wrong
-account fails at plan time rather than building a second working copy of the
-stage somewhere unexpected.
+Copy a `bootstrap/<account>/` directory, both the `account/` root and the
+regional one beside it. In the copies, point each provider at the account id it
+belongs to, set the bucket name in `account/main.tf` and in both `versions.tofu`
+backend blocks, and add that id to `terraform/modules/shared/constants` if it is
+not there yet. Then apply `account/` with the greenfield procedure above, and the
+regional root after it.
+
+Every root reads its account id from that module, so an apply run with
+credentials for the wrong account fails at plan time rather than building a second
+working copy of the stage somewhere unexpected.
 
 ### Adding a stage
 
@@ -475,7 +505,7 @@ Then, in the copy:
    apply jobs copied from dev's, with `apply-staging-apps` needing
    `apply-staging-platform`.
 5. Add `"staging"` to `state_key_prefixes` on the `github_actions_iam` module in
-   `terraform/envs/bootstrap/nonprod/us-east-2/main.tf` and apply that root. The
+   `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
    CI roles are granted the state keys they may touch by prefix, so without this
    the stage's first run fails reading its own state.
 6. Update the branch protection rule on `main`. The new stage adds two required

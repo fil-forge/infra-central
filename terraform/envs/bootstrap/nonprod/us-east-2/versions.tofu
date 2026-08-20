@@ -1,9 +1,13 @@
 terraform {
   required_version = ">= 1.12"
 
-  # This root's own state, in the bucket this root creates. That circularity is
-  # resolved once per account, by the bootstrap procedure in the README: the
-  # first apply runs against a local backend and then moves its state in here.
+  # An ordinary backend block: ../account/ created this bucket, so this root has
+  # no bootstrap dance of its own and `tofu init` is all it takes.
+  #
+  # `region` here is the *bucket's* region, not this root's. A copy of this
+  # directory for another region changes the provider region and the key below,
+  # and leaves this line as it is: the bucket is one per account, and it lives in
+  # us-east-2.
   backend "s3" {
     bucket       = "forge-central-tfstate-654654381893"
     key          = "bootstrap/us-east-2.tfstate"
