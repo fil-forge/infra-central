@@ -22,6 +22,11 @@ concurrency:
   group: bump-deployed-image-${{ github.event.client_payload.service || inputs.service }}
   cancel-in-progress: false
 
+# Matches Check and deploy, which is what actually formats this repository;
+# a different version could reject a file `make check` accepts.
+env:
+  TOFU_VERSION: 1.12.5
+
 jobs:
   bump:
     name: Bump ${{ github.event.client_payload.service || inputs.service }} in dev
@@ -34,7 +39,7 @@ jobs:
       # request is validated because the actor check below needs the app's slug.
       - name: Mint fil-forge-bot token
         id: bot
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.FORGE_BOT_APP_ID }}
           private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
@@ -108,7 +113,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -145,15 +150,16 @@ jobs:
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Terraform
+      - name: Set up OpenTofu
         if: steps.edit.outputs.changed == 'true'
-        uses: hashicorp/setup-terraform@v3
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
-          terraform_wrapper: false
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: Check formatting
         if: steps.edit.outputs.changed == 'true'
-        run: terraform fmt -check terraform/envs/dev/apps/
+        run: tofu fmt -check terraform/envs/dev/apps/
 
       - name: Compose the message
         if: steps.edit.outputs.changed == 'true'
