@@ -377,6 +377,37 @@ They come in two kinds, and the split is what keeps the second region cheap:
   create. Stages sharing an account and region share the repository and pin
   different digests.
 
+One thing has to exist before the account root can be applied, and nothing here
+creates it: the **GitHub OIDC provider**,
+`https://token.actions.githubusercontent.com`. It is one per account and shared
+with every other repository that deploys into that account, so
+`modules/github-actions-iam` reads it as a data source rather than owning it —
+creating it here would fail for the second repository to try, and a destroy would
+lock the first one out of its own CI.
+
+Both accounts this project uses already have it, so this matters only for an
+account nobody has deployed to from GitHub Actions before. Check:
+
+```bash
+aws iam list-open-id-connect-providers \
+  --query "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')]"
+```
+
+If that comes back empty, create it before applying the account root, or the
+apply that makes the CI roles fails on the lookup with `NoSuchEntity`:
+
+```bash
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com
+```
+
+`sts.amazonaws.com` is the audience `aws-actions/configure-aws-credentials`
+requests when the workflow does not override it, and it is what both trust
+policies require in their `aud` condition. Omit it from the client id list and
+every `sts:AssumeRoleWithWebIdentity` call is rejected. No `--thumbprint-list`:
+AWS no longer validates one for this provider.
+
 The account root is the awkward one: its own backend points at the bucket it
 creates, so the first apply in a fresh account cannot use that backend. Run it
 against a local backend once, then move its state into the bucket it just made.
@@ -474,8 +505,10 @@ Copy a `bootstrap/<account>/` directory, both the `account/` root and the
 regional one beside it. In the copies, point each provider at the account id it
 belongs to, set the bucket name in `account/main.tf` and in both `versions.tofu`
 backend blocks, and add that id to `terraform/modules/shared/constants` if it is
-not there yet. Then apply `account/` with the greenfield procedure above, and the
-regional root after it.
+not there yet. Confirm the account has the GitHub OIDC provider, which nothing
+here creates — see [First time in an account and
+region](#first-time-in-an-account-and-region) — then apply `account/` with the
+greenfield procedure there, and the regional root after it.
 
 Every root reads its account id from that module, so an apply run with
 credentials for the wrong account fails at plan time rather than building a second
