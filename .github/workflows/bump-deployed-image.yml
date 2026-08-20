@@ -132,19 +132,24 @@ jobs:
             "s|^([[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\")sha256:[0-9a-f]{64}(\")$|\1${DIGEST}\2|" \
             "$file"
 
-          if [ -z "$(git diff --numstat -- "$file")" ]; then
+          # Read the result rather than trusting sed. A pattern that matched
+          # nothing leaves the file untouched too, so an absent key or a line
+          # the pattern does not fit would otherwise pass for "already pinned".
+          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
+            echo "::error::$file does not pin $SERVICE at $DIGEST"
+            git --no-pager diff -- "$file"
+            grep -nE "^[[:blank:]]*${SERVICE}[[:blank:]]*=" "$file" || true
+            exit 1
+          fi
+
+          changes=$(git diff --numstat -- "$file")
+          if [ -z "$changes" ]; then
             echo "$SERVICE is already pinned at $DIGEST; nothing to deploy"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          if [ "$(git diff --numstat -- "$file")" != "$(printf '1\t1\t%s' "$file")" ]; then
+          if [ "$changes" != "$(printf '1\t1\t%s' "$file")" ]; then
             echo "::error::expected a one-line change"
-            git --no-pager diff -- "$file"
-            exit 1
-          fi
-          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
-            echo "::error::the rewrite did not land as expected"
             git --no-pager diff -- "$file"
             exit 1
           fi
