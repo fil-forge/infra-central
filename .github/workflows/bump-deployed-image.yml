@@ -1,6 +1,7 @@
 # Deploys a service to the dev stage by pinning the image digest it just
 # published. Services dispatch here from their own publish workflow; the commit
-# this opens is what deploys, because HCP applies dev on every commit to main.
+# this opens is what deploys, because Check and deploy applies dev/apps on every
+# push to main.
 name: Bump deployed image
 
 on:
@@ -21,6 +22,11 @@ concurrency:
   group: bump-deployed-image-${{ github.event.client_payload.service || inputs.service }}
   cancel-in-progress: false
 
+# Matches Check and deploy, which is what actually formats this repository;
+# a different version could reject a file `make check` accepts.
+env:
+  TOFU_VERSION: 1.12.5
+
 jobs:
   bump:
     name: Bump ${{ github.event.client_payload.service || inputs.service }} in dev
@@ -33,7 +39,7 @@ jobs:
       # request is validated because the actor check below needs the app's slug.
       - name: Mint fil-forge-bot token
         id: bot
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.FORGE_BOT_APP_ID }}
           private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
@@ -107,7 +113,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -126,33 +132,39 @@ jobs:
             "s|^([[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\")sha256:[0-9a-f]{64}(\")$|\1${DIGEST}\2|" \
             "$file"
 
-          if [ -z "$(git diff --numstat -- "$file")" ]; then
+          # Read the result rather than trusting sed. A pattern that matched
+          # nothing leaves the file untouched too, so an absent key or a line
+          # the pattern does not fit would otherwise pass for "already pinned".
+          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
+            echo "::error::$file does not pin $SERVICE at $DIGEST"
+            git --no-pager diff -- "$file"
+            grep -nE "^[[:blank:]]*${SERVICE}[[:blank:]]*=" "$file" || true
+            exit 1
+          fi
+
+          changes=$(git diff --numstat -- "$file")
+          if [ -z "$changes" ]; then
             echo "$SERVICE is already pinned at $DIGEST; nothing to deploy"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          if [ "$(git diff --numstat -- "$file")" != "$(printf '1\t1\t%s' "$file")" ]; then
+          if [ "$changes" != "$(printf '1\t1\t%s' "$file")" ]; then
             echo "::error::expected a one-line change"
-            git --no-pager diff -- "$file"
-            exit 1
-          fi
-          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
-            echo "::error::the rewrite did not land as expected"
             git --no-pager diff -- "$file"
             exit 1
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Terraform
+      - name: Set up OpenTofu
         if: steps.edit.outputs.changed == 'true'
-        uses: hashicorp/setup-terraform@v3
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
-          terraform_wrapper: false
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
 
       - name: Check formatting
         if: steps.edit.outputs.changed == 'true'
-        run: terraform fmt -check terraform/envs/dev/apps/
+        run: tofu fmt -check terraform/envs/dev/apps/
 
       - name: Compose the message
         if: steps.edit.outputs.changed == 'true'
@@ -165,6 +177,8 @@ jobs:
           SOURCE_PR_URL: ${{ steps.req.outputs.source_pr_url }}
           RUN_URL: ${{ steps.req.outputs.run_url }}
           ACTOR: ${{ github.actor }}
+          APPS_DIR: terraform/envs/dev/apps
+          APPS_URL: ${{ github.server_url }}/${{ github.repository }}/tree/main/terraform/envs/dev/apps
         run: |
           set -euo pipefail
           short=${DIGEST#sha256:}
@@ -174,18 +188,16 @@ jobs:
             if [ -n "$SOURCE_PR_URL" ]; then
               echo "Published from $SOURCE_PR_URL"
             elif [ -n "$COMMIT" ]; then
-              echo "Published from $SOURCE_REPO@${COMMIT:0:7}, which reached main"
-              echo "without a pull request."
+              echo "Published from $SOURCE_REPO@${COMMIT:0:7}, which reached main without a pull request."
             else
               echo "Dispatched manually by @$ACTOR."
             fi
             echo
-            echo "Digest: $DIGEST"
-            [ -n "$COMMIT" ] && echo "Commit: https://github.com/$SOURCE_REPO/commit/$COMMIT"
-            [ -n "$RUN_URL" ] && echo "Publish run: $RUN_URL"
+            echo "- Digest: \`$DIGEST\`"
+            [ -n "$COMMIT" ] && echo "- Commit: https://github.com/$SOURCE_REPO/commit/$COMMIT"
+            [ -n "$RUN_URL" ] && echo "- Publish run: $RUN_URL"
             echo
-            echo "Merging applies the forge-central-dev-apps workspace in HCP"
-            echo "Terraform with no further confirmation."
+            echo "Merging applies [\`$APPS_DIR\`]($APPS_URL) with no further confirmation."
           } > "$RUNNER_TEMP/message.md"
           cat "$RUNNER_TEMP/message.md"
 
@@ -223,12 +235,16 @@ jobs:
           if [ -z "$url" ]; then
             url=$(gh pr create --base main --head "$BRANCH" \
               --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md")
+            action=Opened
           else
             gh pr edit "$url" --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md"
             { echo "Superseded by a newer image."; echo; cat "$RUNNER_TEMP/message.md"; } \
               > "$RUNNER_TEMP/comment.md"
             gh pr comment "$url" --body-file "$RUNNER_TEMP/comment.md"
+            action=Refreshed
           fi
+          echo "$action $url"
+          echo "$action $url" >> "$GITHUB_STEP_SUMMARY"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Enable auto-merge
