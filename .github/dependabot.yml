@@ -1,11 +1,18 @@
-# Dependency update pull requests, for the two things here that have versions
-# somebody else controls: the actions the workflows run, and the Go modules the
-# provision Lambda is built from.
+# Dependency update pull requests, for the four things here that have versions
+# somebody else controls: the actions the workflows run, the Go modules the
+# provision Lambda is built from, that Lambda's base images, and the AWS
+# provider every OpenTofu root resolves.
 #
-# No commit-message prefix on either. Dependabot's default subject is "Bump X
-# from A to B", which already matches this repository's imperative, unprefixed
+# No commit-message prefix on any of them. Dependabot's default subject is "Bump
+# X from A to B", which already matches this repository's imperative, unprefixed
 # style; a `ci:` or `chore:` prefix would make its commits the only ones in the
 # log wearing one.
+#
+# Three versioned things are deliberately absent, because no ecosystem reaches
+# them: the OpenBao image digest defaulted in modules/platform/openbao, the
+# per-service image digests in terraform/envs/dev/apps/terraform.tfvars, and
+# TOFU_VERSION in the two workflows. The service digests have their own mechanism
+# in bump-deployed-image.yml. The other two are bumped by hand.
 version: 2
 
 updates:
@@ -53,3 +60,64 @@ updates:
           - github.com/aws/*
           - github.com/aws/*/*
           - github.com/aws/*/*/*
+
+  # The two FROM lines in build/provision.Dockerfile.
+  #
+  # The directory is /build rather than /, because Dependabot lists the one
+  # directory it is given and does not descend. The filename needs no
+  # accommodation: the matcher looks for `dockerfile` anywhere in it, so
+  # provision.Dockerfile is found the same as a plain Dockerfile.
+  #
+  # In practice this entry produces one kind of pull request, bumping the
+  # `golang:1.25-bookworm` build stage when a new Go minor ships. The runtime
+  # stage pins public.ecr.aws/lambda/provided:al2023, a rolling tag with no
+  # version to compare against, so AL2023 moves underneath the image whether or
+  # not this entry exists.
+  #
+  # Merging a bump here deploys nothing on its own. `make publish` builds and
+  # pushes the image from an operator's machine, and what deploys is the digest
+  # that command writes into image.auto.tfvars.
+  - package-ecosystem: docker
+    directory: /build
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "09:00"
+      timezone: America/New_York
+
+  # The AWS provider each root requires in its versions.tofu, and the version
+  # each root's .terraform.lock.hcl resolved it to.
+  #
+  # Dependabot ships a separate `terraform` ecosystem, and `opentofu` is the one
+  # that fits these roots. It reads .tofu files as well as .tf, it resolves
+  # against registry.opentofu.org, which is the hostname these lock files key on,
+  # and it rewrites them with `tofu providers lock`. The terraform ecosystem does
+  # none of the three, and pointed here it would find no provider at all: the
+  # only thing in a versions.tf in this repository is the constraint that stops
+  # Terraform.
+  #
+  # Globs rather than a list of the eight roots, so a new stage or a new
+  # bootstrap region is covered the day someone adds it. Three globs rather than
+  # `/terraform/envs/*/*`, which would also match envs/bootstrap/nonprod and
+  # envs/bootstrap/prod, two directories that hold no configuration of their own.
+  #
+  # Grouped by dependency name, which is what collapses a provider bump across
+  # all eight roots into a single pull request. A plain `patterns` group has no
+  # effect here: grouping happens within each directory, so it would still open
+  # eight. The constraint is `~> 6.0` everywhere, so a 6.x release changes no
+  # .tofu file and only moves the locked version in each root, which is the same
+  # diff eight times.
+  - package-ecosystem: opentofu
+    directories:
+      - /terraform/envs/dev/*
+      - /terraform/envs/prod/*
+      - /terraform/envs/bootstrap/*/*
+    schedule:
+      interval: weekly
+      day: thursday
+      time: "09:00"
+      timezone: America/New_York
+    groups:
+      opentofu:
+        patterns: ["*"]
+        group-by: dependency-name
