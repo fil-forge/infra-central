@@ -808,6 +808,20 @@ Both run offline against no deployed stage, which is why `make smoke` is
 separate: it needs a stage to be up. See [Smoke-testing a
 stage](#smoke-testing-a-stage).
 
+### Dependency updates
+
+Dependabot opens the pull requests, `.github/dependabot.yml` says which and how
+often, and
+[`auto-merge-dependabot.yml`](.github/workflows/auto-merge-dependabot.yml)
+merges the ones that are minor or patch bumps. The merge is squashed and armed
+through `fil-forge-bot`, so `main` moves only after `make check` and both plans
+have passed, and the push that lands applies dev the same way any other merge
+to `main` does.
+
+A major bump stays open for someone to read. So does a group whose highest
+change is a major, and so does any Dependabot branch that carries a commit
+Dependabot did not write.
+
 ## Planned work
 
 Deliberate compromises and open questions. Some need a change outside this
