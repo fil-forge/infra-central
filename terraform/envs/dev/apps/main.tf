@@ -30,7 +30,7 @@ variable "region" {
 }
 
 variable "image_digests" {
-  description = "Pinned per service in terraform.tfvars. Dev pins digests like prod: HCP applies this workspace on every commit to main, and a rolling tag would make what dev runs depend on when a task last restarted rather than on what was merged."
+  description = "Pinned per service in terraform.tfvars. Dev pins digests like prod: this root is applied on every push to main, and a rolling tag would make what dev runs depend on when a task last restarted rather than on what was merged."
   type = object({
     sprue           = string
     hilt            = string

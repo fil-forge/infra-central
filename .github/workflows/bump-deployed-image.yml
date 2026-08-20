@@ -1,6 +1,7 @@
 # Deploys a service to the dev stage by pinning the image digest it just
 # published. Services dispatch here from their own publish workflow; the commit
-# this opens is what deploys, because HCP applies dev on every commit to main.
+# this opens is what deploys, because Check and deploy applies dev/apps on every
+# push to main.
 name: Bump deployed image
 
 on:
@@ -165,6 +166,8 @@ jobs:
           SOURCE_PR_URL: ${{ steps.req.outputs.source_pr_url }}
           RUN_URL: ${{ steps.req.outputs.run_url }}
           ACTOR: ${{ github.actor }}
+          APPS_DIR: terraform/envs/dev/apps
+          APPS_URL: ${{ github.server_url }}/${{ github.repository }}/tree/main/terraform/envs/dev/apps
         run: |
           set -euo pipefail
           short=${DIGEST#sha256:}
@@ -174,18 +177,16 @@ jobs:
             if [ -n "$SOURCE_PR_URL" ]; then
               echo "Published from $SOURCE_PR_URL"
             elif [ -n "$COMMIT" ]; then
-              echo "Published from $SOURCE_REPO@${COMMIT:0:7}, which reached main"
-              echo "without a pull request."
+              echo "Published from $SOURCE_REPO@${COMMIT:0:7}, which reached main without a pull request."
             else
               echo "Dispatched manually by @$ACTOR."
             fi
             echo
-            echo "Digest: $DIGEST"
-            [ -n "$COMMIT" ] && echo "Commit: https://github.com/$SOURCE_REPO/commit/$COMMIT"
-            [ -n "$RUN_URL" ] && echo "Publish run: $RUN_URL"
+            echo "- Digest: \`$DIGEST\`"
+            [ -n "$COMMIT" ] && echo "- Commit: https://github.com/$SOURCE_REPO/commit/$COMMIT"
+            [ -n "$RUN_URL" ] && echo "- Publish run: $RUN_URL"
             echo
-            echo "Merging applies the forge-central-dev-apps workspace in HCP"
-            echo "Terraform with no further confirmation."
+            echo "Merging applies [\`$APPS_DIR\`]($APPS_URL) with no further confirmation."
           } > "$RUNNER_TEMP/message.md"
           cat "$RUNNER_TEMP/message.md"
 
@@ -223,12 +224,16 @@ jobs:
           if [ -z "$url" ]; then
             url=$(gh pr create --base main --head "$BRANCH" \
               --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md")
+            action=Opened
           else
             gh pr edit "$url" --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md"
             { echo "Superseded by a newer image."; echo; cat "$RUNNER_TEMP/message.md"; } \
               > "$RUNNER_TEMP/comment.md"
             gh pr comment "$url" --body-file "$RUNNER_TEMP/comment.md"
+            action=Refreshed
           fi
+          echo "$action $url"
+          echo "$action $url" >> "$GITHUB_STEP_SUMMARY"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Enable auto-merge
