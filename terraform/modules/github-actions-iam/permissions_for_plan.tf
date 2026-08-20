@@ -19,6 +19,11 @@
 # cannot be expressed against a resource ARN that does not exist yet, and several
 # IAM and EC2 list actions reject a resource qualifier outright. An action that
 # reads no data is safe against "*"; that is the property this list maintains.
+#
+# lambda:Get* is where action scoping alone does not hold it. GetFunction returns
+# a presigned URL for the function's deployment package, so against "*" it lets a
+# pull request download the code of every Lambda in the account. It gets its own
+# statement below, scoped to the functions this project manages.
 data "aws_iam_policy_document" "plan" {
   statement {
     sid       = "DescribeInfrastructure"
@@ -48,7 +53,9 @@ data "aws_iam_policy_document" "plan" {
       "kms:GetKeyRotationStatus",
       "kms:ListAliases",
       "kms:ListResourceTags",
-      "lambda:Get*",
+      # lambda:Get* is not here; see DescribeStageFunctions below. The list
+      # actions are, because ListFunctions rejects a resource qualifier and the
+      # configuration it returns carries no code URL.
       "lambda:List*",
       "logs:Describe*",
       "logs:ListTagsForResource",
@@ -70,6 +77,17 @@ data "aws_iam_policy_document" "plan" {
       "servicediscovery:List*",
       "sts:GetCallerIdentity",
     ]
+  }
+
+  # Every function this project creates is named for its stage, and the prefix is
+  # what keeps that presigned code URL to images this repository builds.
+  #
+  # The region is a wildcard because these roles are account-scoped: one pair
+  # covers every region a stage is deployed into.
+  statement {
+    sid       = "DescribeStageFunctions"
+    actions   = ["lambda:Get*"]
+    resources = ["arn:aws:lambda:*:${var.account_id}:function:fc-*"]
   }
 
   # A plan reads state and takes a lock, and use_lockfile keeps the lock in a
