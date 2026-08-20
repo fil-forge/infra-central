@@ -59,7 +59,9 @@ SSM parameter paths; both spellings refer to the same service.
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                               |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                      |
 | **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                        |
-| **Two workspaces per stage**                    | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                            |
+| **Two roots per stage**                         | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                            |
+| **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                        |
+| **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                          |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                        |
 | **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                           |
 
@@ -132,16 +134,20 @@ scripts/smoke-test.sh    checks a deployed stage over public HTTPS
 # Infra configuration
 terraform/
   modules/                                         the wiring; see Stages below
-  envs/                                            one directory per workspace
-    bootstrap/<account>/<region>/                  one workspace per registry
-    dev/platform/    dev/apps/
-    prod/platform/   prod/apps/                    committed, no workspaces yet
+  envs/                                            one directory per root module
+    bootstrap/<account>/account/                   state bucket, CI roles
+    bootstrap/<account>/<region>/                  the image registry
+    dev/platform/    dev/apps/                     applied on every push to main
+    prod/platform/   prod/apps/                    committed, not deployed yet
+
+# Deployment
+.github/workflows/check-and-deploy.yml    check, then plan on a PR or apply on main
 ```
 
 ## Stages
 
-A stage is a directory pair under `terraform/envs/`, backed by two HCP
-workspaces. Everything is namespaced by the stage name, so stages coexist in one
+A stage is a directory pair under `terraform/envs/`, backed by two state files in
+the account's bucket. Everything is namespaced by the stage name, so stages coexist in one
 AWS account without colliding:
 
 - `fc-<stage>-*` resources
@@ -160,39 +166,45 @@ Files:
 terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
-  outputs.tf               re-exported for the apps workspace
+  outputs.tf               re-exported for the apps root
   image.auto.tfvars        committed, written by `make publish`
+  versions.tofu            OpenTofu version, S3 backend, providers
+  versions.tf              refuses Terraform; OpenTofu never reads it
 
 terraform/envs/<stage>/apps/       the six ECS services
-  main.tf                  reads platform outputs via tfe_outputs
+  main.tf                  reads platform outputs via terraform_remote_state
   terraform.tfvars         committed: image digests
+  versions.tofu            as above, with this root's own state key
+  versions.tf              as above
 ```
 
 Both roots stay short because `modules/platform` and `modules/apps` hold the
 wiring. That is the point of the split: a stage's root says what differs, and
 nothing else can drift between stages.
 
-The module tree mirrors that split, so each workspace can name the directories
+The module tree mirrors that split, so each root can name the directories
 it depends on:
 
 ```
 terraform/modules/
-  platform/                everything the platform workspace builds
+  platform/                everything the platform root builds
     main.tf                the wiring, calling the seven below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
   apps/                    the six ECS services
-  shared/                  used by more than one workspace
+  shared/                  used by more than one root
     ecs-service/           apps, and openbao inside platform
-    constants/             every workspace, bootstrap included
-  ecr/                     bootstrap only
+    constants/             every root, bootstrap included
+  ecr/                     regional bootstrap only
+  tfstate/                 account bootstrap only: the state bucket
+  github-actions-iam/      account bootstrap only: the two CI roles
 ```
 
-A module used by exactly one workspace lives under that workspace's composite
-module. `shared/` holds the two that genuinely cross the boundary. Adding a
-module therefore never means editing a workspace's trigger patterns in HCP
-web console.
+A module used by exactly one root lives under that root's composite module.
+`shared/` holds the two that genuinely cross the boundary. Adding a module
+therefore never means editing a trigger pattern anywhere, because the workflow
+applies both roots on every push rather than choosing between them by path.
 
-Chain configuration lives in the **platform** workspace and the apps workspace
+Chain configuration lives in the **platform** root and the apps root
 reads it from there, so a stage has one set of contract addresses rather than
 two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
 
@@ -235,9 +247,9 @@ Two per-stage settings follow, and this is where they diverge:
 
 The delegation itself lives in
 [fil-one/infrastructure](https://github.com/fil-one/infrastructure) and is added
-once per workspace: an `aws_route53_zone` for the delegated name, plus a
+once per root: an `aws_route53_zone` for the delegated name, plus a
 Cloudflare `NS` record carrying that zone's four name servers, named
-`forge-sandbox` in the non-prod workspace and `forge` in the prod one.
+`forge-sandbox` in the non-prod account and `forge` in the prod one.
 
 Those records are created with `proxied = false`, which matters: these hostnames
 serve `did:web` documents and terminate their own TLS at the ALB, so Cloudflare
@@ -297,8 +309,11 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
 ### Prerequisites
 
 - **AWS CLI**, with credentials for the target account.
-- **Terraform 1.15 or newer**, for the bootstrap workspaces and for reading a
-  stage's outputs. Stage applies themselves run on HCP's runners.
+- **[OpenTofu](https://opentofu.org) 1.12 or newer**, for the bootstrap roots and
+  for reading a stage's outputs. Stage applies themselves run in GitHub Actions.
+  Terraform is not an alternative here and every root refuses it outright: it
+  stamps a version marker into state that OpenTofu reads as being from the future,
+  so one `terraform apply` would lock OpenTofu out of that state.
 - **Docker with buildx**, for `make publish`.
 - **Go and make**, for `make check` and `make test`.
 - **[Foundry](https://getfoundry.sh)'s `cast`**, only to read chain balances by
@@ -306,49 +321,124 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
 
 ### How each part is deployed
 
-| Part                   | How it is deployed                                  |
-| ---------------------- | --------------------------------------------------- |
-| `bootstrap` workspaces | `terraform apply` run locally, always               |
-| provision image        | `make publish` run locally, pushed to ECR by hand   |
-| dev `platform`, `apps` | HCP applies every commit to `main`, no confirmation |
+| Part                   | How it is deployed                                             |
+| ---------------------- | -------------------------------------------------------------- |
+| `bootstrap` roots      | `tofu apply` run locally, always                               |
+| provision image        | `make publish` run locally, pushed to ECR by hand              |
+| dev `platform`, `apps` | GitHub Actions, on every push to `main`, with no approval step |
 
-The dev stage deploys itself. Both of its workspaces are connected to this
-repository, track `main`, and have auto-apply on, so a merge reaches dev without
-anyone running Terraform. Plans and applies execute on HCP's runners rather than
-on a laptop, which is what keeps a deploy from depending on which Terraform or
-provider version an operator happens to have installed.
+The dev stage deploys itself. `.github/workflows/check-and-deploy.yml` runs `make check` on
+every pull request and every push to `main`; a pull request then plans both roots,
+and a push applies them. A merge reaches dev without anyone running OpenTofu, and
+the version that runs is pinned in the workflow rather than being whatever an
+operator has installed.
 
-`apps` reads `platform` outputs through `tfe_outputs`, so ordering matters:
-`platform` applies first and a run trigger starts `apps` afterwards. A merge
-that touched only one of them runs only that one.
+`apps` reads `platform`'s state through `terraform_remote_state`, so ordering
+matters: the `apply-apps` job waits on `apply-platform` through a `needs:` edge, so
+it never plans against outputs an in-flight platform apply is about to change.
+Both roots are applied on every push, even one that touched only one of them. An
+empty plan costs about a minute, and it means there is no path-filter list to
+forget to update when a module moves.
 
-AWS credentials are never stored in a workspace. Each run assumes an IAM role
-in the target account through HCP's OIDC federation, and the credentials expire
-with the run.
+In a pull request the two plans run at once, and the apps plan is computed against
+the *last applied* platform state rather than against this pull request's platform
+plan. A change to a platform output that apps consumes therefore shows its real
+apps plan only after platform applies.
 
-Prod is not deployed yet: `terraform/envs/prod/` is committed, but its two HCP
-workspaces have not been created.
+AWS credentials are never stored. Each job assumes an IAM role in the target
+account through GitHub's OIDC federation, and the credentials expire with the job.
+There are two roles, and the split matters: GitHub runs the workflow file from a
+pull request's own head, so the role a plan job uses can describe infrastructure
+and read nothing, and the role that can change anything is reachable only from
+`refs/heads/main`. See `terraform/modules/github-actions-iam`.
+
+Prod is not deployed yet: `terraform/envs/prod/` is committed and neither of its
+bootstrap roots has ever been applied. No workflow names it, because its
+`terraform.tfvars` still carries `REPLACE_ME` contract addresses.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
 ### First time in an account and region
 
-The bootstrap workspaces are always applied locally. They run rarely, once per
-account and region, and they create the registry that everything else depends
-on, so there is nothing for a pipeline to trigger on and no earlier apply to
-create their state.
+The bootstrap roots are always applied locally. They run rarely, they create the
+things everything else depends on, and so there is nothing for a pipeline to
+trigger on and no earlier apply to have created their state.
+
+They come in two kinds, and the split is what keeps the second region cheap:
+
+- `bootstrap/<account>/account/` — the **state bucket** every other root in the
+  account keeps its state in, and the two **CI roles** GitHub Actions assumes to
+  plan and apply the stages. One per account. A bucket name is global and IAM is
+  not regional, so a second region must not create these again.
+- `bootstrap/<account>/<region>/` — `forge-central/provision`, the **ECR
+  repository** for the provision Lambda image. One per account *and* region:
+  Lambda pulls an image only from ECR in the same region as the function, and a
+  pull from another account needs a repository policy this project does not
+  create. Stages sharing an account and region share the repository and pin
+  different digests.
+
+One thing has to exist before the account root can be applied, and nothing here
+creates it: the **GitHub OIDC provider**,
+`https://token.actions.githubusercontent.com`. It is one per account and shared
+with every other repository that deploys into that account, so
+`modules/github-actions-iam` reads it as a data source rather than owning it —
+creating it here would fail for the second repository to try, and a destroy would
+lock the first one out of its own CI.
+
+Both accounts this project uses already have it, so this matters only for an
+account nobody has deployed to from GitHub Actions before. Check:
 
 ```bash
-terraform -chdir=terraform/envs/bootstrap/nonprod/us-east-2 init
-terraform -chdir=terraform/envs/bootstrap/nonprod/us-east-2 apply
+aws iam list-open-id-connect-providers \
+  --query "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')]"
 ```
 
-This creates `forge-central/provision`, the ECR repository for the provision
-Lambda image. There is one bootstrap directory per account and region, each with
-its own workspace and its own repository: ECR repositories are regional, Lambda
-pulls an image only from ECR in the same region as the function, and a pull from
-another account needs a repository policy this project does not create. Stages
-sharing an account and region share the repository and pin different digests.
+If that comes back empty, create it before applying the account root, or the
+apply that makes the CI roles fails on the lookup with `NoSuchEntity`:
+
+```bash
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com
+```
+
+`sts.amazonaws.com` is the audience `aws-actions/configure-aws-credentials`
+requests when the workflow does not override it, and it is what both trust
+policies require in their `aud` condition. Omit it from the client id list and
+every `sts:AssumeRoleWithWebIdentity` call is rejected. No `--thumbprint-list`:
+AWS no longer validates one for this provider.
+
+The account root is the awkward one: its own backend points at the bucket it
+creates, so the first apply in a fresh account cannot use that backend. Run it
+against a local backend once, then move its state into the bucket it just made.
+`.gitignore` already ignores `*_override.tf`, so the override cannot be committed
+by accident:
+
+```bash
+cd terraform/envs/bootstrap/nonprod/account
+
+printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+tofu init
+tofu apply -target=module.tfstate    # the bucket, and nothing else yet
+
+rm backend_override.tf
+tofu init -migrate-state             # local state moves into the bucket
+rm -f terraform.tfstate terraform.tfstate.backup
+
+tofu apply                           # the CI roles
+```
+
+Note the two role ARNs it prints. `.github/workflows/check-and-deploy.yml` names them
+literally, so if they differ from what is there, the workflow needs updating.
+
+Every root after this one is ordinary — its backend block points at a bucket that
+now exists — including the regional bootstrap beside it:
+
+```bash
+cd ../us-east-2
+tofu init
+tofu apply                           # the image registry
+```
 
 Every image this project publishes to ECR lives under the `forge-central/`
 prefix, one repository per image. Per-image repositories are what make per-image
@@ -381,9 +471,26 @@ from anyway; the account ids and the repository name live in
 cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonprod/us-west-2
 ```
 
-Change both region names in the copy: the workspace name
-(`forge-central-bootstrap-nonprod-us-west-2`) and the provider `region`. Create
-the workspace in HCP Terraform, apply, then fill the repository:
+Change two things in the copy: the `region` in the provider block, and the `key`
+in the `backend "s3"` block in `versions.tofu` (`bootstrap/us-west-2.tfstate`).
+
+Leave the backend's `region` at `us-east-2`. It names the region the *state
+bucket* is in, not the region this root deploys into, and the bucket is one per
+account — created by `bootstrap/nonprod/account/`, which a regional copy does not
+touch. Pointing it at `us-west-2` makes `tofu init` fail against a bucket that is
+sitting right there.
+
+Nothing else needs changing, and nothing needs deleting: the account-scoped
+resources are not in this directory to begin with. So there is no bootstrap dance
+here — `tofu init` works immediately, because the bucket already exists:
+
+```bash
+cd terraform/envs/bootstrap/nonprod/us-west-2
+tofu init
+tofu apply
+```
+
+Then fill the repository:
 
 ```bash
 make publish STAGE=<stage> AWS_REGION=us-west-2
@@ -394,12 +501,18 @@ the new region can pin the same digest an existing stage already runs.
 
 ### Adding an account
 
-Copy a `bootstrap/<account>/` directory, point the new copy's provider at the
-account id it belongs to, and add that id to
-`terraform/modules/shared/constants` if it is not there yet. Every root reads
-its account id from that module, so an apply run with credentials for the wrong
-account fails at plan time rather than building a second working copy of the
-stage somewhere unexpected.
+Copy a `bootstrap/<account>/` directory, both the `account/` root and the
+regional one beside it. In the copies, point each provider at the account id it
+belongs to, set the bucket name in `account/main.tf` and in both `versions.tofu`
+backend blocks, and add that id to `terraform/modules/shared/constants` if it is
+not there yet. Confirm the account has the GitHub OIDC provider, which nothing
+here creates — see [First time in an account and
+region](#first-time-in-an-account-and-region) — then apply `account/` with the
+greenfield procedure there, and the regional root after it.
+
+Every root reads its account id from that module, so an apply run with
+credentials for the wrong account fails at plan time rather than building a second
+working copy of the stage somewhere unexpected.
 
 ### Adding a stage
 
@@ -409,8 +522,10 @@ cp -r terraform/envs/dev terraform/envs/staging
 
 Then, in the copy:
 
-1. Set the workspace names in both `cloud` blocks to
-   `forge-central-staging-{platform,apps}`.
+1. Set the `key` in both `versions.tofu` files to `staging/platform.tfstate` and
+   `staging/apps.tfstate`, and the `key` in the apps root's
+   `terraform_remote_state` block to match the platform one. The bucket is
+   already right: it is per account, and staging shares the non-prod account.
 2. Change `stage = "dev"` to `"staging"` in `platform/main.tf`, and the `Stage`
    default tag in both roots.
 3. In `platform/terraform.tfvars`, set `hostname_suffix` to
@@ -418,62 +533,53 @@ Then, in the copy:
    already delegated and shared by every non-prod stage, so the DNS project
    needs no change. Point the `chain` block at the network this stage
    transacts against.
-4. Create the two HCP workspaces with those names and working directories, in
-   Remote execution mode, connected to this repository and tracking `main`.
-   They belong to the `Filecoin_Foundation` organization, in the `FilOne`
-   project. Each needs:
-   - `TFC_AWS_PROVIDER_AUTH` and `TFC_AWS_RUN_ROLE_ARN`, which a variable set
-     supplies to every workspace in the project. Nothing else authenticates to
-     AWS: the run assumes the role through OIDC and the credentials expire with
-     it.
-   - Trigger patterns covering the stage's own directory, the composite module
-     the workspace uses, and the shared modules. On `platform`:
-     `terraform/envs/staging/platform/**/*`,
-     `terraform/modules/platform/**/*`, `terraform/modules/shared/**/*`. On
-     `apps`, the same three with `apps` in place of `platform`. Without the
-     module patterns, a module change queues no plan and the stage drifts from
-     the repository without saying so. Pointing them at
-     `terraform/modules/**/*` instead works but plans both workspaces on every
-     module change.
-   - On `apps`, a run trigger on the stage's `platform` workspace, so it never
-     plans against outputs an in-flight `platform` run is about to change. Also
-     turn on **Auto-apply run triggers**, which is a separate setting from
-     auto-apply: without it, a `platform`-only change queues an `apps` plan that
-     waits for someone to confirm it.
-   - On `platform`, allow state sharing with `apps`.
-5. Start the first run by hand from **Actions → Start new run**. Merges take it
-   from there.
+4. Add the stage to `.github/workflows/check-and-deploy.yml`: two more entries in
+   the `plan` matrix, named `staging-platform` and `staging-apps`, and two more
+   apply jobs copied from dev's, with `apply-staging-apps` needing
+   `apply-staging-platform`.
+5. Add `"staging"` to `state_key_prefixes` on the `github_actions_iam` module in
+   `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
+   CI roles are granted the state keys they may touch by prefix, so without this
+   the stage's first run fails reading its own state.
+6. Update the branch protection rule on `main`. The new stage adds two required
+   checks, `plan-staging-platform` and `plan-staging-apps`, and a rule that does
+   not name them will merge a pull request whose staging plan failed.
+7. Merge. The workflow applies both roots on the same push, in order.
 
 Prod will differ from dev inside `main.tf` rather than by being a different
 shape: multi-AZ database, deletion protection on, a larger OpenBao connection
 budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
-is promoted rather than written by whatever was built last.
+is promoted rather than written by whatever was built last. It will also want a
+gated apply rather than dev's automatic one — see [Planned
+work](#planned-work).
 
 ### Bringing up a stage
 
-Merge the stage's directories to `main`. The `platform` workspace applies the
-VPC, RDS, OpenBao and the secrets; its run trigger then starts `apps`, which
-applies the six services.
+Merge the stage's directories to `main`. The `platform` root applies the VPC, RDS,
+OpenBao and the secrets; the `apply-apps` job then runs, applying the six
+services.
 
 The first `platform` apply is slow: it waits for the OpenBao task's cold start
 before it can initialise it, inside a synchronous Lambda call that Lambda caps at
-15 minutes. If it times out there, start the run again — the seed phase
-regenerates nothing that already exists, which is what protects funded wallets.
+15 minutes. If it times out there, re-run the job — the seed phase regenerates
+nothing that already exists, which is what protects funded wallets.
 
-A new stage's first run usually needs starting by hand, from **Actions → Start
-new run** in the workspace: the workspace is created after its config has already
-landed, so there is no later push for HCP to react to. Everything after that
-arrives on `main`.
+Nothing needs starting by hand. The push that adds the stage's directories is the
+same push the workflow acts on, so there is no gap between the configuration
+landing and the first apply.
 
 ### A personal sandbox stage
 
-Stage names are not limited to dev and prod. A sandbox stage in **Local**
-execution mode runs Terraform on your machine with only state in HCP, which is
-the fastest loop for iterating on the provision Lambda: no commit, no merge, no
-run to wait for. What it costs is everything the dev stage gets from HCP —
-speculative plans on pull requests, applies that cannot disagree with `main`,
-and a Terraform and provider version that is the same for everyone. Use it to
-iterate, not to host anything anyone depends on.
+Stage names are not limited to dev and prod. Copy `envs/dev` to `envs/<you>`, give
+it its own state key in the same bucket, and apply it from your machine — no
+commit, no merge, no workflow run to wait for, which is the fastest loop for
+iterating on the provision Lambda. Leave it out of `check-and-deploy.yml`; that is what
+makes it yours.
+
+What it costs is everything the dev stage gets from the workflow: a plan on every
+pull request, applies that cannot disagree with `main`, and an OpenTofu and
+provider version that is the same for everyone. Use it to iterate, not to host
+anything anyone depends on.
 
 ### Funding the wallets
 
@@ -481,7 +587,7 @@ The seed phase mints two secp256k1 wallets and reports their addresses. Both
 start empty, and nothing works until they hold funds:
 
 ```bash
-terraform -chdir=terraform/envs/dev/platform output wallet_addresses
+tofu -chdir=terraform/envs/dev/platform output wallet_addresses
 ```
 
 **Gas, for both wallets.** The delegator's transactor signs provider approvals
@@ -554,9 +660,9 @@ make publish STAGE=dev
 ```
 
 That writes the new digest into the stage's `image.auto.tfvars`, so there is no
-line to edit by hand. **Commit that file and merge it.** The stage plans in HCP,
-which sees only what is in version control, so a digest left on your machine is
-applied nowhere.
+line to edit by hand. **Commit that file and merge it.** The stage is planned by a
+workflow, which sees only what is in version control, so a digest left on your
+machine is applied nowhere.
 
 Promoting the same image to prod will be a copy of that digest into
 `terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
@@ -565,17 +671,17 @@ change is ready rather than as a side effect of a build.
 ### Deploying a service
 
 Change its digest in the stage's `image_digests` and merge. Every stage pins
-digests, dev included: HCP applies dev on every commit to `main`, and a rolling
-tag would make what dev runs depend on when a task last restarted rather than on
-what was merged.
+digests, dev included: dev is applied on every push to `main`, and a rolling tag
+would make what dev runs depend on when a task last restarted rather than on what
+was merged.
 
 ### Confirming nothing was regenerated
 
 The most important check after any apply. Read `created_parameters` from the
-run's outputs in HCP, or from a shell:
+`apply-platform` job's log, or from a shell:
 
 ```bash
-terraform -chdir=terraform/envs/dev/platform output created_parameters
+tofu -chdir=terraform/envs/dev/platform output created_parameters
 ```
 
 Empty means every key already existed and was reused. A non-empty list after
@@ -678,7 +784,7 @@ replaces it rather than leaving hilt unable to start.
 ## Development
 
 ```bash
-make check   # gofmt, go vet, go test, terraform fmt
+make check   # gofmt, go vet, go test, tofu fmt
 make test    # go test alone, for the inner loop
 ```
 
@@ -691,12 +797,26 @@ stage](#smoke-testing-a-stage).
 Deliberate compromises and open questions. Some need a change outside this
 repository; the rest are work that has not been done here yet.
 
-### CI checks
+### Prod will need a gated apply
 
-Create GitHub Actions to run `make check` for every pull request.
+Dev applies on merge with no confirmation, which is the point of a dev stage. Prod
+should not: an apply there wants a plan someone has read and approved.
 
-Configure GitHub Branch Protection rules to require passing CI checks + Terraform speculative
-preview before a PR can be merged.
+The shape is a GitHub Environment with required reviewers on the prod apply jobs,
+which turns the same workflow into plan-then-approve-then-apply without changing
+how dev behaves. Worth doing in the same change that first stands prod up, because
+a gate nobody has exercised is not a gate.
+
+### The apply role's policy is only as narrow as the last failure
+
+`modules/github-actions-iam/permissions_for_apply.tf` grants write actions per service rather than
+`AdministratorAccess`, and its IAM writes are confined to `fc-*` role names. It is
+still service-wide (`ec2:*`, `ecs:*`) where enumerating every action would churn
+on every provider upgrade.
+
+The plan role is the one that is genuinely tight, because a pull request chooses
+what the plan job runs. Narrowing the apply role further is worth doing, but it
+buys less: a push to `main` has already been reviewed.
 
 ### Automated post-deploy checks
 
@@ -796,10 +916,10 @@ control, not as the identity boundary.
 
 ### Publish the provision image from CI
 
-Terraform changes reach dev on merge, but the image the Lambda runs does not.
+Infrastructure changes reach dev on merge, but the image the Lambda runs does not.
 `make publish` is still run by hand from a developer machine with credentials for
-the target account, and the digest it writes has to be committed before a run
-will pick it up.
+the target account, and the digest it writes has to be committed before the deploy
+workflow will pick it up.
 
 A workflow on merge to `main` that publishes the image and commits the digest
 would close the last manual step. Ordering needs care: the commit carrying the
@@ -812,13 +932,15 @@ writes, and write only what it published.
 `seed_trigger` and `vault_trigger` in `modules/platform` exist for. Rotating an
 identity or hilt's OpenBao credential needs one of them bumped.
 
-Neither is reachable today. The stage roots do not expose them, and a VCS-driven
-run takes no `-var` flags, so the only way to bump one is to edit
-`envs/<stage>/platform/main.tf` and merge. Exposing both as root variables would
-let an operator change a workspace variable and start a run, which is probably
-the answer, but it puts a value that means "re-run the thing that mints wallets"
-one text field away from anyone with write access to the workspace. Worth
-deciding deliberately.
+Neither is reachable today. The stage roots do not expose them, and the workflow
+passes no `-var` flags, so the only way to bump one is to edit
+`envs/<stage>/platform/main.tf` and merge.
+
+That is arguably the right answer rather than a limitation. A committed, reviewed
+diff is what re-running the thing that mints wallets should cost, and it stays
+visible afterwards. The alternative — a workflow input anyone with write access
+could set — puts that one text field away. A `workflow_dispatch` input would be the
+middle ground if the merge ever proves too slow.
 
 ### Deploy service changes from their own repositories
 
@@ -828,7 +950,7 @@ happen when a commit lands on the service's own `main`.
 The missing piece is a `repository_dispatch` from each service's publish
 workflow into this one, carrying the service name and the digest it just pushed,
 which commits that digest to the dev stage. The commit is what deploys, so dev
-stays visible in git rather than in a workspace variable nobody reads.
+stays visible in git rather than in a CI variable nobody reads.
 
 Prod stays manual either way: a promotion is a digest copied deliberately, and a
 reviewable diff is the point.

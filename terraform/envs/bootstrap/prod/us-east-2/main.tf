@@ -1,28 +1,12 @@
-# Bootstrap for the prod account in us-east-2: the ECR repositories the prod
-# stage in this region pulls its images from.
+# Regional bootstrap for the prod account in us-east-2: the ECR repositories the
+# prod stage pulls its images from, and nothing else.
 #
 # The non-prod copy of this directory carries the full explanation of why the
-# bootstrap is a workspace of its own and why there is one per account and
-# region.
-
-terraform {
-  required_version = ">= 1.15"
-
-  cloud {
-    organization = "Filecoin_Foundation"
-
-    workspaces {
-      name = "forge-central-bootstrap-prod-us-east-2"
-    }
-  }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-  }
-}
+# state bucket and the CI roles are not here but in ../account/.
+#
+# Nothing here has been applied yet: the prod account holds no
+# forge-central/provision repository. It cannot be applied before ../account/,
+# which creates the bucket this root's backend names.
 
 provider "aws" {
   region = "us-east-2"
