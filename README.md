@@ -822,6 +822,10 @@ A major bump stays open for someone to read. So does a group whose highest
 change is a major, and so does any Dependabot branch that carries a commit
 Dependabot did not write.
 
+Dependabot rebases its pull requests in place, and the workflow runs again on
+each new head, so a branch that stops qualifying also loses the auto-merge it
+was given earlier.
+
 ## Planned work
 
 Deliberate compromises and open questions. Some need a change outside this
