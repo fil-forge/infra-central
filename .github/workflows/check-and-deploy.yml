@@ -61,19 +61,33 @@ jobs:
   # apps against a platform plan that has not been applied and may never be,
   # which is a worse thing to show a reviewer than a slightly stale one.
   #
-  # Skipped for pull requests from forks, which get no OIDC token, and for
-  # Dependabot's, which GitHub runs "as if they were opened from a repository
-  # fork" and which are therefore the same case. Nothing is lost by skipping
-  # them: a dependency bump moves an action pin or go.mod, and neither reaches a
-  # plan, because the deployed image is a digest `make publish` commits. `check`
-  # still runs on both, so neither kind of pull request is unreviewable.
+  # Skipped for pull requests from forks, which get no OIDC token and therefore
+  # cannot assume the plan role. A fork's pull request cannot satisfy the branch
+  # protection rule either, since a skipped job reports no status at all and a
+  # required check that never reports never passes. Nothing opens one today.
+  #
+  # Dependabot's are not skipped. GitHub runs them "as if they were opened from a
+  # repository fork", but the branch is in this repository and the run honours
+  # the `permissions` block below, so the job gets its OIDC token and mints the
+  # same `:pull_request` subject claim any other pull request does. The plan
+  # role's trust policy needs nothing added for it.
+  #
+  # What that accepts: a bump to an action pin runs the bumped action holding the
+  # plan role's credentials, before anyone has reviewed the bump, and a
+  # compromised upstream release is exactly the pull request Dependabot would
+  # open. Those credentials reach no data — the plan role describes
+  # infrastructure and reads nothing, no Secrets Manager, no object outside the
+  # state keys, and the state carries no password because RDS keeps the master
+  # one in Secrets Manager. The same exposure is already open to anyone with push
+  # access, who writes the workflow file their own pull request runs. See
+  # modules/github-actions-iam.
   plan:
     # Set explicitly, so the two instances report as `plan-platform` and
     # `plan-apps` rather than as GitHub's default `plan (dev/platform)`. A branch
     # protection rule has to name its required checks literally, and the flat
     # names are the ones worth typing.
     name: plan-${{ matrix.name }}
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: check
     runs-on: ubuntu-latest
     permissions:
