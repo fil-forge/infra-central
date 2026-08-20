@@ -1,0 +1,246 @@
+# Deploys a service to the dev stage by pinning the image digest it just
+# published. Services dispatch here from their own publish workflow; the commit
+# this opens is what deploys, because HCP applies dev on every commit to main.
+name: Bump deployed image
+
+on:
+  repository_dispatch:
+    types: [bump-deployed-image]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service key in image_digests
+        required: true
+      digest:
+        description: Manifest index digest, sha256:...
+        required: true
+
+# Queue rather than cancel: a cancelled run could leave a branch pushed with no
+# pull request behind it.
+concurrency:
+  group: bump-deployed-image-${{ github.event.client_payload.service || inputs.service }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump ${{ github.event.client_payload.service || inputs.service }} in dev
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Not GITHUB_TOKEN: a pull request it opens does not trigger workflows, so
+      # the checks auto-merge waits on would never start. Minted before the
+      # request is validated because the actor check below needs the app's slug.
+      - name: Mint fil-forge-bot token
+        id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.FORGE_BOT_APP_ID }}
+          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
+      # client_payload is untrusted input: every field reaches the shell through
+      # env, never through ${{ }} interpolation into a script body.
+      - name: Validate the request
+        id: req
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          APP_SLUG: ${{ steps.bot.outputs.app-slug }}
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          DIGEST: ${{ github.event.client_payload.digest || inputs.digest }}
+          SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+          COMMIT: ${{ github.event.client_payload.commit }}
+          SOURCE_PR_URL: ${{ github.event.client_payload.pr_url }}
+          RUN_URL: ${{ github.event.client_payload.run_url }}
+        run: |
+          set -euo pipefail
+          # The repository each service publishes from, mirroring the ghcr.io
+          # paths in terraform/modules/apps/main.tf.
+          case "$SERVICE" in
+            sprue)           publisher=fil-forge/sprue ;;
+            hilt)            publisher=fil-forge/hilt ;;
+            swarf)           publisher=fil-forge/swarf ;;
+            delegator)       publisher=fil-forge/delegator ;;
+            signing_service) publisher=fil-forge/piri-signing-service ;;
+            plc)             publisher=fil-forge/did-method-plc ;;
+            *) echo "::error::unknown service '$SERVICE'"; exit 1 ;;
+          esac
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "::error::malformed digest '$DIGEST'"; exit 1; }
+
+          # The link fields land in GITHUB_OUTPUT, where an embedded newline
+          # would define further outputs. Shapes are checked, empty is allowed.
+          [[ -z "$SOURCE_REPO" || "$SOURCE_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
+            || { echo "::error::malformed source_repo '$SOURCE_REPO'"; exit 1; }
+          [[ -z "$COMMIT" || "$COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "::error::malformed commit '$COMMIT'"; exit 1; }
+          for url in "$SOURCE_PR_URL" "$RUN_URL"; do
+            [[ -z "$url" || "$url" =~ ^https://github\.com/[A-Za-z0-9._/-]+$ ]] \
+              || { echo "::error::malformed url '$url'"; exit 1; }
+          done
+
+          # The commit message links to $SOURCE_REPO/commit/$COMMIT, so the two
+          # fields are only meaningful together.
+          [[ -z "$COMMIT" || -n "$SOURCE_REPO" ]] \
+            || { echo "::error::commit given without source_repo"; exit 1; }
+
+          if [ "$EVENT" = repository_dispatch ]; then
+            # Anyone holding a token with write access here can dispatch. This
+            # is the boundary that keeps that to the publish workflows.
+            [ "$ACTOR" = "${APP_SLUG}[bot]" ] \
+              || { echo "::error::dispatch from '$ACTOR', expected ${APP_SLUG}[bot]"; exit 1; }
+            # Every publisher shares that one app installation, so the payload
+            # is self-reported and this pairing catches a misconfigured publish
+            # workflow rather than a lying one.
+            [ "$SOURCE_REPO" = "$publisher" ] \
+              || { echo "::error::$SERVICE is published from $publisher, not '$SOURCE_REPO'"; exit 1; }
+          fi
+
+          {
+            echo "service=$SERVICE"
+            echo "digest=$DIGEST"
+            echo "source_repo=$SOURCE_REPO"
+            echo "commit=$COMMIT"
+            echo "source_pr_url=$SOURCE_PR_URL"
+            echo "run_url=$RUN_URL"
+            echo "branch=bot/bump-$SERVICE-image-dev"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.bot.outputs.token }}
+
+      - name: Rewrite the dev pin
+        id: edit
+        env:
+          SERVICE: ${{ steps.req.outputs.service }}
+          DIGEST: ${{ steps.req.outputs.digest }}
+        run: |
+          set -euo pipefail
+          file=terraform/envs/dev/apps/terraform.tfvars
+
+          sed -i -E \
+            "s|^([[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\")sha256:[0-9a-f]{64}(\")$|\1${DIGEST}\2|" \
+            "$file"
+
+          if [ -z "$(git diff --numstat -- "$file")" ]; then
+            echo "$SERVICE is already pinned at $DIGEST; nothing to deploy"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$(git diff --numstat -- "$file")" != "$(printf '1\t1\t%s' "$file")" ]; then
+            echo "::error::expected a one-line change"
+            git --no-pager diff -- "$file"
+            exit 1
+          fi
+          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
+            echo "::error::the rewrite did not land as expected"
+            git --no-pager diff -- "$file"
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Terraform
+        if: steps.edit.outputs.changed == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Check formatting
+        if: steps.edit.outputs.changed == 'true'
+        run: terraform fmt -check terraform/envs/dev/apps/
+
+      - name: Compose the message
+        if: steps.edit.outputs.changed == 'true'
+        id: message
+        env:
+          SERVICE: ${{ steps.req.outputs.service }}
+          DIGEST: ${{ steps.req.outputs.digest }}
+          SOURCE_REPO: ${{ steps.req.outputs.source_repo }}
+          COMMIT: ${{ steps.req.outputs.commit }}
+          SOURCE_PR_URL: ${{ steps.req.outputs.source_pr_url }}
+          RUN_URL: ${{ steps.req.outputs.run_url }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          short=${DIGEST#sha256:}
+          echo "subject=Bump $SERVICE in dev to sha256:${short:0:7}" >> "$GITHUB_OUTPUT"
+
+          {
+            if [ -n "$SOURCE_PR_URL" ]; then
+              echo "Published from $SOURCE_PR_URL"
+            elif [ -n "$COMMIT" ]; then
+              echo "Published from $SOURCE_REPO@${COMMIT:0:7}, which reached main"
+              echo "without a pull request."
+            else
+              echo "Dispatched manually by @$ACTOR."
+            fi
+            echo
+            echo "Digest: $DIGEST"
+            [ -n "$COMMIT" ] && echo "Commit: https://github.com/$SOURCE_REPO/commit/$COMMIT"
+            [ -n "$RUN_URL" ] && echo "Publish run: $RUN_URL"
+            echo
+            echo "Merging applies the forge-central-dev-apps workspace in HCP"
+            echo "Terraform with no further confirmation."
+          } > "$RUNNER_TEMP/message.md"
+          cat "$RUNNER_TEMP/message.md"
+
+      - name: Commit and push
+        if: steps.edit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          APP_SLUG: ${{ steps.bot.outputs.app-slug }}
+          BRANCH: ${{ steps.req.outputs.branch }}
+          SUBJECT: ${{ steps.message.outputs.subject }}
+        run: |
+          set -euo pipefail
+          # Attribute the commit to the app rather than to a nameless actor.
+          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+          { echo "$SUBJECT"; echo; cat "$RUNNER_TEMP/message.md"; } > "$RUNNER_TEMP/commit.txt"
+          git checkout -b "$BRANCH"
+          git commit --all --file "$RUNNER_TEMP/commit.txt"
+          git push --force origin "$BRANCH"
+
+      # One branch per service, force-pushed: a second publish updates the open
+      # pull request rather than stacking a stale one beside it.
+      - name: Open or refresh the pull request
+        if: steps.edit.outputs.changed == 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          BRANCH: ${{ steps.req.outputs.branch }}
+          SUBJECT: ${{ steps.message.outputs.subject }}
+        run: |
+          set -euo pipefail
+          url=$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [ -z "$url" ]; then
+            url=$(gh pr create --base main --head "$BRANCH" \
+              --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md")
+          else
+            gh pr edit "$url" --title "$SUBJECT" --body-file "$RUNNER_TEMP/message.md"
+            { echo "Superseded by a newer image."; echo; cat "$RUNNER_TEMP/message.md"; } \
+              > "$RUNNER_TEMP/comment.md"
+            gh pr comment "$url" --body-file "$RUNNER_TEMP/comment.md"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge
+        if: steps.edit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$armed" = true ]; then
+            echo "auto-merge is already enabled on $PR_URL"
+          else
+            gh pr merge --auto --squash "$PR_URL"
+          fi
