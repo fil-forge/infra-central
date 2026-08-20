@@ -21,9 +21,10 @@ ECR_REPO    ?= forge-central/provision
 ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 
-# Where `make publish` records the digest. The file is committed: the stage
-# plans in HCP, which sees only what is in version control. Prod pins its digest
-# in a committed terraform.tfvars, copied from dev when a change is promoted.
+# Where `make publish` records the digest. The file is committed: the stage is
+# planned by a workflow, which sees only what is in version control. Prod pins its
+# digest in a committed terraform.tfvars, copied from dev when a change is
+# promoted.
 STAGE       ?= dev
 TFVARS      := terraform/envs/$(STAGE)/platform/image.auto.tfvars
 
@@ -58,7 +59,7 @@ publish: login builder
 	  echo "  image  $(IMAGE)@$$digest"; \
 	  echo "  wrote  $(TFVARS)"; \
 	  echo; \
-	  echo "Commit $(TFVARS) so the HCP run for $(STAGE) picks up the new image."
+	  echo "Commit $(TFVARS) so the deploy workflow for $(STAGE) picks up the new image."
 
 .PHONY: builder
 builder:
@@ -101,9 +102,9 @@ check:
 	fi
 	go vet ./...
 	go test ./...
-	terraform -chdir=terraform fmt -check -recursive
+	tofu -chdir=terraform fmt -check -recursive
 
 .PHONY: fmt
 fmt:
 	gofmt -w cmd internal
-	terraform -chdir=terraform fmt -recursive
+	tofu -chdir=terraform fmt -recursive

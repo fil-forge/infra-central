@@ -1,32 +1,9 @@
 # Dev apps: the six ECS services.
 #
-# Reads the platform workspace's state rather than re-deriving anything, so a
-# routine image bump plans in seconds and never touches the database. A run
-# trigger on that workspace is what keeps the two in order: HCP applies both on
-# every commit to main, and this one has to wait for the outputs it reads.
-
-terraform {
-  required_version = ">= 1.15"
-
-  cloud {
-    organization = "Filecoin_Foundation"
-
-    workspaces {
-      name = "forge-central-dev-apps"
-    }
-  }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-    tfe = {
-      source  = "hashicorp/tfe"
-      version = "~> 0.58"
-    }
-  }
-}
+# Reads the platform root's state rather than re-deriving anything, so a routine
+# image bump plans in seconds and never touches the database. The `needs:` edge in
+# .github/workflows/check-and-deploy.yml is what keeps the two in order: both are applied on
+# every push to main, and this one has to wait for the outputs it reads.
 
 provider "aws" {
   region = var.region
@@ -64,17 +41,22 @@ variable "image_digests" {
   })
 }
 
-data "tfe_outputs" "platform" {
-  organization = "Filecoin_Foundation"
-  workspace    = "forge-central-dev-platform"
+# The platform root's state, read straight from the bucket. Bucket and key are
+# stated literally so they read the same as the backend block in
+# envs/dev/platform/versions.tofu, which cannot take a variable. Two literals
+# that have to match are easier to check than one literal and one expression.
+data "terraform_remote_state" "platform" {
+  backend = "s3"
+
+  config = {
+    bucket = "forge-central-tfstate-654654381893"
+    key    = "dev/platform.tfstate"
+    region = "us-east-2"
+  }
 }
 
 locals {
-  # nonsensitive_values, because tfe_outputs marks the whole `values` map
-  # sensitive and that taint spreads to every output derived from it. Nothing
-  # the platform workspace exports here is a secret: ARNs, subnet ids and
-  # hostnames.
-  platform = data.tfe_outputs.platform.nonsensitive_values.platform
+  platform = data.terraform_remote_state.platform.outputs.platform
 }
 
 module "apps" {
