@@ -130,6 +130,7 @@ internal/fund/           the three FilecoinPay transactions
 build/                   Lambda container image
 scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
 scripts/smoke-test.sh    checks a deployed stage over public HTTPS
+scripts/tail-logs.sh     prints the tail of every log group a stage owns
 
 # Infra configuration
 terraform/
@@ -358,6 +359,12 @@ covers the task; a newly created Route53 record or listener rule in front of it
 can take a moment longer. It needs no credentials at all, since every check goes
 over public HTTPS. See [Smoke-testing a stage](#smoke-testing-a-stage).
 
+When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
+tail of every log group the stage owns into the run, so the diagnosis is where
+the failure is. The groups are discovered from CloudWatch, so a service added to
+either root is covered. It runs on the apply role, because reading log events
+needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
+
 A failed run on `main` posts to `#filone-alerts` in Slack with the commit
 subject, its author and a link to the run. Any failed job triggers it, from
 `make check` through the smoke test. Pull request failures are not announced,
@@ -557,9 +564,10 @@ Then, in the copy:
 4. Add the stage to `.github/workflows/check-and-deploy.yml`: two more entries in
    the `plan` matrix, named `staging-platform` and `staging-apps`, two more
    apply jobs copied from dev's, with `apply-staging-apps` needing
-   `apply-staging-platform`, and a smoke job for the new stage. Add both apply
-   jobs and the smoke job to `notify-failure`'s `needs`, or a failure in them
-   announces nothing.
+   `apply-staging-platform`, a smoke job for the new stage, and a diagnose job
+   copied from dev's, which names the stage whose logs it tails. Add both apply
+   jobs and the smoke job to `notify-failure`'s `needs`; a failure in a job it
+   does not name announces nothing.
 5. Add `"staging"` to `state_key_prefixes` on the `github_actions_iam` module in
    `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
    CI roles are granted the state keys they may touch by prefix, so without this

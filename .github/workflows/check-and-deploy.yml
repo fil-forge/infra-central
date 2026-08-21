@@ -255,6 +255,44 @@ jobs:
           echo "the dev stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
+  # The stage's own logs, printed into the run when a deploy fails, so the
+  # diagnosis is in the run the alert links to rather than in the console.
+  # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
+  # added to either root is covered without this job being edited.
+  #
+  # apply-apps and smoke are the two jobs whose failure means the stage did not
+  # come up: the wait for steady state is the last step of the first, and the
+  # smoke test is the whole of the second. A failed apply-platform skips both
+  # rather than failing them, and a skipped job is not a failure, so nothing
+  # fires for it.
+  #
+  # It runs on the apply role, because reading log events needs
+  # logs:FilterLogEvents and the plan role deliberately has none of it: it may
+  # describe infrastructure and read no data. Using it here widens nothing. The
+  # same role applied the stage two jobs earlier, and it is reachable only from
+  # refs/heads/main.
+  diagnose:
+    if: failure() && github.event_name == 'push'
+    needs: [apply-apps, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-${{ github.run_id }}
+
+      # Half an hour covers the whole run: ten minutes waiting for steady state,
+      # four of smoke-test retries, and the applies before them. Fifty lines per
+      # service rather than the script's default ten, because this is the only
+      # look anyone gets before opening the console.
+      - run: scripts/tail-logs.sh dev --since 30m --lines 50
+
   # One job for the whole workflow rather than a notification step in each: a
   # failed apply and a failed smoke test want the same message, and `failure()`
   # is true here when anything above it failed. A job skipped because the run is
