@@ -352,6 +352,14 @@ traffic, so the job retries for four minutes before it fails. It needs no
 credentials at all: every check goes over public HTTPS. See [Smoke-testing a
 stage](#smoke-testing-a-stage).
 
+A failed run on `main` posts to `#filone-alerts` in Slack with the commit
+subject, its author and a link to the run. Any failed job triggers it, from
+`make check` through the smoke test. Pull request failures are not announced,
+because the author already sees the red check on the pull request. The job reads
+one repository secret, `SLACK_BOT_TOKEN`, holding the bot token of a Slack app
+with the `chat:write` scope; without the secret the notification step fails and
+nothing else about the run changes.
+
 AWS credentials are never stored. Each job assumes an IAM role in the target
 account through GitHub's OIDC federation, and the credentials expire with the job.
 There are two roles, and the split matters: GitHub runs the workflow file from a
@@ -543,7 +551,9 @@ Then, in the copy:
 4. Add the stage to `.github/workflows/check-and-deploy.yml`: two more entries in
    the `plan` matrix, named `staging-platform` and `staging-apps`, two more
    apply jobs copied from dev's, with `apply-staging-apps` needing
-   `apply-staging-platform`, and a smoke job for the new stage.
+   `apply-staging-platform`, and a smoke job for the new stage. Add both apply
+   jobs and the smoke job to `notify-failure`'s `needs`, or a failure in them
+   announces nothing.
 5. Add `"staging"` to `state_key_prefixes` on the `github_actions_iam` module in
    `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
    CI roles are granted the state keys they may touch by prefix, so without this

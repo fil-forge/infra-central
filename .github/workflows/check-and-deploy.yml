@@ -234,3 +234,52 @@ jobs:
           done
           echo "the dev stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
+
+  # One job for the whole workflow rather than a notification step in each: a
+  # failed apply and a failed smoke test want the same message, and `failure()`
+  # is true here when anything above it failed. A job skipped because the run is
+  # a pull request does not count as a failure, so a green pull request run
+  # announces nothing.
+  #
+  # Only pushes are announced. A pull request's author already sees a red check
+  # on the pull request, and a shared alert channel that fires on every failed
+  # check stops being read.
+  notify-failure:
+    if: failure() && github.event_name == 'push'
+    needs: [check, apply-platform, apply-apps, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      # Only for the commit subject below. github.event.head_commit.message
+      # would save the checkout, but it is the whole message, newlines included.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: commit
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      # Every interpolation goes through toJSON, because the payload is JSON and
+      # a commit subject is free to contain a quote or a backslash.
+      - uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Deploy of `{0}` to `dev` failed. Commit: {1} by @{2}. Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` to `dev` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit.outputs.subject, github.actor)) }}
+                  }
+                }
+              ]
+            }
