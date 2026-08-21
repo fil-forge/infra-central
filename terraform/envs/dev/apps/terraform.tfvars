@@ -10,7 +10,7 @@
 #
 image_digests = {
   sprue           = "sha256:dd4b4f93dfb9cfe4e493cd94c627e6f3f178ad3bc9454d2c9504b206f6cd0f73"
-  hilt            = "sha256:de7461f446a6a70f6ce3b44bd3c4b27dc7e5ccbf4935d1b7189c83374d05b675"
+  hilt            = "sha256:87470e2a5ab30863e9e62e776639ea72c0cba93c42b9df874f32fd37a6acf5b4"
   swarf           = "sha256:6c6c209c7cc88ebd9ce4693db8f675dfeefea6635c438585bb7778f5ad25dfa4"
   delegator       = "sha256:1df0976e1682d60f71ad32b95025a972fb9f4c8b1df27b835d542424cf782a40"
   signing_service = "sha256:75435d72ebb7cff150548f656e8013962d14262fdb322181249412b79dec2ba5"
