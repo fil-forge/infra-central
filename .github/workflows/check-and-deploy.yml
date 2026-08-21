@@ -197,3 +197,40 @@ jobs:
       - run: tofu init -input=false
 
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+  # The check the two applies cannot make: that the stage actually answers.
+  # `tofu apply` reports success once AWS accepted the change, which for an ECS
+  # service means the new task definition was registered, not that a task is
+  # serving traffic on it.
+  #
+  # No AWS credentials and no OIDC token: every check goes over public HTTPS, and
+  # the hostnames come from the stage's committed terraform.tfvars. curl, jq and
+  # make are already on the runner.
+  smoke:
+    if: github.event_name == 'push'
+    needs: apply-apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Retried, because apply returns before ECS has finished rolling out. A
+      # rolling update keeps the old tasks serving while the new ones start, so
+      # the usual case passes on the first attempt; a service deployed for the
+      # first time has nothing to serve from until its task passes a health
+      # check, which is what the wait is for.
+      #
+      # Four minutes of retries and then a failure. A stage still down after
+      # four minutes is broken, and the alert should fire.
+      - name: make smoke STAGE=dev
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "=== attempt $attempt of 5, after 60s ==="
+              sleep 60
+            fi
+            if make smoke STAGE=dev; then
+              exit 0
+            fi
+          done
+          echo "the dev stage did not come up: 5 attempts over 4 minutes" >&2
+          exit 1

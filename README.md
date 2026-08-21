@@ -141,7 +141,7 @@ terraform/
     prod/platform/   prod/apps/                    committed, not deployed yet
 
 # Deployment
-.github/workflows/check-and-deploy.yml    check, then plan on a PR or apply on main
+.github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
 ```
 
 ## Stages
@@ -329,9 +329,9 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
 
 The dev stage deploys itself. `.github/workflows/check-and-deploy.yml` runs `make check` on
 every pull request and every push to `main`; a pull request then plans both roots,
-and a push applies them. A merge reaches dev without anyone running OpenTofu, and
-the version that runs is pinned in the workflow rather than being whatever an
-operator has installed.
+and a push applies them and smoke-tests the stage. A merge reaches dev without
+anyone running OpenTofu, and the version that runs is pinned in the workflow
+rather than being whatever an operator has installed.
 
 `apps` reads `platform`'s state through `terraform_remote_state`, so ordering
 matters: the `apply-apps` job waits on `apply-platform` through a `needs:` edge, so
@@ -344,6 +344,13 @@ In a pull request the two plans run at once, and the apps plan is computed again
 the *last applied* platform state rather than against this pull request's platform
 plan. A change to a platform output that apps consumes therefore shows its real
 apps plan only after platform applies.
+
+`make smoke STAGE=dev` runs last, once both applies have finished. An apply
+reports success as soon as AWS accepted the change, which for an ECS service
+means a task definition was registered rather than that a task is serving
+traffic, so the job retries for four minutes before it fails. It needs no
+credentials at all: every check goes over public HTTPS. See [Smoke-testing a
+stage](#smoke-testing-a-stage).
 
 AWS credentials are never stored. Each job assumes an IAM role in the target
 account through GitHub's OIDC federation, and the credentials expire with the job.
@@ -534,9 +541,9 @@ Then, in the copy:
    needs no change. Point the `chain` block at the network this stage
    transacts against.
 4. Add the stage to `.github/workflows/check-and-deploy.yml`: two more entries in
-   the `plan` matrix, named `staging-platform` and `staging-apps`, and two more
+   the `plan` matrix, named `staging-platform` and `staging-apps`, two more
    apply jobs copied from dev's, with `apply-staging-apps` needing
-   `apply-staging-platform`.
+   `apply-staging-platform`, and a smoke job for the new stage.
 5. Add `"staging"` to `state_key_prefixes` on the `github_actions_iam` module in
    `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
    CI roles are granted the state keys they may touch by prefix, so without this
@@ -721,6 +728,9 @@ way, so `/.well-known/did.json` is read and its `id` compared against
 `did:web:<hostname>`. A mismatch means the service is running an identity
 nothing has registered against.
 
+The same command runs in CI after every push to `main` applies dev. See [How
+each part is deployed](#how-each-part-is-deployed).
+
 The script reads `hostname_suffix` from the stage's
 `platform/terraform.tfvars`, so it needs no Terraform state and no TFE token.
 Services are probed concurrently: a task that accepts the connection and never
@@ -851,11 +861,6 @@ on every provider upgrade.
 The plan role is the one that is genuinely tight, because a pull request chooses
 what the plan job runs. Narrowing the apply role further is worth doing, but it
 buys less: a push to `main` has already been reviewed.
-
-### Automated post-deploy checks
-
-After Terraform applies changes, run the smoke tests to verify that the stage is up and running
-correctly.
 
 ### Onboarding a regional appliance has no tooling
 
