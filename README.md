@@ -345,12 +345,18 @@ the *last applied* platform state rather than against this pull request's platfo
 plan. A change to a platform output that apps consumes therefore shows its real
 apps plan only after platform applies.
 
-`make smoke STAGE=dev` runs last, once both applies have finished. An apply
-reports success as soon as AWS accepted the change, which for an ECS service
-means a task definition was registered rather than that a task is serving
-traffic, so the job retries for four minutes before it fails. It needs no
-credentials at all: every check goes over public HTTPS. See [Smoke-testing a
-stage](#smoke-testing-a-stage).
+An apply reports success as soon as AWS accepted the change, which for an ECS
+service means a task definition was registered rather than that a task is
+serving traffic on it. `apply-apps` therefore ends by waiting for every service
+in the cluster to reach steady state, and a task that never becomes healthy
+fails the job after ten minutes. Without that wait a smoke test can pass against
+the revision the push replaced, because a rolling update keeps the old task
+answering.
+
+`make smoke STAGE=dev` runs after it and retries for four minutes. Steady state
+covers the task; a newly created Route53 record or listener rule in front of it
+can take a moment longer. It needs no credentials at all, since every check goes
+over public HTTPS. See [Smoke-testing a stage](#smoke-testing-a-stage).
 
 A failed run on `main` posts to `#filone-alerts` in Slack with the commit
 subject, its author and a link to the run. Any failed job triggers it, from
@@ -758,6 +764,10 @@ Two gaps it names in its own output rather than passing over:
 - **piri-signing-service** takes a `did:web` but serves no document at it. It is
   the only service no other service addresses by DID, so nothing resolves it
   today.
+
+Run by hand it also says nothing about which revision answered. No service
+reports its build, so a stage mid-rollout can pass on the old task. In CI the
+`apply-apps` job closes that by waiting for steady state first.
 
 ### Rotating a service identity
 

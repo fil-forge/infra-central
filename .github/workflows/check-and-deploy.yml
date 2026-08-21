@@ -198,10 +198,32 @@ jobs:
 
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
-  # The check the two applies cannot make: that the stage actually answers.
-  # `tofu apply` reports success once AWS accepted the change, which for an ECS
-  # service means the new task definition was registered, not that a task is
-  # serving traffic on it.
+      # apply returns once AWS accepted the change: for an ECS service that means
+      # a new task definition was registered. A rolling update keeps the old task
+      # answering until the new one passes its health check, so without this wait
+      # the smoke test below can pass against the revision this push replaced and
+      # a deploy whose new task never starts still goes green.
+      #
+      # Every service in the cluster, listed rather than named, so a service added
+      # to the apps root is waited on without this step being edited. That covers
+      # openbao too, which the platform apply above rolls out.
+      #
+      # No deployment circuit breaker is configured, so a task that never becomes
+      # healthy leaves the deployment unstable rather than being rolled back: the
+      # wait runs out after ten minutes and the job fails. `wait services-stable`
+      # takes at most ten services per call, hence the xargs.
+      - name: wait for every service to reach steady state
+        run: |
+          set -o pipefail
+          cluster="$(tofu output -raw cluster_arn)"
+          aws ecs list-services --cluster "$cluster" --query 'serviceArns[]' --output text \
+            | tr '\t' '\n' \
+            | xargs -r -n 10 aws ecs wait services-stable --cluster "$cluster" --services
+
+  # The check the applies cannot make: that the stage answers from the outside.
+  # A service reaching steady state says its task passes its own container health
+  # check; it says nothing about the Route53 record, the certificate or the
+  # listener rule in front of it.
   #
   # No AWS credentials and no OIDC token: every check goes over public HTTPS, and
   # the hostnames come from the stage's committed terraform.tfvars. curl, jq and
@@ -213,14 +235,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Retried, because apply returns before ECS has finished rolling out. A
-      # rolling update keeps the old tasks serving while the new ones start, so
-      # the usual case passes on the first attempt; a service deployed for the
-      # first time has nothing to serve from until its task passes a health
-      # check, which is what the wait is for.
+      # Retried anyway, because steady state is not the whole ingress path. A
+      # newly created Route53 record or listener rule takes a moment longer than
+      # the task behind it, and DNS on the runner is not warm.
       #
-      # Four minutes of retries and then a failure. A stage still down after
-      # four minutes is broken, and the alert should fire.
+      # Four minutes of retries and then a failure. A stage still unreachable
+      # after four minutes is broken, and the alert should fire.
       - name: make smoke STAGE=dev
         run: |
           for attempt in 1 2 3 4 5; do
