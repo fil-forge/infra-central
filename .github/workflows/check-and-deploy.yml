@@ -197,3 +197,147 @@ jobs:
       - run: tofu init -input=false
 
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+      # apply returns once AWS accepted the change: for an ECS service that means
+      # a new task definition was registered. A rolling update keeps the old task
+      # answering until the new one passes its health check, so without this wait
+      # the smoke test below can pass against the revision this push replaced and
+      # a deploy whose new task never starts still goes green.
+      #
+      # Every service in the cluster, listed rather than named, so a service added
+      # to the apps root is waited on without this step being edited. That covers
+      # openbao too, which the platform apply above rolls out.
+      #
+      # No deployment circuit breaker is configured, so a task that never becomes
+      # healthy leaves the deployment unstable rather than being rolled back: the
+      # wait runs out after ten minutes and the job fails. `wait services-stable`
+      # takes at most ten services per call, hence the xargs.
+      - name: wait for every service to reach steady state
+        run: |
+          set -o pipefail
+          cluster="$(tofu output -raw cluster_arn)"
+          aws ecs list-services --cluster "$cluster" --query 'serviceArns[]' --output text \
+            | tr '\t' '\n' \
+            | xargs -r -n 10 aws ecs wait services-stable --cluster "$cluster" --services
+
+  # The check the applies cannot make: that the stage answers from the outside.
+  # A service reaching steady state says its task passes its own container health
+  # check; it says nothing about the Route53 record, the certificate or the
+  # listener rule in front of it.
+  #
+  # No AWS credentials and no OIDC token: every check goes over public HTTPS, and
+  # the hostnames come from the stage's committed terraform.tfvars. curl, jq and
+  # make are already on the runner.
+  smoke:
+    if: github.event_name == 'push'
+    needs: apply-apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Retried anyway, because steady state is not the whole ingress path. A
+      # newly created Route53 record or listener rule takes a moment longer than
+      # the task behind it, and DNS on the runner is not warm.
+      #
+      # Four minutes of retries and then a failure. A stage still unreachable
+      # after four minutes is broken, and the alert should fire.
+      - name: make smoke STAGE=dev
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "=== attempt $attempt of 5, after 60s ==="
+              sleep 60
+            fi
+            if make smoke STAGE=dev; then
+              exit 0
+            fi
+          done
+          echo "the dev stage did not come up: 5 attempts over 4 minutes" >&2
+          exit 1
+
+  # The stage's own logs, printed into the run when a deploy fails, so the
+  # diagnosis is in the run the alert links to rather than in the console.
+  # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
+  # added to either root is covered without this job being edited.
+  #
+  # apply-apps and smoke are the two jobs whose failure means the stage did not
+  # come up: the wait for steady state is the last step of the first, and the
+  # smoke test is the whole of the second. A failed apply-platform skips both
+  # rather than failing them, and a skipped job is not a failure, so nothing
+  # fires for it.
+  #
+  # It runs on the apply role, because reading log events needs
+  # logs:FilterLogEvents and the plan role deliberately has none of it: it may
+  # describe infrastructure and read no data. Using it here widens nothing. The
+  # same role applied the stage two jobs earlier, and it is reachable only from
+  # refs/heads/main.
+  diagnose:
+    if: failure() && github.event_name == 'push'
+    needs: [apply-apps, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-${{ github.run_id }}
+
+      # Half an hour covers the whole run: ten minutes waiting for steady state,
+      # four of smoke-test retries, and the applies before them. Fifty lines per
+      # service rather than the script's default ten, because this is the only
+      # look anyone gets before opening the console.
+      - run: scripts/tail-logs.sh dev --since 30m --lines 50
+
+  # One job for the whole workflow rather than a notification step in each: a
+  # failed apply and a failed smoke test want the same message, and `failure()`
+  # is true here when anything above it failed. A job skipped because the run is
+  # a pull request does not count as a failure, so a green pull request run
+  # announces nothing.
+  #
+  # Only pushes are announced. A pull request's author already sees a red check
+  # on the pull request, and a shared alert channel that fires on every failed
+  # check stops being read.
+  notify-failure:
+    if: failure() && github.event_name == 'push'
+    needs: [check, apply-platform, apply-apps, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      # Only for the commit subject below. github.event.head_commit.message
+      # would save the checkout, but it is the whole message, newlines included.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: commit
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      # Every interpolation goes through toJSON, because the payload is JSON and
+      # a commit subject is free to contain a quote or a backslash.
+      - uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Deploy of `{0}` to `dev` failed. Commit: {1} by @{2}. Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` to `dev` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit.outputs.subject, github.actor)) }}
+                  }
+                }
+              ]
+            }

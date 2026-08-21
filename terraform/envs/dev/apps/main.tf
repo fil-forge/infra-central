@@ -110,3 +110,9 @@ output "service_urls" {
 output "service_dids" {
   value = module.apps.service_dids
 }
+
+# Read by the deploy workflow, which waits for every service in the cluster to
+# reach steady state before the stage is smoke-tested.
+output "cluster_arn" {
+  value = local.platform.cluster_arn
+}
