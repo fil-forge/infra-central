@@ -10,6 +10,9 @@
 # ephemeral identity when no key is supplied and report themselves healthy either
 # way, so a DID matching the hostname is what proves the key arrived from SSM.
 #
+# OpenBao is covered too. It answers at ssm.<suffix> rather than at its own name,
+# because regional appliances authenticate there at boot to unseal.
+#
 # plc is not covered. It has no public hostname, and reaching it would need AWS
 # credentials and an `ecs describe-services` call.
 #
@@ -28,7 +31,7 @@
 set -euo pipefail
 
 case "${1-}" in
-  -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "")        echo "usage: scripts/smoke-test.sh <stage>" >&2; exit 2 ;;
   -*)        echo "unknown option: $1" >&2; exit 2 ;;
 esac
@@ -54,20 +57,26 @@ SUFFIX="$(sed -n 's/^hostname_suffix[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]
   exit 1
 }
 
-# service : health path : serves a did:web document
+# service : hostname label : health path : serves a did:web document
 #
 # Health paths disagree per service, which is why this is a table and not a
-# constant. plc is absent because it has no public hostname.
+# constant. The hostname label is spelled out for the same reason: openbao is
+# reached at ssm.<suffix>. plc is absent because it has no public hostname.
+#
+# openbao's path omits the uninitcode=200 the ALB health check passes. ECS has to
+# keep a fresh task alive for the provision Lambda to initialise it; a stage that
+# has been deployed and is still uninitialised is a failure, and 501 says so.
 #
 # piri-signing-service takes a did:web through SIGNING_SERVICE_SERVICE_DID but
 # serves no document at it, so its DID resolves nowhere. Nothing resolves it
 # today: it is the only service no other service addresses by DID.
 SERVICES=(
-  "sprue:/health:yes"
-  "hilt:/health:yes"
-  "swarf:/health:yes"
-  "delegator:/healthcheck:yes"
-  "signing-service:/healthcheck:no"
+  "sprue:sprue:/health:yes"
+  "hilt:hilt:/health:yes"
+  "swarf:swarf:/health:yes"
+  "delegator:delegator:/healthcheck:yes"
+  "signing-service:signing-service:/healthcheck:no"
+  "openbao:ssm:/v1/sys/health?standbyok=true:no"
 )
 
 # Every request is bounded. A hung smoke test is worse than a failing one, and
@@ -122,9 +131,9 @@ check_did() {
   fi
 }
 
-# check_service <service> <health path> <serves did>
+# check_service <hostname label> <health path> <serves did>
 check_service() {
-  local service="$1" path="$2" serves_did="$3" host="${1}.${SUFFIX}"
+  local path="$2" serves_did="$3" host="${1}.${SUFFIX}"
 
   check_health "$host" "$path"
 
@@ -136,7 +145,7 @@ check_service() {
 }
 
 echo "=== Smoke-test the ${STAGE} stage ==="
-echo "  Hostnames: <service>.${SUFFIX}"
+echo "  Hostnames: <service>.${SUFFIX}, openbao at ssm.${SUFFIX}"
 echo
 
 # One job per service. A service whose target group has nothing healthy answers
@@ -148,8 +157,8 @@ results="$(mktemp -d)"
 trap 'rm -rf "$results"' EXIT
 
 for entry in "${SERVICES[@]}"; do
-  IFS=: read -r service path serves_did <<<"$entry"
-  check_service "$service" "$path" "$serves_did" >"$results/$service" 2>&1 &
+  IFS=: read -r service label path serves_did <<<"$entry"
+  check_service "$label" "$path" "$serves_did" >"$results/$service" 2>&1 &
 done
 
 wait

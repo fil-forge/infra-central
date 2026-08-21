@@ -738,6 +738,11 @@ way, so `/.well-known/did.json` is read and its `id` compared against
 `did:web:<hostname>`. A mismatch means the service is running an identity
 nothing has registered against.
 
+OpenBao is checked too, at `ssm.<suffix>` rather than at its own name. The
+request omits the `uninitcode=200` its ALB health check passes: ECS has to keep a
+fresh task alive long enough for the provision Lambda to initialise it, but a
+stage that has finished deploying and is still uninitialised is a failure.
+
 The same command runs in CI after every push to `main` applies dev. See [How
 each part is deployed](#how-each-part-is-deployed).
 
