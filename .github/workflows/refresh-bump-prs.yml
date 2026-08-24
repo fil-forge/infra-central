@@ -78,11 +78,14 @@ jobs:
           # alone would pick up a pull request whose head is no ref of ours.
           # --limit, because the default page of 30 could hide a bump behind a
           # queue of Dependabot pull requests.
-          branches=$(gh pr list --state open --limit 100 \
+          opened=$(gh pr list --state open --limit 100 \
             --author "app/${APP_SLUG}" \
             --json headRefName,isCrossRepository \
-            --jq '.[] | select(.isCrossRepository | not) | .headRefName' \
-            | grep -E '^bot/bump-[a-z_]+-image-dev$' || true)
+            --jq '.[] | select(.isCrossRepository | not) | .headRefName')
+          # Its own statement, so `|| true` covers grep finding no bump and
+          # nothing else. On one pipeline it would also swallow an outage or an
+          # expired token, and the run would report having refreshed everything.
+          branches=$(grep -E '^bot/bump-[a-z_]+-image-dev$' <<<"$opened" || true)
           if [ -z "$branches" ]; then
             echo "no open bump pull requests"
             exit 0
