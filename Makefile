@@ -84,6 +84,19 @@ DEPOSIT   ?= 3
 fund-payer:
 	scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
 
+# Mint a regional appliance's unseal credential. The region's transit key must
+# already exist, which means its label committed to appliance_regions and merged.
+#
+#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7
+#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7 TOKEN_ARGS=--reissue
+REGION     ?=
+NODE_IP    ?=
+TOKEN_ARGS ?=
+
+.PHONY: mint-appliance-token
+mint-appliance-token:
+	scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
+
 .PHONY: test
 test:
 	go test ./...

@@ -7,10 +7,15 @@
 // private key ever enters Terraform state, and nothing is written to a local
 // disk anywhere in the flow.
 //
-// Two phases, because the ordering is circular otherwise. OpenBao stores its
-// data in Postgres, so its database must exist before it starts; but OpenBao
-// must be running before it can be configured. Phase seed runs after RDS and
-// before OpenBao; phase vault runs once OpenBao is serving.
+// Terraform drives two phases, because the ordering is circular otherwise.
+// OpenBao stores its data in Postgres, so its database must exist before it
+// starts; but OpenBao must be running before it can be configured. Phase seed
+// runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
+//
+// Two more phases exist that Terraform must never invoke, because an apply must
+// not move money or issue a credential. Phase fund deposits USDFC for the payer
+// and phase appliance-token mints a regional appliance's unseal credential; both
+// are run by an operator through a script that shows the plan and asks first.
 package main
 
 import (
@@ -50,12 +55,29 @@ type Request struct {
 	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
 	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
 
-	// --- fund phase only ---
+	// --- appliance-token phase only ---
 
-	// Confirm must be true before the fund phase signs anything. Without it the
-	// phase reports its plan and stops, so no invocation moves money by
-	// accident.
+	// Region is the appliance's region label, naming its transit key and policy.
+	Region string `json:"region,omitempty"`
+	// NodeCIDR is the node's egress address, its Elastic IP as a /32. The token
+	// is bound to it and is worthless anywhere else.
+	NodeCIDR string `json:"node_cidr,omitempty"`
+	// Period and WrapTTL override the defaults in appliancetoken.go.
+	Period  string `json:"period,omitempty"`
+	WrapTTL string `json:"wrap_ttl,omitempty"`
+	// Reissue revokes the region's existing token before minting another.
+	// Without it a region that already has a live token is refused, because two
+	// standing credentials for one node is a state nothing can reason about.
+	Reissue bool `json:"reissue,omitempty"`
+
+	// --- fund and appliance-token phases ---
+
+	// Confirm must be true before a phase signs or mints anything. Without it
+	// the phase reports its plan and stops, so no invocation moves money or
+	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
+
+	// --- fund phase only ---
 
 	// Amounts are decimal USDFC strings exactly as the operator typed them, so
 	// the number shown in the confirmation prompt is the number that is signed.
@@ -90,10 +112,18 @@ type Response struct {
 	ApplianceKeys     []string `json:"appliance_keys,omitempty"`
 	RetiredAppliances []string `json:"retired_appliances,omitempty"`
 
-	// DryRun is true when the fund phase reported a plan without signing.
+	// DryRun is true when a phase reported a plan without acting.
 	DryRun     bool         `json:"dry_run,omitempty"`
 	FundPlan   *fund.Plan   `json:"fund_plan,omitempty"`
 	FundResult *fund.Result `json:"fund_result,omitempty"`
+
+	// TokenPlan and TokenResult belong to the appliance-token phase.
+	//
+	// TokenResult is the one field in this struct that is not safe to put in
+	// Terraform state: it carries a wrapping token that exchanges for a live
+	// credential. That is why no aws_lambda_invocation calls that phase.
+	TokenPlan   *TokenPlan   `json:"token_plan,omitempty"`
+	TokenResult *TokenResult `json:"token_result,omitempty"`
 }
 
 func main() {
@@ -134,8 +164,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.vault(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
+	case "appliance-token":
+		return deps.applianceToken(ctx, req)
 	default:
-		return nil, fmt.Errorf("unknown phase %q; want \"seed\", \"vault\" or \"fund\"", req.Phase)
+		return nil, fmt.Errorf(
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\" or \"appliance-token\"", req.Phase)
 	}
 }
 
