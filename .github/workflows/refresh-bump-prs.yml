@@ -26,6 +26,13 @@ on:
       # run a bump push starts here rebuilds it right away. Rebuild pushes
       # start a run too; it finds every branch current and stops.
       - bot/bump-*-image-dev
+  # A service's first bump pushes its branch before it opens the pull request,
+  # so the run that push starts can list pull requests before this one exists
+  # and find nothing to rebuild. Opening it starts a run of its own, which the
+  # concurrency group holds until the first finishes, and that run sees it.
+  # The app opens these, and a pull request opened by an app triggers workflows.
+  pull_request:
+    types: [opened]
 
 permissions:
   contents: read
@@ -34,6 +41,13 @@ jobs:
   refresh:
     name: Refresh bump pull requests
     runs-on: ubuntu-latest
+    # Before the checkout, so an unrelated pull request costs nothing. A fork
+    # cannot reach the signing key anyway, so admitting one would only fail the
+    # token step loudly on every fork branch that borrowed the name.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository
+      && startsWith(github.event.pull_request.head.ref, 'bot/bump-'))
     steps:
       # Not GITHUB_TOKEN: a push it makes starts no workflows, so the checks the
       # refreshed pull request needs would never run and auto-merge would wait
