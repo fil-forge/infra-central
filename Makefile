@@ -94,6 +94,10 @@ test:
 smoke:
 	scripts/smoke-test.sh $(STAGE)
 
+# Scripts are discovered rather than listed, so one added under scripts/ is checked
+# without the recipe being edited. Only tracked files: an untracked script is skipped
+# here and caught by CI, which checks out the tree. xargs -r so shellcheck is never
+# invoked with no arguments, where it would read stdin and hang.
 .PHONY: check
 check:
 	@unformatted=$$(gofmt -l cmd internal); \
@@ -103,6 +107,7 @@ check:
 	go vet ./...
 	go test ./...
 	tofu -chdir=terraform fmt -check -recursive
+	git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
 .PHONY: fmt
 fmt:

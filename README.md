@@ -317,6 +317,9 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   so one `terraform apply` would lock OpenTofu out of that state.
 - **Docker with buildx**, for `make publish`.
 - **Go and make**, for `make check` and `make test`.
+- **[ShellCheck](https://www.shellcheck.net)**, for the shell half of `make
+  check`. CI pins 0.11.0, so that build is the one that decides a merge; an
+  older local one can pass a script CI rejects.
 - **[Foundry](https://getfoundry.sh)'s `cast`**, only to read chain balances by
   hand. Nothing in the deploy path needs it.
 
@@ -843,7 +846,7 @@ replaces it rather than leaving hilt unable to start.
 ## Development
 
 ```bash
-make check   # gofmt, go vet, go test, tofu fmt
+make check   # gofmt, go vet, go test, tofu fmt, shellcheck
 make test    # go test alone, for the inner loop
 ```
 

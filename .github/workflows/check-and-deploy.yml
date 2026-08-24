@@ -27,6 +27,10 @@ env:
   # Pinned rather than latest. What deploys must not change because a new release
   # landed between two merges.
   TOFU_VERSION: 1.12.5
+  # Pinned for the same reason as the tofu version: a shellcheck release that
+  # adds a check would otherwise start failing merges that had nothing to do
+  # with it. The runner image ships 0.9.0, older than the current brew build.
+  SHELLCHECK_VERSION: 0.11.0
   AWS_REGION: us-east-2
   # Describes infrastructure and reads no data, because a pull request chooses
   # what the plan jobs run. See modules/github-actions-iam.
@@ -34,9 +38,9 @@ env:
   APPLY_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-apply
 
 jobs:
-  # gofmt, go vet, go test and tofu fmt. No AWS credentials: everything in
-  # `make check` runs offline against no deployed stage, which is what lets it
-  # gate the jobs that do have credentials.
+  # gofmt, go vet, go test, tofu fmt and shellcheck. No AWS credentials:
+  # everything in `make check` runs offline against no deployed stage, which is
+  # what lets it gate the jobs that do have credentials.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +54,18 @@ jobs:
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
+
+      # Into RUNNER_TEMP rather than /usr/local/bin, which needs sudo. The release
+      # publishes no checksum file.
+      - name: install shellcheck
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ -f - -C "$RUNNER_TEMP" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          echo "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+          # GITHUB_PATH applies to later steps, so a bare `shellcheck` here
+          # would report the runner image's 0.9.0 instead.
+          "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" --version
 
       - run: make check
 
