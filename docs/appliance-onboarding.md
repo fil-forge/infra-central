@@ -172,10 +172,24 @@ retired_appliance_regions = ["us-east-9"]
 The apply revokes the node's unseal token, deletes its token role, destroys its transit key and
 deletes its parameters. **This is not reversible and it is not partial.** The node behind that key
 can never unseal again, and everything on its disks stays encrypted with a key that no longer
-exists. That is the intended effect: it is the containment lever RFC 21 is built around.
+exists.
 
 Keep the retired label in the list. Removing it from both lists is what the apply refuses, and that
 refusal is what protects every other region's key from a typo.
 
-Retiring does not deregister the node from sprue, hilt or the delegator. A node that cannot unseal
-serves nothing, so those rows are tidying rather than containment, and they are removed by hand.
+### Retiring a node you no longer trust
+
+The apply takes effect at the node's next unseal. Transit unseal happens at boot, so an appliance
+that is already running holds its key in memory and keeps serving traffic until it restarts, which
+an operator you are retiring against has no reason to do.
+
+Evicting such a node starts at the registries, and the apply comes last. Both eviction steps are
+manual, and hilt's provider row has no command yet:
+
+- **sprue** stops sending uploads once the Piri is deregistered, with `sprue client admin`.
+- **The delegator** refuses the appliance's next `piri init` once its DID is deleted from the
+  allow list.
+- **hilt** keeps its provider row, because hilt ships no command to remove one. Correcting it means
+  editing hilt's database by hand.
+
+With those done, merge the retirement and the node cannot come back after any restart.
