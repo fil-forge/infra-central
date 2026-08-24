@@ -182,6 +182,11 @@ func (d *deps) mintApplianceToken(ctx context.Context, client *api.Client, req R
 	// Record the accessor before returning. An unrecorded accessor is a token
 	// nothing can revoke, which is worse than a failed mint the operator can
 	// simply run again.
+	//
+	// A crash between the mint above and this write strands a token nothing
+	// records, and the operator's retry mints a second one. The stranded token
+	// needs no clean-up: its wrapping token was returned to nobody, it is bound
+	// to the node's own address, and unrenewed it dies at the end of its period.
 	if err := d.store.PutPublic(ctx, applianceService(req.Region), unsealTokenAccessorKey, accessor); err != nil {
 		return nil, err
 	}
