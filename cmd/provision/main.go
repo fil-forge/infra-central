@@ -39,6 +39,17 @@ type Request struct {
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
 
+	// --- vault phase only ---
+
+	// ApplianceRegions and RetiredApplianceRegions are the region labels this
+	// stage seals appliances for, and the ones it has retired. Both come from
+	// committed tfvars, so they reach the phase through the invocation input and
+	// changing either re-invokes on their own. Git is the source of truth: the
+	// phase reconciles OpenBao against these two lists and refuses to touch a
+	// key that neither one names.
+	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
+	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
+
 	// --- fund phase only ---
 
 	// Confirm must be true before the fund phase signs anything. Without it the
@@ -73,6 +84,11 @@ type Response struct {
 
 	// Initialised reports whether this invocation initialised OpenBao.
 	Initialised bool `json:"initialised,omitempty"`
+
+	// ApplianceKeys lists the transit keys this stage now holds, one per live
+	// region. Retired lists the regions this invocation destroyed keys for.
+	ApplianceKeys     []string `json:"appliance_keys,omitempty"`
+	RetiredAppliances []string `json:"retired_appliances,omitempty"`
 
 	// DryRun is true when the fund phase reported a plan without signing.
 	DryRun     bool         `json:"dry_run,omitempty"`
@@ -115,7 +131,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	case "seed":
 		return deps.seed(ctx)
 	case "vault":
-		return deps.vault(ctx)
+		return deps.vault(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
 	default:

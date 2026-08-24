@@ -23,8 +23,9 @@ const openBaoStartupBudget = 4 * time.Minute
 const openBaoUnsealBudget = 1 * time.Minute
 
 // vault configures a running OpenBao: initialise if needed, mount what Forge
-// uses, and give hilt an AppRole scoped to its own subtree.
-func (d *deps) vault(ctx context.Context) (*Response, error) {
+// uses, give hilt an AppRole scoped to its own subtree, and reconcile the
+// appliance transit keys against the stage's committed region lists.
+func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 	if d.cfg.OpenBaoAddr == "" {
 		return nil, fmt.Errorf("FORGE_OPENBAO_ADDR is required for the vault phase")
 	}
@@ -91,10 +92,101 @@ func (d *deps) vault(ctx context.Context) (*Response, error) {
 		return nil, err
 	}
 
+	if err := d.reconcileApplianceKeys(ctx, client, req, resp); err != nil {
+		return nil, err
+	}
+
 	slog.Info("vault phase complete",
 		"initialised", resp.Initialised,
-		"hilt_mount", vaultinit.HiltMount)
+		"hilt_mount", vaultinit.HiltMount,
+		"appliance_keys", len(resp.ApplianceKeys))
 	return resp, nil
+}
+
+// reconcileApplianceKeys brings the appliance transit keys in line with the two
+// committed region lists.
+//
+// Both directions are automated so the committed lists and OpenBao cannot drift
+// apart, and the check that makes that safe is in vaultinit.PlanApplianceKeys: a
+// key belonging to neither list fails the phase, because the alternative is a
+// mistyped region label destroying an unrecreatable key on an apply nobody
+// confirmed.
+func (d *deps) reconcileApplianceKeys(ctx context.Context, client *api.Client, req Request, resp *Response) error {
+	existing, err := vaultinit.ApplianceRegions(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	plan, err := vaultinit.PlanApplianceKeys(existing, req.ApplianceRegions, req.RetiredApplianceRegions)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("reconciling appliance transit keys",
+		"live", plan.Active, "retiring", plan.Remove)
+
+	created, err := vaultinit.EnsureApplianceTransitKeys(ctx, client, plan.Active)
+	if err != nil {
+		return err
+	}
+	for _, name := range created {
+		resp.Created = append(resp.Created, "openbao:transit/keys/"+name)
+	}
+
+	for _, region := range plan.Remove {
+		if err := d.retireAppliance(ctx, client, region); err != nil {
+			return err
+		}
+		resp.RetiredAppliances = append(resp.RetiredAppliances, region)
+	}
+
+	for _, region := range plan.Active {
+		resp.ApplianceKeys = append(resp.ApplianceKeys, vaultinit.ApplianceKeyName(region))
+	}
+	return nil
+}
+
+// retireAppliance revokes a retired region's unseal token, removes the
+// parameters describing it and destroys its transit key.
+//
+// Both ends of the order carry weight. Revoking first means the node loses its
+// unseal ability even if a later step fails, so a half-finished retirement still
+// contains the node it was meant to contain. Destroying the key last makes the
+// key the record of whether this finished: anything that fails in between leaves
+// it standing, so the next apply still sees the region and runs the whole
+// sequence again. Deleting it earlier would strand whatever came after, with
+// nothing left to notice.
+func (d *deps) retireAppliance(ctx context.Context, client *api.Client, region string) error {
+	slog.Warn("retiring an appliance region; its node can never unseal again", "region", region)
+
+	service := applianceService(region)
+	accessor, found, err := d.store.LookupPublic(ctx, service, unsealTokenAccessorKey)
+	if err != nil {
+		return err
+	}
+	if found {
+		if err := vaultinit.RevokeTokenByAccessor(ctx, client, accessor); err != nil {
+			return err
+		}
+	}
+
+	// The role goes too, so nothing can mint a fresh token for a region that no
+	// longer has a key to grant access to.
+	if err := vaultinit.RemoveApplianceTokenRole(ctx, client, region); err != nil {
+		return err
+	}
+
+	deleted, err := d.store.DeletePrefix(ctx, service)
+	if err != nil {
+		return err
+	}
+
+	if err := vaultinit.RemoveApplianceTransitKey(ctx, client, region); err != nil {
+		return err
+	}
+
+	slog.Info("retired appliance region", "region", region, "parameters_deleted", len(deleted))
+	return nil
 }
 
 // ensureRootToken initialises OpenBao on first run and returns the root token,

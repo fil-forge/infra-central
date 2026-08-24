@@ -2,6 +2,10 @@ package ssmstore
 
 import (
 	"context"
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,8 +20,9 @@ import (
 type fakeSSM struct {
 	params map[string]string
 
-	lastGet *ssm.GetParameterInput
-	lastPut *ssm.PutParameterInput
+	lastGet       *ssm.GetParameterInput
+	lastPut       *ssm.PutParameterInput
+	deleteBatches [][]string
 }
 
 func newFakeSSM() *fakeSSM {
@@ -43,6 +48,35 @@ func (f *fakeSSM) PutParameter(ctx context.Context, in *ssm.PutParameterInput, o
 	}
 	f.params[name] = aws.ToString(in.Value)
 	return &ssm.PutParameterOutput{}, nil
+}
+
+func (f *fakeSSM) GetParametersByPath(ctx context.Context, in *ssm.GetParametersByPathInput, optFns ...func(*ssm.Options)) (*ssm.GetParametersByPathOutput, error) {
+	// Real SSM reads the path as a place in a hierarchy rather than as a text
+	// prefix, so /a/b holds /a/b/c and has nothing to do with /a/bc. Matching on
+	// the trailing slash keeps the fake honest about that: without it a region
+	// label that is another one's prefix, us-east-9 against us-east-90, would
+	// pass here and fail against AWS.
+	prefix := strings.TrimSuffix(aws.ToString(in.Path), "/") + "/"
+
+	var found []types.Parameter
+	for name := range f.params {
+		if strings.HasPrefix(name, prefix) {
+			found = append(found, types.Parameter{Name: aws.String(name)})
+		}
+	}
+	// Real SSM returns no guaranteed order; sorting keeps assertions stable.
+	sort.Slice(found, func(i, j int) bool {
+		return aws.ToString(found[i].Name) < aws.ToString(found[j].Name)
+	})
+	return &ssm.GetParametersByPathOutput{Parameters: found}, nil
+}
+
+func (f *fakeSSM) DeleteParameters(ctx context.Context, in *ssm.DeleteParametersInput, optFns ...func(*ssm.Options)) (*ssm.DeleteParametersOutput, error) {
+	f.deleteBatches = append(f.deleteBatches, in.Names)
+	for _, name := range in.Names {
+		delete(f.params, name)
+	}
+	return &ssm.DeleteParametersOutput{}, nil
 }
 
 func newTestStore(client api) *Store {
@@ -204,5 +238,63 @@ func TestLookupSecretReportsAMissingParameterWithoutFailing(t *testing.T) {
 	}
 	if found || value != "" {
 		t.Errorf("LookupSecret() = (%q, %v), want (%q, false)", value, found, "")
+	}
+}
+
+func TestDeletePrefixRemovesEveryParameterUnderTheService(t *testing.T) {
+	fake := newFakeSSM()
+	store := newTestStore(fake)
+	fake.params[store.Path("appliance/us-east-9", "unseal-token.accessor")] = "hmac-1"
+	fake.params[store.Path("appliance/us-east-9", "hilt-ingot-s3-proof")] = "proof"
+
+	deleted, err := store.DeletePrefix(context.Background(), "appliance/us-east-9")
+	if err != nil {
+		t.Fatalf("DeletePrefix() error = %v", err)
+	}
+	if len(deleted) != 2 || len(fake.params) != 0 {
+		t.Errorf("DeletePrefix() = %v with %d left, want 2 deleted and none left", deleted, len(fake.params))
+	}
+}
+
+// Retiring one region must not touch another service's parameters, nor a region
+// whose label merely starts with the same characters.
+func TestDeletePrefixLeavesOtherServicesAlone(t *testing.T) {
+	survivors := []string{"hilt/identity", "appliance/us-east-90/unseal-token.accessor"}
+	for _, survivor := range survivors {
+		t.Run(survivor, func(t *testing.T) {
+			fake := newFakeSSM()
+			store := newTestStore(fake)
+			fake.params[store.Path("appliance/us-east-9", "unseal-token.accessor")] = "hmac-1"
+
+			path := "/forge-central/test/" + survivor
+			fake.params[path] = "keep me"
+
+			if _, err := store.DeletePrefix(context.Background(), "appliance/us-east-9"); err != nil {
+				t.Fatalf("DeletePrefix() error = %v", err)
+			}
+			if _, found := fake.params[path]; !found {
+				t.Errorf("%s was deleted, want it left alone", path)
+			}
+		})
+	}
+}
+
+// DeleteParameters takes at most ten names, so a larger prefix has to be split.
+func TestDeletePrefixBatchesAtTheAPILimit(t *testing.T) {
+	fake := newFakeSSM()
+	store := newTestStore(fake)
+	for i := range 23 {
+		fake.params[store.Path("appliance/us-east-9", fmt.Sprintf("key-%02d", i))] = "v"
+	}
+
+	if _, err := store.DeletePrefix(context.Background(), "appliance/us-east-9"); err != nil {
+		t.Fatalf("DeletePrefix() error = %v", err)
+	}
+	var sizes []int
+	for _, batch := range fake.deleteBatches {
+		sizes = append(sizes, len(batch))
+	}
+	if want := []int{10, 10, 3}; !reflect.DeepEqual(sizes, want) {
+		t.Errorf("batch sizes = %v, want %v", sizes, want)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,6 +36,8 @@ import (
 type api interface {
 	GetParameter(ctx context.Context, in *ssm.GetParameterInput, optFns ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
 	PutParameter(ctx context.Context, in *ssm.PutParameterInput, optFns ...func(*ssm.Options)) (*ssm.PutParameterOutput, error)
+	GetParametersByPath(ctx context.Context, in *ssm.GetParametersByPathInput, optFns ...func(*ssm.Options)) (*ssm.GetParametersByPathOutput, error)
+	DeleteParameters(ctx context.Context, in *ssm.DeleteParametersInput, optFns ...func(*ssm.Options)) (*ssm.DeleteParametersOutput, error)
 }
 
 // Store reads and writes one stage's parameters.
@@ -163,6 +166,11 @@ func (s *Store) LookupSecret(ctx context.Context, service, name string) (string,
 	return s.get(ctx, s.Path(service, name), true)
 }
 
+// LookupPublic reads a plaintext String and reports whether it exists.
+func (s *Store) LookupPublic(ctx context.Context, service, name string) (string, bool, error) {
+	return s.get(ctx, s.Path(service, name), false)
+}
+
 // GetSecret reads a SecureString, decrypting it.
 func (s *Store) GetSecret(ctx context.Context, service, name string) (string, error) {
 	value, found, err := s.get(ctx, s.Path(service, name), true)
@@ -173,6 +181,46 @@ func (s *Store) GetSecret(ctx context.Context, service, name string) (string, er
 		return "", fmt.Errorf("parameter %s not found", s.Path(service, name))
 	}
 	return value, nil
+}
+
+// DeletePrefix removes every parameter under a service prefix and returns the
+// names it deleted.
+//
+// The one deliberate exception to this package's never-destroy rule, and it
+// exists for retiring a region: the transit key those parameters describe is
+// gone, so leaving them would leave a record of a node that can never come back.
+// Nothing else here deletes anything, and no caller should reach for this to
+// tidy up.
+func (s *Store) DeletePrefix(ctx context.Context, service string) ([]string, error) {
+	prefix := s.Prefix(service)
+
+	var names []string
+	var token *string
+	for {
+		out, err := s.client.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
+			Path:      aws.String(prefix),
+			Recursive: aws.Bool(true),
+			NextToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", prefix, err)
+		}
+		for _, param := range out.Parameters {
+			names = append(names, aws.ToString(param.Name))
+		}
+		if out.NextToken == nil {
+			break
+		}
+		token = out.NextToken
+	}
+
+	// DeleteParameters takes at most ten names per call.
+	for batch := range slices.Chunk(names, 10) {
+		if _, err := s.client.DeleteParameters(ctx, &ssm.DeleteParametersInput{Names: batch}); err != nil {
+			return nil, fmt.Errorf("delete under %s: %w", prefix, err)
+		}
+	}
+	return names, nil
 }
 
 func (s *Store) get(ctx context.Context, path string, decrypt bool) (string, bool, error) {
