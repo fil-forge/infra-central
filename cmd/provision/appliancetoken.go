@@ -199,7 +199,11 @@ func (d *deps) mintApplianceToken(ctx context.Context, client *api.Client, req R
 			WrapTTL:       plan.WrapTTL,
 			Period:        plan.Period,
 			NodeCIDR:      plan.NodeCIDR,
-			UnsealAddress: d.cfg.OpenBaoAddr,
+			// The node unwraps from outside the VPC, so this is the public
+			// hostname the ALB serves OpenBao at, the same "ssm." + suffix the
+			// openbao module builds in terraform/modules/platform/main.tf.
+			// OpenBaoAddr is the in-VPC address only this Lambda can reach.
+			UnsealAddress: "https://ssm." + d.cfg.HostnameSuffix,
 		},
 	}, nil
 }
