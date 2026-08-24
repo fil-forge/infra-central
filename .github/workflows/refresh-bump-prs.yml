@@ -60,71 +60,111 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
+          # The digest one commit pins a service at, empty if it pins none.
+          pin_at() {
+            git show "$1:$FILE" | sed -nE \
+              "s|^[[:blank:]]*$2[[:blank:]]*=[[:blank:]]*\"(sha256:[0-9a-f]{64})\"[[:blank:]]*$|\1|p"
+          }
+
+          # Only what the app opened here. This repository allows forks, and a
+          # fork can name its branch anything: matching on the branch name
+          # alone would pick up a pull request whose head is no ref of ours.
           # --limit, because the default page of 30 could hide a bump behind a
           # queue of Dependabot pull requests.
-          branches=$(gh pr list --state open --limit 100 --json headRefName --jq '.[].headRefName' \
+          branches=$(gh pr list --state open --limit 100 \
+            --author "app/${APP_SLUG}" \
+            --json headRefName,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | .headRefName' \
             | grep -E '^bot/bump-[a-z_]+-image-dev$' || true)
           if [ -z "$branches" ]; then
             echo "no open bump pull requests"
             exit 0
           fi
 
-          git fetch --quiet origin main
+          # After listing, so a branch pushed while this job started is here.
+          git fetch --quiet --force origin main "+refs/heads/bot/*:refs/remotes/origin/bot/*"
+
           for branch in $branches; do
             echo "::group::$branch"
             service=${branch#bot/bump-}
             service=${service%-image-dev}
-            head=$(git rev-parse "origin/$branch")
 
-            if git merge-base --is-ancestor origin/main "origin/$branch"; then
-              echo "already on current main"
-              echo "::endgroup::"
-              continue
-            fi
+            # Twice at most. The lease below fails when a publish replaces the
+            # branch mid-run, and that publish built on the main this run is
+            # refreshing past, so what it left needs the same rebuild.
+            for attempt in 1 2; do
+              if ! head=$(git rev-parse --verify --quiet "origin/$branch"); then
+                echo "opened after this run fetched; the next push to main takes it"
+                break
+              fi
 
-            # What the pull request asks for, read off the branch rather than
-            # passed in, so a refresh cannot deploy a digest nobody published.
-            digest=$(git show "origin/$branch:$FILE" | sed -nE \
-              "s|^[[:blank:]]*${service}[[:blank:]]*=[[:blank:]]*\"(sha256:[0-9a-f]{64})\"[[:blank:]]*$|\1|p")
-            if [ -z "$digest" ]; then
-              echo "::error::$branch pins no digest for $service"
-              exit 1
-            fi
+              if git merge-base --is-ancestor origin/main "origin/$branch"; then
+                echo "already on current main"
+                break
+              fi
 
-            # Rebuilding keeps the original message, which is the whole reason
-            # this beats re-running the bump: the link to the pull request that
-            # published the image survives.
-            message=$(git log -1 --format=%B "origin/$branch")
+              # What the pull request asks for, read off the branch rather than
+              # passed in, so a refresh cannot deploy a digest nobody published.
+              digest=$(pin_at "origin/$branch" "$service")
+              if [ -z "$digest" ]; then
+                echo "::error::$branch pins no digest for $service"
+                exit 1
+              fi
+              main_digest=$(pin_at origin/main "$service")
+              if [ -z "$main_digest" ]; then
+                echo "::error::main pins no digest for $service"
+                exit 1
+              fi
 
-            git checkout --quiet -B "$branch" origin/main
-            changed=$(scripts/set-dev-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
+              if [ "$main_digest" = "$digest" ]; then
+                echo "main already pins $service at $digest; closing"
+                gh pr close "$branch" --delete-branch \
+                  --comment "Superseded: main already pins \`$service\` at \`$digest\`."
+                break
+              fi
 
-            if [ "$changed" != true ]; then
-              echo "main already pins $service at $digest; closing"
-              gh pr close "$branch" --delete-branch \
-                --comment "Superseded: main already pins \`$service\` at \`$digest\`."
-              echo "::endgroup::"
-              continue
-            fi
+              # Someone else moved this service while the branch sat open, so
+              # which digest dev should run is a question rather than an edit.
+              # Rebuilding would answer it by rolling main back to this branch.
+              # Left alone, the pull request shows the conflict it really has.
+              base_digest=$(pin_at "$(git merge-base origin/main "origin/$branch")" "$service")
+              if [ "$main_digest" != "$base_digest" ]; then
+                echo "main moved $service to $main_digest, where this branch was built from $base_digest; leaving it for a person"
+                break
+              fi
 
-            git commit --quiet --all --message "$message"
+              # Rebuilding keeps the original message, which is the whole reason
+              # this beats re-running the bump: the link to the pull request that
+              # published the image survives.
+              message=$(git log -1 --format=%B "origin/$branch")
 
-            # --force-with-lease, where the bump workflow pushes plain --force.
-            # The asymmetry is deliberate: a bump carries a digest nobody has
-            # deployed yet and should win, while a refresh only moves a branch
-            # forward and has nothing worth overwriting a newer publish for.
-            if ! git push --force-with-lease="$branch:$head" --quiet origin "$branch"; then
-              echo "moved while this ran; leaving it to the run that moved it"
-              echo "::endgroup::"
-              continue
-            fi
+              git checkout --quiet -B "$branch" origin/main
+              changed=$(scripts/set-dev-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
+              if [ "$changed" != true ]; then
+                echo "::error::$FILE pins $service at $main_digest and rewriting it to $digest changed nothing"
+                exit 1
+              fi
+              git commit --quiet --all --message "$message"
 
-            armed=$(gh pr view "$branch" --json autoMergeRequest --jq '.autoMergeRequest != null')
-            if [ "$armed" = true ]; then
-              echo "rebuilt on $(git rev-parse --short origin/main), auto-merge already enabled"
-            else
-              gh pr merge --auto --squash "$branch"
-              echo "rebuilt on $(git rev-parse --short origin/main), auto-merge enabled"
-            fi
+              # --force-with-lease, where the bump workflow pushes plain --force.
+              # The asymmetry is deliberate: a bump carries a digest nobody has
+              # deployed yet and should win, while a refresh only moves a branch
+              # forward and has nothing worth overwriting a newer publish for.
+              if git push --force-with-lease="$branch:$head" --quiet origin "$branch"; then
+                armed=$(gh pr view "$branch" --json autoMergeRequest --jq '.autoMergeRequest != null')
+                if [ "$armed" != true ]; then
+                  gh pr merge --auto --squash "$branch"
+                fi
+                echo "rebuilt on $(git rev-parse --short origin/main), auto-merge enabled"
+                break
+              fi
+
+              if [ "$attempt" = 2 ]; then
+                echo "replaced twice while this ran; leaving it to the next push to main"
+                break
+              fi
+              echo "replaced while this ran; re-reading the branch"
+              git fetch --quiet --force origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+            done
             echo "::endgroup::"
           done

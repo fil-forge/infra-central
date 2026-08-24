@@ -723,7 +723,9 @@ adjacent lines and each bump rewrites one line. And
 open bump branch on top of `main` whenever `main` moves, because the ruleset
 will not merge a branch that is behind. A rebuild keeps the original commit
 message, so the link to the pull request that published the image survives. A
-branch whose digest `main` already pins is closed instead.
+branch whose digest `main` already pins is closed instead, and one whose service
+someone else moved meanwhile is left alone: which digest dev should run is then
+a question rather than an edit, and the pull request shows the conflict it has.
 
 The same workflow bumps any of the six services on demand:
 
