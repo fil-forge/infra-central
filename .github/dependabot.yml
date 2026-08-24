@@ -69,7 +69,7 @@ updates:
   # provision.Dockerfile is found the same as a plain Dockerfile.
   #
   # In practice this entry produces one kind of pull request, bumping the
-  # `golang:1.25-bookworm` build stage when a new Go minor ships. The runtime
+  # `golang:1.26-bookworm` build stage when a new Go minor ships. The runtime
   # stage pins public.ecr.aws/lambda/provided:al2023, a rolling tag with no
   # version to compare against, so AL2023 moves underneath the image whether or
   # not this entry exists.
