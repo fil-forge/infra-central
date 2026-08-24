@@ -64,7 +64,8 @@ retiring a region is a reviewed one-line diff that reconciles on merge with no t
 Removal is automated in the same pass, because a key that exists in OpenBao and in no committed
 file means git no longer describes the system. What makes that safe is the refusal: a key matching
 `appliance-unseal-*` that appears in neither list **fails the phase**, naming the region and both
-lists. Retiring is therefore an explicit move from one list to the other, and the accident this
+lists. A label that appears in both lists fails the same way, before anything is written, since a
+region is either live or retired. Retiring is therefore an explicit move from one list to the other, and the accident this
 guards against is specific. Deleting a transit key permanently destroys the node behind it, dev
 applies on merge with nobody confirming, and under a single-list scheme a mistyped region label
 would read as "destroy that key, create this one" and be obeyed.
@@ -79,8 +80,12 @@ record of whether the sequence finished, since the key's presence is what puts t
 front of the next apply; deleting it earlier would strand every step after it with nothing left to
 notice.
 
-Retirement does not deregister the node from sprue, hilt or the delegator. A node that cannot unseal
-serves nothing, so those rows are tidying rather than containment, and they stay manual.
+Retirement does not deregister the node from sprue, hilt or the delegator, and the kill lever
+contains a node at its next unseal rather than immediately: an appliance that is already unsealed
+holds its key in memory and keeps receiving traffic until it restarts. Evicting a live node
+therefore starts at the registries, with sprue's deregister command and a delete against the
+delegator's allow list, and fires the lever after. Those steps stay manual; hilt's row is the open
+decision recorded below.
 
 ## The unseal token is delivered wrapped
 
@@ -103,9 +108,10 @@ The wrap TTL defaults to 24 hours, which is how long the hand-off may sit unclai
 a delivery across time zones, short enough that a leak nobody noticed expires on its own. An expired
 wrap costs another mint, which is cheap.
 
-One discipline the design requires: a failed legitimate unwrap is a compromise, not a hiccup.
-Revoke by the stored accessor, mint again, and find out who read the channel. The runbook says so
-where the step is.
+One discipline the design requires: a failed legitimate unwrap inside the wrap TTL is a compromise,
+not a hiccup, and the mint time in the Lambda's logs is what separates the two cases. Revoke by the
+stored accessor, mint again, and find out who read the channel. The runbook says so where the step
+is.
 
 infra-nodes' original design doc had rejected wrapped enrollment as buying nothing at a single
 first-party node, and that was right for the case it considered. With a third party on the other
@@ -128,6 +134,14 @@ node's own apply has run.
 `token_no_default_policy` is set, so the token carries the region's policy and nothing else. That is
 why the policy grants `auth/token/renew-self` explicitly: without the default policy, a periodic
 token that could not renew itself would die at the end of its first period.
+
+The CIDR check reads the client address the listener reports, and the appliance reaches OpenBao
+through the ALB, which connects from its own address. A listener checking raw connections would see
+the ALB and refuse every bound token. The listener therefore trusts `X-Forwarded-For` from the
+ALB's subnets and nothing wider: the ALB appends the caller's real address as the final hop, so a
+forged header loses to the append, and a direct in-VPC client carries no header and is checked on
+its own address. Trusting the whole VPC instead would let any workload inside it claim the node's
+address.
 
 ## The token is orphan, periodic, 72 hours, CIDR-bound
 
@@ -155,6 +169,12 @@ second run would leave two standing credentials for one node, so a region whose 
 recorded and whose token still lives is refused unless the operator passes `--reissue`, which
 revokes the old token before minting the new one.
 
+A mint writes the token first and the accessor second, so a Lambda that dies between the two leaves
+a token no parameter records, and the retry mints a second one. The window is accepted because the
+stranded token is contained without anyone acting: its wrapping token was returned to nobody, it is
+bound to the node's own address, it carries only the region's unseal policy, and unrenewed it dies
+at the end of its 72-hour period.
+
 It is also the one phase whose response carries a secret, where every other phase response is
 documented as safe for anyone with Terraform state access. The phase is therefore never wired to an
 `aws_lambda_invocation`, and both the code and this document say so.
@@ -162,7 +182,10 @@ documented as safe for anyone with Terraform state access. The phase is therefor
 ## The client packages are imported rather than reimplemented
 
 The Lambda calls sprue and hilt through their published Go client packages, so the invocation
-format cannot drift from what the services accept. Hand-rolling the four commands on ucantone, which
+format is the services' own rather than a reimplementation that could quietly diverge. The modules
+are still pinned independently of the image digests the bump workflow deploys, so a version skew
+between client and service remains possible; it shows up as a failed admin call rather than a
+silent mismatch, and the phase reads its writes back. Hand-rolling the four commands on ucantone, which
 is already a dependency, would keep the Lambda image smaller and was the fallback if the dependency
 tree proved unreasonable for a Lambda.
 
