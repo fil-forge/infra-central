@@ -121,16 +121,18 @@ These each cost an afternoon to rediscover.
 
 ```
 # Go binary executed in AWS to provision DB & secrets
-cmd/provision/           the Lambda: phase dispatch, seeding, OpenBao, funding
-internal/keygen/         Ed25519 identities, secp256k1 wallets, UCAN proofs
-internal/dbinit/         idempotent role and database creation
-internal/vaultinit/      OpenBao init, mounts, hilt's AppRole
-internal/ssmstore/       the never-overwrite parameter store
-internal/fund/           the three FilecoinPay transactions
-build/                   Lambda container image
-scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
-scripts/smoke-test.sh    checks a deployed stage over public HTTPS
-scripts/tail-logs.sh     prints the tail of every log group a stage owns
+cmd/provision/                the Lambda: phase dispatch, seeding, OpenBao, funding
+internal/keygen/              Ed25519 identities, secp256k1 wallets, UCAN proofs
+internal/dbinit/              idempotent role and database creation
+internal/vaultinit/           OpenBao init, mounts, hilt's AppRole
+internal/ssmstore/            the never-overwrite parameter store
+internal/fund/                the three FilecoinPay transactions
+build/                        Lambda container image
+scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
+scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
+scripts/set-dev-pin.sh        pins one dev service at one image digest
+scripts/smoke-test.sh         checks a deployed stage over public HTTPS
+scripts/tail-logs.sh          prints the tail of every log group a stage owns
 
 # Infra configuration
 terraform/
@@ -706,7 +708,7 @@ digests, dev included: dev is applied on every push to `main`, and a rolling tag
 would make what dev runs depend on when a task last restarted rather than on what
 was merged.
 
-For dev, hilt does this itself. Its publish workflow dispatches a
+For dev, the services do this themselves. A publish workflow dispatches a
 `bump-deployed-image` event carrying the digest it just pushed, and
 [`bump-deployed-image.yml`](.github/workflows/bump-deployed-image.yml) opens a
 pull request that changes the one line, with auto-merge enabled so the deploy
@@ -715,12 +717,45 @@ lands as soon as the required checks pass. Those pull requests come from the
 branch per service, so a second publish updates the open request instead of
 stacking a stale one beside it.
 
+Two things keep those pull requests mergeable while several are open at once.
+The pins are spaced a blank line apart, because git conflicts on changes to
+adjacent lines and each bump rewrites one line. And
+[`refresh-bump-prs.yml`](.github/workflows/refresh-bump-prs.yml) rebuilds every
+open bump branch on top of `main`, because the ruleset will not merge a branch
+that is behind. It runs when `main` moves, when a bump branch is pushed, and
+when a bump pull request is opened: a bump commit is built from the `main` its
+run checked out, which can be behind by the time the push lands, and on a
+service's first bump the branch is pushed before the pull request exists to be
+found. A rebuild keeps the original commit message, so the link to the pull
+request that published the image survives. A branch whose digest `main` already
+pins is closed instead, and one whose service someone else moved meanwhile is
+left alone: which digest dev should run is then a question rather than an edit,
+and the pull request shows the conflict it has.
+
 The same workflow bumps any of the six services on demand:
 
 ```bash
 gh workflow run bump-deployed-image.yml -R fil-forge/infra-central \
   -f service=sprue -f digest="$(crane digest ghcr.io/fil-forge/sprue:main)"
 ```
+
+Locally, [`scripts/set-dev-pin.sh`](scripts/set-dev-pin.sh) makes the same edit.
+It is what both workflows run, so a pin written by hand comes out identical to
+one written by the bot:
+
+```bash
+scripts/set-dev-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
+```
+
+A service is wired up with a dispatch step in its publish workflow plus the
+`fil-forge-bot` credentials in that repository. The receiver only accepts
+dispatches made as that app, and the `source_repo` in the payload has to be the
+repository the service is published from, so the required `client_payload` is
+`service`, `digest` and `source_repo`; `commit`, `pr_url` and `run_url` are
+provenance links the commit message uses when present.
+
+Prod stays manual: a promotion is a digest copied deliberately, and a reviewable
+diff is the point.
 
 ### Confirming nothing was regenerated
 
@@ -1013,23 +1048,6 @@ diff is what re-running the thing that mints wallets should cost, and it stays
 visible afterwards. The alternative — a workflow input anyone with write access
 could set — puts that one text field away. A `workflow_dispatch` input would be the
 middle ground if the merge ever proves too slow.
-
-### Deploy the remaining services from their own repositories
-
-hilt already does this: its publish workflow dispatches the digest it pushed and
-[`bump-deployed-image.yml`](.github/workflows/bump-deployed-image.yml) commits it
-to the dev stage. sprue, swarf, delegator, signing_service and plc are still
-deployed by editing `image_digests` here.
-
-The receiver accepts all six service names, so wiring one up is a dispatch step
-in its publish workflow plus the `fil-forge-bot` credentials in that repository.
-It only accepts dispatches made as that app, and the `source_repo` in the
-payload has to be the repository the service is published from, so the required
-`client_payload` is `service`, `digest` and `source_repo`; `commit`, `pr_url`
-and `run_url` are provenance links the commit message uses when present.
-
-Prod stays manual either way: a promotion is a digest copied deliberately, and a
-reviewable diff is the point.
 
 ### OpenBao runs without an audit log
 

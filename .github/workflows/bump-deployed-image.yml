@@ -119,6 +119,9 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.bot.outputs.token }}
 
+      # The rewrite itself lives in scripts/set-dev-pin.sh, which the refresh
+      # workflow and a person at a terminal run too. Its stdout is the
+      # `changed` output and nothing else; what a person reads goes to stderr.
       - name: Rewrite the dev pin
         id: edit
         env:
@@ -126,34 +129,7 @@ jobs:
           DIGEST: ${{ steps.req.outputs.digest }}
         run: |
           set -euo pipefail
-          file=terraform/envs/dev/apps/terraform.tfvars
-
-          sed -i -E \
-            "s|^([[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\")sha256:[0-9a-f]{64}(\")$|\1${DIGEST}\2|" \
-            "$file"
-
-          # Read the result rather than trusting sed. A pattern that matched
-          # nothing leaves the file untouched too, so an absent key or a line
-          # the pattern does not fit would otherwise pass for "already pinned".
-          if ! grep -qE "^[[:blank:]]*${SERVICE}[[:blank:]]*=[[:blank:]]*\"${DIGEST}\"$" "$file"; then
-            echo "::error::$file does not pin $SERVICE at $DIGEST"
-            git --no-pager diff -- "$file"
-            grep -nE "^[[:blank:]]*${SERVICE}[[:blank:]]*=" "$file" || true
-            exit 1
-          fi
-
-          changes=$(git diff --numstat -- "$file")
-          if [ -z "$changes" ]; then
-            echo "$SERVICE is already pinned at $DIGEST; nothing to deploy"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$changes" != "$(printf '1\t1\t%s' "$file")" ]; then
-            echo "::error::expected a one-line change"
-            git --no-pager diff -- "$file"
-            exit 1
-          fi
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          scripts/set-dev-pin.sh "$SERVICE" "$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Set up OpenTofu
         if: steps.edit.outputs.changed == 'true'
