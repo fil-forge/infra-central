@@ -11,19 +11,22 @@ which decides the node's half.
 
 ## Two touchpoints, not one
 
-Onboarding cannot be a single operation, and the ordering forces the shape of everything else. The
-transit key has to exist before the node's first boot, because OpenBao refuses to start without it.
-The registration writes need the node's DIDs, which do not exist until the node has provisioned
-its own keys, which it can only do after it boots. So there are two operator steps with the node's
-bring-up between them.
+Onboarding cannot be a single operation:
+
+- The transit key has to exist before the node's first boot, because OpenBao refuses to start without it.
+- The node registration need the node's DIDs, which do not exist until the node has provisioned its own keys, which it can only do after it boots.
+
+So there are two operator steps with the node's bring-up between them.
 
 ## A person runs both halves
 
 Onboarding is a conversation between someone at Forge Central and the node's operator, and the
-tooling serves that conversation rather than replacing it. Central needs the node's egress CIDR to
-mint the unseal token, and its two DIDs and Piri proof to register it; the operator needs the
-wrapped token, and the S3 delegation that comes back. Each script takes what the other side sent and
-prints what to send in return.
+tooling serves that conversation rather than replacing it.
+
+- Central needs the node's egress CIDR to mint the unseal token, and its two DIDs and Piri proof to register it.
+- The operator needs the wrapped token, and the S3 delegation that comes back.
+
+Each script takes what the other side sent and prints what to send in return.
 
 Nothing here is built for an appliance that onboards itself. The two commands are run by a person who
 knows which appliance they are admitting, and the exchange in the middle is where a third-party
@@ -185,11 +188,6 @@ loader.
 `fund-payer.sh`'s shape: dry run, printed plan, typed confirmation, then the run that changes
 something. Two scripts rather than one command with subcommands, because they take different inputs,
 and handle secrets differently.
-
-infra-nodes' design doc assigns the onboarding client to that repository, and this does not conflict
-with it: the Lambda's request and response are the interface, and a node-side wrapper can call the
-script or the function directly. Shipping both scripts here means an operator bringing up the first
-appliance works from one repository.
 
 ## A mismatch is a refusal, not a repair
 
