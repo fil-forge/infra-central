@@ -1,0 +1,130 @@
+# Rebuilds every open bump pull request on top of the commit that just landed on
+# main. The ruleset requires a branch to be up to date before it merges, so one
+# bump landing leaves every other open bump behind main and unmergeable until
+# something moves it. Nothing did: bump-deployed-image.yml rebuilds a branch only
+# when that service publishes again.
+#
+# Rebuilding is safe because of what a bump pull request is. It asks for one
+# thing, that dev run one digest, and its branch is main plus that one line. So
+# it can be regenerated from current main rather than merged, which is how
+# bump-deployed-image.yml builds it in the first place.
+name: Refresh bump pull requests
+
+# One at a time. Two runs would force-push the same branches from two different
+# commits, and the loser's pull request would show the older main.
+concurrency:
+  group: refresh-bump-prs
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh bump pull requests
+    runs-on: ubuntu-latest
+    steps:
+      # Not GITHUB_TOKEN: a push it makes starts no workflows, so the checks the
+      # refreshed pull request needs would never run and auto-merge would wait
+      # for a status that never arrives.
+      - name: Mint fil-forge-bot token
+        id: bot
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.FORGE_BOT_APP_ID }}
+          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.bot.outputs.token }}
+
+      - name: Rebuild every open bump branch
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          APP_SLUG: ${{ steps.bot.outputs.app-slug }}
+          FILE: terraform/envs/dev/apps/terraform.tfvars
+        run: |
+          set -euo pipefail
+
+          # Attribute the commits to the app, as the bump workflow does. A
+          # commit from anyone else would need the extra approval the ruleset
+          # asks for on unattributed changes.
+          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+          # --limit, because the default page of 30 could hide a bump behind a
+          # queue of Dependabot pull requests.
+          branches=$(gh pr list --state open --limit 100 --json headRefName --jq '.[].headRefName' \
+            | grep -E '^bot/bump-[a-z_]+-image-dev$' || true)
+          if [ -z "$branches" ]; then
+            echo "no open bump pull requests"
+            exit 0
+          fi
+
+          git fetch --quiet origin main
+          for branch in $branches; do
+            echo "::group::$branch"
+            service=${branch#bot/bump-}
+            service=${service%-image-dev}
+            head=$(git rev-parse "origin/$branch")
+
+            if git merge-base --is-ancestor origin/main "origin/$branch"; then
+              echo "already on current main"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # What the pull request asks for, read off the branch rather than
+            # passed in, so a refresh cannot deploy a digest nobody published.
+            digest=$(git show "origin/$branch:$FILE" | sed -nE \
+              "s|^[[:blank:]]*${service}[[:blank:]]*=[[:blank:]]*\"(sha256:[0-9a-f]{64})\"[[:blank:]]*$|\1|p")
+            if [ -z "$digest" ]; then
+              echo "::error::$branch pins no digest for $service"
+              exit 1
+            fi
+
+            # Rebuilding keeps the original message, which is the whole reason
+            # this beats re-running the bump: the link to the pull request that
+            # published the image survives.
+            message=$(git log -1 --format=%B "origin/$branch")
+
+            git checkout --quiet -B "$branch" origin/main
+            changed=$(scripts/set-dev-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
+
+            if [ "$changed" != true ]; then
+              echo "main already pins $service at $digest; closing"
+              gh pr close "$branch" --delete-branch \
+                --comment "Superseded: main already pins \`$service\` at \`$digest\`."
+              echo "::endgroup::"
+              continue
+            fi
+
+            git commit --quiet --all --message "$message"
+
+            # --force-with-lease, where the bump workflow pushes plain --force.
+            # The asymmetry is deliberate: a bump carries a digest nobody has
+            # deployed yet and should win, while a refresh only moves a branch
+            # forward and has nothing worth overwriting a newer publish for.
+            if ! git push --force-with-lease="$branch:$head" --quiet origin "$branch"; then
+              echo "moved while this ran; leaving it to the run that moved it"
+              echo "::endgroup::"
+              continue
+            fi
+
+            armed=$(gh pr view "$branch" --json autoMergeRequest --jq '.autoMergeRequest != null')
+            if [ "$armed" = true ]; then
+              echo "rebuilt on $(git rev-parse --short origin/main), auto-merge already enabled"
+            else
+              gh pr merge --auto --squash "$branch"
+              echo "rebuilt on $(git rev-parse --short origin/main), auto-merge enabled"
+            fi
+            echo "::endgroup::"
+          done
