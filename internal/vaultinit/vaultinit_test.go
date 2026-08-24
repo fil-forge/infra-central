@@ -235,13 +235,18 @@ type fakeOpenBao struct {
 	authMounts    map[string]string
 	secretIDKnown bool
 	transitKeys   map[string]bool // key name -> exists
+	accessorKnown bool
+	refuseToWrap  bool
 
-	mountedPaths    []string
-	enabledAuths    []string
-	roleWrite       map[string]any
-	policies        map[string]string
-	deletedPolicies []string
-	deletionAllowed map[string]bool
+	mountedPaths     []string
+	enabledAuths     []string
+	roleWrite        map[string]any
+	policies         map[string]string
+	deletedPolicies  []string
+	deletionAllowed  map[string]bool
+	tokenRoles       map[string]map[string]any
+	revokedAccessors []string
+	wrapTTLSeen      string
 }
 
 func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +370,60 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case key == "PUT /v1/auth/approle/role/hilt/secret-id":
 		writeJSON(w, map[string]any{"data": map[string]any{"secret_id": "sid-1"}})
+
+	case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/v1/auth/token/roles/"):
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if f.tokenRoles == nil {
+			f.tokenRoles = map[string]map[string]any{}
+		}
+		f.tokenRoles[strings.TrimPrefix(r.URL.Path, "/v1/auth/token/roles/")] = body
+		w.WriteHeader(http.StatusNoContent)
+
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/auth/token/roles/"):
+		delete(f.tokenRoles, strings.TrimPrefix(r.URL.Path, "/v1/auth/token/roles/"))
+		w.WriteHeader(http.StatusNoContent)
+
+	case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/v1/auth/token/create/"):
+		// Wrapping is requested through a header, and the response shape
+		// changes completely when it is honoured: the token moves into
+		// wrap_info and auth is absent.
+		f.wrapTTLSeen = r.Header.Get("X-Vault-Wrap-TTL")
+		if f.wrapTTLSeen == "" || f.refuseToWrap {
+			writeJSON(w, map[string]any{"auth": map[string]any{"client_token": "plain-1", "accessor": "acc-1"}})
+			return
+		}
+		writeJSON(w, map[string]any{
+			"wrap_info": map[string]any{
+				"token":            "wrap-1",
+				"accessor":         "wrap-acc-1",
+				"wrapped_accessor": "acc-1",
+				"ttl":              86400,
+			},
+		})
+
+	case key == "POST /v1/auth/token/lookup-accessor":
+		if !f.accessorKnown {
+			// A lapsed accessor is reported as a 400 naming it, not a 404.
+			http.Error(w, `{"errors":["invalid accessor"]}`, http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"accessor": "acc-1", "policies": []string{"x"}}})
+
+	case key == "POST /v1/auth/token/revoke-accessor":
+		if !f.accessorKnown {
+			http.Error(w, `{"errors":["invalid accessor"]}`, http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			Accessor string `json:"accessor"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.revokedAccessors = append(f.revokedAccessors, body.Accessor)
+		w.WriteHeader(http.StatusNoContent)
 
 	default:
 		http.Error(w, "unexpected request: "+key, http.StatusNotFound)
