@@ -720,8 +720,10 @@ Two things keep those pull requests mergeable while several are open at once.
 The pins are spaced a blank line apart, because git conflicts on changes to
 adjacent lines and each bump rewrites one line. And
 [`refresh-bump-prs.yml`](.github/workflows/refresh-bump-prs.yml) rebuilds every
-open bump branch on top of `main` whenever `main` moves, because the ruleset
-will not merge a branch that is behind. A rebuild keeps the original commit
+open bump branch on top of `main`, because the ruleset will not merge a branch
+that is behind. It runs when `main` moves and when a bump branch is pushed: a
+bump commit is built from the `main` its run checked out, which can be behind
+by the time the push lands. A rebuild keeps the original commit
 message, so the link to the pull request that published the image survives. A
 branch whose digest `main` already pins is closed instead, and one whose service
 someone else moved meanwhile is left alone: which digest dev should run is then
