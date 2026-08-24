@@ -29,10 +29,21 @@ const (
 	// per fil-one/RFC#21.
 	TransitMount = "transit"
 
+	// AppliancePrefix names both the transit key and the policy belonging to one
+	// appliance. OpenBao mounts cannot nest, so per-node grouping lives in key
+	// names rather than sub-paths; the prefix is what makes the set of appliance
+	// keys enumerable, which is what the reconciliation below rests on.
+	AppliancePrefix = "appliance-unseal-"
+
 	hiltPolicyName   = "hilt"
 	hiltAppRoleName  = "hilt"
 	appRoleAuthMount = "approle"
 )
+
+// ApplianceKeyName returns the transit key and policy name for a region label.
+func ApplianceKeyName(region string) string {
+	return AppliancePrefix + region
+}
 
 // InitResult reports what initialisation produced. Both fields are secret and
 // belong in SSM immediately; neither is returned to Terraform.

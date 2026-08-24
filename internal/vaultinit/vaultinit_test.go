@@ -188,16 +188,41 @@ func TestIssueSecretIDReturnsTheMintedSecret(t *testing.T) {
 	}
 }
 
+// newClient hands the fake to the real OpenBao client through an in-process
+// transport.
+//
+// Everything worth exercising still is: the client builds the URL, sets its
+// headers, serialises the body and parses the response exactly as it would over
+// a socket. What is skipped is only the socket, which no assertion here depends
+// on and which needs a listener the test does not otherwise need.
 func newClient(t *testing.T, f *fakeOpenBao) *api.Client {
 	t.Helper()
-	srv := httptest.NewServer(f)
-	t.Cleanup(srv.Close)
 
-	client, err := api.NewClient(&api.Config{Address: srv.URL})
+	cfg := api.DefaultConfig()
+	cfg.Address = "http://openbao.test"
+	cfg.HttpClient = &http.Client{Transport: handlerTransport{handler: f}}
+
+	client, err := api.NewClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client
+}
+
+// handlerTransport answers each request from a handler rather than a connection.
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+
+	resp := recorder.Result()
+	// A response the client reads status and body from needs its request back;
+	// the api client logs the URL on an error path.
+	resp.Request = req
+	return resp, nil
 }
 
 // fakeOpenBao mimics the slice of the OpenBao HTTP API that vaultinit touches.
@@ -209,10 +234,14 @@ type fakeOpenBao struct {
 	mounts        map[string]string // path with trailing slash -> engine type
 	authMounts    map[string]string
 	secretIDKnown bool
+	transitKeys   map[string]bool // key name -> exists
 
-	mountedPaths []string
-	enabledAuths []string
-	roleWrite    map[string]any
+	mountedPaths    []string
+	enabledAuths    []string
+	roleWrite       map[string]any
+	policies        map[string]string
+	deletedPolicies []string
+	deletionAllowed map[string]bool
 }
 
 func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +268,70 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mountedPaths = append(f.mountedPaths, strings.TrimPrefix(r.URL.Path, "/v1/sys/mounts/"))
 		w.WriteHeader(http.StatusNoContent)
 
-	case key == "PUT /v1/sys/policies/acl/hilt":
+	case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/v1/sys/policies/acl/"):
+		var body struct {
+			Policy string `json:"policy"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if f.policies == nil {
+			f.policies = map[string]string{}
+		}
+		f.policies[strings.TrimPrefix(r.URL.Path, "/v1/sys/policies/acl/")] = body.Policy
+		w.WriteHeader(http.StatusNoContent)
+
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/sys/policies/acl/"):
+		name := strings.TrimPrefix(r.URL.Path, "/v1/sys/policies/acl/")
+		f.deletedPolicies = append(f.deletedPolicies, name)
+		delete(f.policies, name)
+		w.WriteHeader(http.StatusNoContent)
+
+	case key == "LIST /v1/transit/keys" || (r.Method == "GET" && r.URL.Path == "/v1/transit/keys" && r.URL.Query().Get("list") == "true"):
+		var names []string
+		for name := range f.transitKeys {
+			names = append(names, name)
+		}
+		if len(names) == 0 {
+			// An empty transit mount has nothing to list, which the API
+			// reports as a 404 rather than an empty array.
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"keys": names}})
+
+	case r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/config") && strings.HasPrefix(r.URL.Path, "/v1/transit/keys/"):
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/transit/keys/"), "/config")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if f.deletionAllowed == nil {
+			f.deletionAllowed = map[string]bool{}
+		}
+		if allowed, ok := body["deletion_allowed"].(bool); ok {
+			f.deletionAllowed[name] = allowed
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/transit/keys/"):
+		name := strings.TrimPrefix(r.URL.Path, "/v1/transit/keys/")
+		if !f.transitKeys[name] {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"name": name}})
+
+	case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/v1/transit/keys/"):
+		if f.transitKeys == nil {
+			f.transitKeys = map[string]bool{}
+		}
+		f.transitKeys[strings.TrimPrefix(r.URL.Path, "/v1/transit/keys/")] = true
+		w.WriteHeader(http.StatusNoContent)
+
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/transit/keys/"):
+		name := strings.TrimPrefix(r.URL.Path, "/v1/transit/keys/")
+		if !f.deletionAllowed[name] {
+			http.Error(w, "deletion is not allowed for this key", http.StatusBadRequest)
+			return
+		}
+		delete(f.transitKeys, name)
 		w.WriteHeader(http.StatusNoContent)
 
 	case key == "GET /v1/sys/auth":
