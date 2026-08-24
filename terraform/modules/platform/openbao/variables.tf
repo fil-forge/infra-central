@@ -90,6 +90,11 @@ variable "ssm_prefix" {
   type        = string
 }
 
+variable "alb_cidrs" {
+  description = "The ALB's own subnets. A forwarded-for header is trusted from these addresses and from nowhere else, which is what lets OpenBao check a CIDR-bound token against the caller rather than the ALB. Widening this to the whole VPC would let any workload inside it claim an appliance's address."
+  type        = list(string)
+}
+
 variable "listener_arn" {
   type = string
 }

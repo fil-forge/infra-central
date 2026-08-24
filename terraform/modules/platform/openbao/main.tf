@@ -31,6 +31,26 @@ locals {
     listener "tcp" {
       address     = "0.0.0.0:${var.port}"
       tls_disable = 1
+
+      # An appliance authenticates here with a token bound to its Elastic IP,
+      # and it arrives through the ALB, which connects from its own address.
+      # Checking the raw connection would compare the ALB against the node's
+      # address and refuse every one of those tokens at first unseal.
+      #
+      # The ALB appends the caller's address as the last entry of
+      # X-Forwarded-For, and with no hops skipped that last entry is what the
+      # listener takes as the client. A header a client sends itself arrives
+      # earlier in the chain and loses to the append.
+      x_forwarded_for_authorized_addrs = "${join(",", var.alb_cidrs)}"
+      x_forwarded_for_hop_skips        = 0
+
+      # hilt and the provision Lambda connect directly inside the VPC and send
+      # no header, so a request without one is checked on its own address.
+      # One that carries a header from anywhere but the ALB is refused rather
+      # than quietly downgraded, which turns a workload trying to claim a
+      # node's address into an error somebody sees.
+      x_forwarded_for_reject_not_present    = false
+      x_forwarded_for_reject_not_authorized = true
     }
 
     seal "awskms" {
