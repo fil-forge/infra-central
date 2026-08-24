@@ -4,10 +4,7 @@
 # moves it. Nothing did: bump-deployed-image.yml rebuilds a branch only when
 # that service publishes again.
 #
-# Rebuilding is safe because of what a bump pull request is. It asks for one
-# thing, that dev run one digest, and its branch is main plus that one line. So
-# it can be regenerated from current main rather than merged, which is how
-# bump-deployed-image.yml builds it in the first place.
+# What a rebuild is and why it is safe: scripts/refresh-bump-prs.sh.
 name: Refresh bump pull requests
 
 # One at a time. Two runs would force-push the same branches from two different
@@ -66,142 +63,10 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.bot.outputs.token }}
 
+      # The rebuild itself lives in scripts/refresh-bump-prs.sh, so shellcheck
+      # can read it and a person can run it from a terminal.
       - name: Rebuild every open bump branch
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           APP_SLUG: ${{ steps.bot.outputs.app-slug }}
-          FILE: terraform/envs/dev/apps/terraform.tfvars
-        run: |
-          set -euo pipefail
-
-          # Attribute the commits to the app, as the bump workflow does. A
-          # commit from anyone else would need the extra approval the ruleset
-          # asks for on unattributed changes.
-          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
-
-          # The digest one commit pins a service at, empty if it pins none.
-          pin_at() {
-            git show "$1:$FILE" | sed -nE \
-              "s|^[[:blank:]]*$2[[:blank:]]*=[[:blank:]]*\"(sha256:[0-9a-f]{64})\"[[:blank:]]*$|\1|p"
-          }
-
-          # Only what the app opened here. This repository allows forks, and a
-          # fork can name its branch anything: matching on the branch name
-          # alone would pick up a pull request whose head is no ref of ours.
-          # --limit, because the default page of 30 could hide a bump behind a
-          # queue of Dependabot pull requests.
-          opened=$(gh pr list --state open --limit 100 \
-            --author "app/${APP_SLUG}" \
-            --json headRefName,isCrossRepository \
-            --jq '.[] | select(.isCrossRepository | not) | .headRefName')
-          # Its own statement, so `|| true` covers grep finding no bump and
-          # nothing else. On one pipeline it would also swallow an outage or an
-          # expired token, and the run would report having refreshed everything.
-          branches=$(grep -E '^bot/bump-[a-z_]+-image-dev$' <<<"$opened" || true)
-          if [ -z "$branches" ]; then
-            echo "no open bump pull requests"
-            exit 0
-          fi
-
-          # After listing, so a branch pushed while this job started is here.
-          git fetch --quiet --force origin main "+refs/heads/bot/*:refs/remotes/origin/bot/*"
-
-          for branch in $branches; do
-            echo "::group::$branch"
-            service=${branch#bot/bump-}
-            service=${service%-image-dev}
-
-            # Twice at most. The lease below fails when a publish replaces the
-            # branch mid-run, and that publish built on the main this run is
-            # refreshing past, so what it left needs the same rebuild.
-            for attempt in 1 2; do
-              if ! head=$(git rev-parse --verify --quiet "origin/$branch"); then
-                echo "pushed after this run fetched; that push queued another run"
-                break
-              fi
-
-              if git merge-base --is-ancestor origin/main "origin/$branch"; then
-                echo "already on current main"
-                break
-              fi
-
-              # What the pull request asks for, read off the branch rather than
-              # passed in, so a refresh cannot deploy a digest nobody published.
-              digest=$(pin_at "origin/$branch" "$service")
-              if [ -z "$digest" ]; then
-                echo "::error::$branch pins no digest for $service"
-                exit 1
-              fi
-              main_digest=$(pin_at origin/main "$service")
-              if [ -z "$main_digest" ]; then
-                echo "::error::main pins no digest for $service"
-                exit 1
-              fi
-
-              if [ "$main_digest" = "$digest" ]; then
-                # The URL now, while the branch still resolves to the one open
-                # pull request; every merged bump reused this branch name. The
-                # deletion carries the same lease as the rebuild push below,
-                # because a publish may have replaced the branch after $head
-                # was read, and deleting what it pushed would throw away a
-                # digest nobody deployed yet.
-                url=$(gh pr view "$branch" --json url --jq .url)
-                if git push --force-with-lease="$branch:$head" --quiet origin ":$branch"; then
-                  echo "main already pins $service at $digest; closing"
-                  gh pr comment "$url" \
-                    --body "Superseded: main already pins \`$service\` at \`$digest\`."
-                  # Usually a no-op: deleting the head closes the pull request.
-                  gh pr close "$url" 2>/dev/null || true
-                  break
-                fi
-              else
-                # Someone else moved this service while the branch sat open, so
-                # which digest dev should run is a question rather than an edit.
-                # Rebuilding would answer it by rolling main back to this branch.
-                # Left alone, the pull request shows the conflict it really has.
-                base_digest=$(pin_at "$(git merge-base origin/main "origin/$branch")" "$service")
-                if [ "$main_digest" != "$base_digest" ]; then
-                  echo "main moved $service to $main_digest, where this branch was built from $base_digest; leaving it for a person"
-                  break
-                fi
-
-                # Rebuilding keeps the original message, which is the whole reason
-                # this beats re-running the bump: the link to the pull request that
-                # published the image survives.
-                message=$(git log -1 --format=%B "origin/$branch")
-
-                git checkout --quiet -B "$branch" origin/main
-                changed=$(scripts/set-dev-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
-                if [ "$changed" != true ]; then
-                  echo "::error::$FILE pins $service at $main_digest and rewriting it to $digest changed nothing"
-                  exit 1
-                fi
-                git commit --quiet --all --message "$message"
-
-                # --force-with-lease, where the bump workflow pushes plain --force.
-                # The asymmetry is deliberate: a bump carries a digest nobody has
-                # deployed yet and should win, while a refresh only moves a branch
-                # forward and has nothing worth overwriting a newer publish for.
-                # A bump that wins on a stale base is caught by the run its own
-                # push starts.
-                if git push --force-with-lease="$branch:$head" --quiet origin "$branch"; then
-                  armed=$(gh pr view "$branch" --json autoMergeRequest --jq '.autoMergeRequest != null')
-                  if [ "$armed" != true ]; then
-                    gh pr merge --auto --squash "$branch"
-                  fi
-                  echo "rebuilt on $(git rev-parse --short origin/main), auto-merge enabled"
-                  break
-                fi
-              fi
-
-              if [ "$attempt" = 2 ]; then
-                echo "replaced twice while this ran; leaving it to the run those pushes queued"
-                break
-              fi
-              echo "replaced while this ran; re-reading the branch"
-              git fetch --quiet --force origin "+refs/heads/$branch:refs/remotes/origin/$branch"
-            done
-            echo "::endgroup::"
-          done
+        run: scripts/refresh-bump-prs.sh

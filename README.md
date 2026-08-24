@@ -121,17 +121,18 @@ These each cost an afternoon to rediscover.
 
 ```
 # Go binary executed in AWS to provision DB & secrets
-cmd/provision/           the Lambda: phase dispatch, seeding, OpenBao, funding
-internal/keygen/         Ed25519 identities, secp256k1 wallets, UCAN proofs
-internal/dbinit/         idempotent role and database creation
-internal/vaultinit/      OpenBao init, mounts, hilt's AppRole
-internal/ssmstore/       the never-overwrite parameter store
-internal/fund/           the three FilecoinPay transactions
-build/                   Lambda container image
-scripts/fund-payer.sh    invokes the fund phase, with a confirmation prompt
-scripts/set-dev-pin.sh   pins one dev service at one image digest
-scripts/smoke-test.sh    checks a deployed stage over public HTTPS
-scripts/tail-logs.sh     prints the tail of every log group a stage owns
+cmd/provision/                the Lambda: phase dispatch, seeding, OpenBao, funding
+internal/keygen/              Ed25519 identities, secp256k1 wallets, UCAN proofs
+internal/dbinit/              idempotent role and database creation
+internal/vaultinit/           OpenBao init, mounts, hilt's AppRole
+internal/ssmstore/            the never-overwrite parameter store
+internal/fund/                the three FilecoinPay transactions
+build/                        Lambda container image
+scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
+scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
+scripts/set-dev-pin.sh        pins one dev service at one image digest
+scripts/smoke-test.sh         checks a deployed stage over public HTTPS
+scripts/tail-logs.sh          prints the tail of every log group a stage owns
 
 # Infra configuration
 terraform/
