@@ -65,6 +65,11 @@ SSM parameter paths; both spellings refer to the same service.
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                        |
 | **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                           |
 
+How a regional appliance is admitted to a stage is decided in
+[docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
+transit key it seals against, the wrapped token that delivers its unseal credential, and the
+registration writes central performs on its behalf.
+
 ## What each service needs
 
 | Service              | Port | Health         | Postgres | Other                        |
@@ -121,18 +126,25 @@ These each cost an afternoon to rediscover.
 
 ```
 # Go binary executed in AWS to provision DB & secrets
-cmd/provision/                the Lambda: phase dispatch, seeding, OpenBao, funding
+cmd/provision/                the Lambda: phase dispatch, seeding, OpenBao, funding, appliances
 internal/keygen/              Ed25519 identities, secp256k1 wallets, UCAN proofs
 internal/dbinit/              idempotent role and database creation
 internal/vaultinit/           OpenBao init, mounts, hilt's AppRole
 internal/ssmstore/            the never-overwrite parameter store
 internal/fund/                the three FilecoinPay transactions
+internal/onboard/             the appliance registration writes and their verification
 build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
+scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
+scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/set-dev-pin.sh        pins one dev service at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
+
+# Documentation beyond this file
+docs/appliance-onboarding.md  the runbook for admitting a regional appliance
+docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration
 terraform/
@@ -617,6 +629,14 @@ pull request, applies that cannot disagree with `main`, and an OpenTofu and
 provider version that is the same for everyone. Use it to iterate, not to host
 anything anyone depends on.
 
+### Onboarding a regional appliance
+
+A stage seals the appliances named in its `appliance_regions`, and
+`make mint-appliance-token` issues a node's unseal credential. The ordering across
+both repositories, how the credential is delivered to a node operator, and what
+retiring a region destroys are in
+[docs/appliance-onboarding.md](docs/appliance-onboarding.md).
+
 ### Funding the wallets
 
 The seed phase mints two secp256k1 wallets and reports their addresses. Both
@@ -933,75 +953,31 @@ The plan role is the one that is genuinely tight, because a pull request chooses
 what the plan job runs. Narrowing the apply role further is worth doing, but it
 buys less: a push to `main` has already been reviewed.
 
-### Onboarding a regional appliance has no tooling
+### Retiring a region should deregister the node
 
-Everything the central services need is minted and wired by an apply. The first
-Piri/Ingot appliance pointed at a stage needs five more things, and this
-repository provides none of them. Until it does, an appliance cannot finish
-`piri init`: it fails at the approval step with `403`, and if it gets past that,
-uploads fail with `CandidateUnavailable` and hilt rejects every tenant in the
-region.
+Moving a label to `retired_appliance_regions` revokes the node's unseal token
+and destroys its transit key, which is what contains it. Its rows stay behind in
+sprue, hilt and the delegator's allow list, and they should be removed in the
+same pass: a retired region leaves a provider sprue can still select and a DID
+the delegator still approves.
 
-**Three registration writes.**
+The work is uneven across the three. sprue has `provider deregister`. The
+delegator's allow list is a `DeleteItem` on the table the onboard phase already
+writes. hilt ships no command to remove a provider at all, so that row means
+either a change in hilt or a delete against its database, and which of those is
+right is the part worth deciding first.
 
-These are runtime state, not configuration, so no
-apply creates them. smelt does each one from the operator's machine against the
-box; the equivalents here have no home yet.
+Retirement's ordering already accounts for a longer sequence: the unseal token is
+revoked first so a run that fails halfway has still contained the node, and the
+transit key is destroyed last so its presence is what brings an unfinished
+retirement back to the next apply.
 
-| What                                                                             | Where it lands                    | Without it                                                                                                 |
-| -------------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| The appliance's DID on the delegator's allow list                                | `fc-<stage>-delegator-allow-list` | `piri init` step 4 calls `/registrar/request-approval`, which refuses any DID not on the list with a `403` |
-| `provider register <did> <url> <proof>` plus `provider weight set` against sprue | sprue's database                  | uploads fail with `CandidateUnavailable: no storage providers available`                                   |
-| `provider add <did> <region>` against hilt                                       | hilt's database                   | hilt rejects tenant creation for the region and every `/s3/*` invocation ingot makes                       |
+### A region mismatch has to be fixed by hand
 
-smelt ([smelt#11](https://github.com/fil-forge/smelt/pull/11)) implements these
-as `staging-allowlist-piri`, `staging-register-piri` and `staging-register-ingot`,
-and its runbook is the best statement of the ordering and the failure modes.
-
-**Two proofs, one in each direction.**
-
-The provision Lambda deliberately issues three of the five proofs that smelt
-issues. The seed phase could not issue the other two even if it wanted to,
-because both involve a key that does not exist when a stage is brought up:
-
-- `piri-0-proof` — signed by the appliance's own identity key, audience sprue,
-  granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
-  `/pdp/info`. Central never holds that key, so this proof arrives from the
-  appliance and is handed to sprue as the third argument of `provider register`.
-- `hilt-ingot-s3-proof` — signed by hilt, audience the region's ingot
-  `did:web:<region>.<content suffix>`, granting `/s3/request/authorize` and the
-  four `/s3/bucket/*` commands. Central holds hilt's key and derives the audience
-  from the region, so this one is issued per appliance rather than per stage and
-  returned to the node.
-
-That asymmetry is the shape of the missing tool: onboarding is a request carrying
-the appliance's Piri DID and its public URL.
-
-**There is no shell to run the admin CLIs in.**
-
-smelt reaches sprue and hilt with `docker compose exec`. Here both run as
-Fargate tasks in private subnets and `enable_execute_command` is not set on any
-service, so `aws ecs execute-command` does not work either. Three ways out:
-
-- turn ECS Exec on and accept a documented human path into a task
-- add a Lambda alongside `provision` that performs the writes and issues the hilt proof, reusing its
-  SSM access to read hilt's identity;
-- or expose the admin operations over the ALB behind authentication, which is the largest change and
-  the only one that also serves a self-service future.
-
-The delegator's allow list is the exception and can be written today. Its table
-takes a single `did` string as the hash key, so an operator with credentials for
-the account writes the item directly without going near a task, once the item
-shape the delegator reads has been confirmed against its store package.
-
-**Where this belongs is the open question.**
-
-The appliance knows its own DIDs and its operator runs its bootstrap, which argues for the appliance
-pulling. Every write lands in central's tables and databases, and central holds the key that signs
-the proof going back, which argues for the authority staying here. The likely answer is both halves:
-the appliance presents its DIDs and URL, and tooling in this repository performs the three writes
-and returns the proof. Deciding that before the first appliance arrives is cheaper than discovering
-it during one.
+hilt raises one error for a DID registered under this region and for one
+registered under another, and ships no command to move a provider. The onboard
+phase reads hilt's `provider` row to tell the two apart and refuses to continue
+on a mismatch, but correcting the row means editing hilt's database.
 
 ### hilt should authenticate to OpenBao with AWS IAM auth
 
@@ -1143,8 +1119,10 @@ arrangement was chosen rather than overlooked.
 - [smelt](https://github.com/fil-forge/smelt) — the single-VM Docker Compose
   deployment this replaces, and the source of the key generation code.
 - [smelt#11](https://github.com/fil-forge/smelt/pull/11) — its appliance
-  registration scripts, which are the closest thing to a specification for the
-  onboarding tooling this repository still lacks.
+  registration scripts, which specified the writes the onboard phase performs,
+  including the region mismatch hilt's own error cannot distinguish.
+- [fil-forge/infra-nodes](https://github.com/fil-forge/infra-nodes) — the
+  appliance side: the node this repository seals, registers and can revoke.
 - [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) — regional security
   and key management, which makes this OpenBao the root of trust for
   appliances.
