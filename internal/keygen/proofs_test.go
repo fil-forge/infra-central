@@ -2,6 +2,7 @@ package keygen
 
 import (
 	"encoding/base64"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,6 +124,42 @@ func TestIssueProofEncodesABinaryDelegation(t *testing.T) {
 	}
 	if _, err := delegation.Decode(decoded); err != nil {
 		t.Errorf("the delegator cannot parse what the base64 decodes to: %v", err)
+	}
+}
+
+// The five commands Ingot invokes on hilt, exactly as smelt's generate-proofs.sh
+// delegates them. A missing one fails at the request Ingot makes, not at
+// onboarding, so the list is worth pinning.
+func TestHiltIngotS3ProofCoversEveryCommandIngotInvokes(t *testing.T) {
+	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", "did:key:zIngot")
+
+	want := []string{
+		"/s3/request/authorize",
+		"/s3/bucket/create",
+		"/s3/bucket/delete",
+		"/s3/bucket/info",
+		"/s3/bucket/list",
+	}
+	if !reflect.DeepEqual(proof.commands, want) {
+		t.Errorf("commands = %v, want %v", proof.commands, want)
+	}
+}
+
+// Ingot reads the proof from a file, and smelt writes it as a textual container.
+func TestHiltIngotS3ProofIsATextualContainer(t *testing.T) {
+	issuer, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+
+	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", issuer.DID)
+	out, err := IssueProof(issuer.PrivatePEM, proof)
+	if err != nil {
+		t.Fatalf("IssueProof: %v", err)
+	}
+
+	if strings.ContainsRune(out, 0) {
+		t.Error("the proof carries a NUL byte, so it is not the textual container Ingot reads")
 	}
 }
 

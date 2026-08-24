@@ -37,6 +37,10 @@ type config struct {
 	// PrivateCIDRs bounds hilt's AppRole to the VPC. See the note in
 	// internal/vaultinit about what this does and does not buy.
 	PrivateCIDRs []string
+
+	// AllowListTable is the delegator's DynamoDB table, written by the onboard
+	// phase. Not validated at startup, because every other phase runs without it.
+	AllowListTable string
 }
 
 func loadConfig() (config, error) {
@@ -48,6 +52,7 @@ func loadConfig() (config, error) {
 		DBAdminDatabase: envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
 		DBMasterSecret:  os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:     os.Getenv("FORGE_OPENBAO_ADDR"),
+		AllowListTable:  os.Getenv("FORGE_ALLOW_LIST_TABLE"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),

@@ -77,6 +77,37 @@ func Proofs(did map[string]string) []Proof {
 	}
 }
 
+// HiltIngotS3Proof returns the delegation hilt issues to a regional appliance's
+// Ingot, authorising the S3 commands Ingot invokes on hilt.
+//
+// This is the one proof that cannot be issued when a stage is brought up, which
+// is why it is not in Proofs above: its audience is the appliance's Ingot
+// did:key, and no such appliance exists yet. Central holds hilt's key, so
+// central signs it, on demand, with the appliance's DID as input.
+//
+// It is stored under the appliance's own prefix rather than a service's, because
+// the appliance is who reads it and retiring a region deletes that prefix whole.
+func HiltIngotS3Proof(consumer, hiltDIDWeb, ingotDID string) Proof {
+	return Proof{
+		Consumer:  consumer,
+		Name:      "hilt-ingot-s3-proof",
+		Issuer:    "hilt",
+		issuerDID: hiltDIDWeb,
+		audience:  ingotDID,
+		subject:   hiltDIDWeb,
+		commands: []string{
+			"/s3/request/authorize",
+			"/s3/bucket/create",
+			"/s3/bucket/delete",
+			"/s3/bucket/info",
+			"/s3/bucket/list",
+		},
+		// Textual, matching what smelt's generate-proofs.sh writes and what
+		// Ingot reads from a file.
+		codec: "base64+gzip",
+	}
+}
+
 // IssueProof signs a delegation with the issuer's private key and returns it in
 // the form it is stored in.
 //
