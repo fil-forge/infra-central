@@ -247,6 +247,7 @@ type fakeOpenBao struct {
 	tokenRoles       map[string]map[string]any
 	revokedAccessors []string
 	wrapTTLSeen      string
+	tokenCreateBody  map[string]any
 }
 
 func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -388,6 +389,10 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/v1/auth/token/create/"):
+		if err := json.NewDecoder(r.Body).Decode(&f.tokenCreateBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		// Wrapping is requested through a header, and the response shape
 		// changes completely when it is honoured: the token moves into
 		// wrap_info and auth is absent.

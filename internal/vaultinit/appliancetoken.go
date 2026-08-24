@@ -85,8 +85,12 @@ func MintApplianceToken(ctx context.Context, client *api.Client, cfg ApplianceTo
 	wrapped.SetToken(client.Token())
 	wrapped.SetWrappingLookupFunc(func(operation, path string) string { return wrapTTL })
 
+	// The role's allowed_policies would supply the same set when a request
+	// names none, but that is a fallback inside OpenBao's token store. Naming
+	// the policy makes the request itself say what the token carries.
 	resp, err := wrapped.Logical().WriteWithContext(ctx, "auth/token/create/"+name, map[string]any{
 		"display_name": name,
+		"policies":     []string{name},
 		"meta":         map[string]string{"region": cfg.Region},
 	})
 	if err != nil {

@@ -91,6 +91,24 @@ func TestMintApplianceTokenReturnsTheWrappingTokenAndAccessor(t *testing.T) {
 	}
 }
 
+// The role's allowed_policies would fill the policies in when a request names
+// none, but that is a fallback the request should not lean on.
+func TestMintApplianceTokenNamesTheRegionPolicy(t *testing.T) {
+	f := &fakeOpenBao{initialised: true}
+	client := newClient(t, f)
+
+	if _, _, err := MintApplianceToken(context.Background(), client, ApplianceTokenConfig{
+		Region: "us-east-9",
+	}, "24h"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []any{"appliance-unseal-us-east-9"}
+	if got := f.tokenCreateBody["policies"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("policies = %v, want %v", got, want)
+	}
+}
+
 // The wrap is the whole reason the real token never reaches the operator, so an
 // unwrapped response is a failure rather than something to pass along.
 func TestMintApplianceTokenRefusesAnUnwrappedResponse(t *testing.T) {
