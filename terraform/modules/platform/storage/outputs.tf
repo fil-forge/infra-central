@@ -11,6 +11,10 @@ output "allow_list_table_name" {
   value = aws_dynamodb_table.allow_list.name
 }
 
+output "allow_list_table_arn" {
+  value = aws_dynamodb_table.allow_list.arn
+}
+
 output "provider_info_table_name" {
   value = aws_dynamodb_table.provider_info.name
 }

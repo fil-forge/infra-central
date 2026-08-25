@@ -84,10 +84,15 @@ done
 command -v aws >/dev/null || { echo "ERROR: aws CLI not found in PATH" >&2; exit 1; }
 command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 
-PIRI_PROOF=""
+# The proof is sent base64-encoded, whatever form the file holds. A bare
+# DAG-CBOR container is binary and carries NUL bytes, which neither a shell
+# variable nor a JSON string can hold, so reading such a file as text would
+# corrupt it before it left the laptop. Encoding both forms means nothing here
+# has to guess which one the appliance sent.
+PIRI_PROOF_B64=""
 if [ -n "$PROOF_FILE" ]; then
   [ -r "$PROOF_FILE" ] || { echo "ERROR: cannot read $PROOF_FILE" >&2; exit 1; }
-  PIRI_PROOF="$(cat "$PROOF_FILE")"
+  PIRI_PROOF_B64="$(base64 < "$PROOF_FILE" | tr -d '\n')"
 fi
 
 FUNCTION="fc-${STAGE}-provision"
@@ -103,12 +108,12 @@ invoke() {
     --arg piri "$PIRI_DID" \
     --arg ingot "$INGOT_DID" \
     --arg url "$PIRI_URL" \
-    --arg proof "$PIRI_PROOF" \
+    --arg proof "$PIRI_PROOF_B64" \
     --arg weight "$WEIGHT" \
     --arg replication "$REPLICATION_WEIGHT" \
     '{phase:"onboard", confirm:$confirm, region:$region, piri_did:$piri,
       ingot_did:$ingot, piri_url:$url}
-     + (if $proof       == "" then {} else {piri_proof:$proof} end)
+     + (if $proof       == "" then {} else {piri_proof_b64:$proof} end)
      + (if $weight      == "" then {} else {weight:($weight|tonumber)} end)
      + (if $replication == "" then {} else {replication_weight:($replication|tonumber)} end)')"
 

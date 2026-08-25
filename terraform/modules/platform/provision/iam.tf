@@ -56,6 +56,16 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
+  # The delegator's allow list, which the onboard phase adds an appliance's Piri
+  # DID to. Reading it is what lets the dry run report whether the DID is
+  # already listed, so both actions are needed even for a run that writes
+  # nothing.
+  statement {
+    sid       = "ManageDelegatorAllowList"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    resources = [var.allow_list_table_arn]
+  }
+
   # The RDS master credentials, which Terraform never sees because
   # manage_master_user_password keeps them out of state.
   statement {

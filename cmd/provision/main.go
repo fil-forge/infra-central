@@ -80,8 +80,14 @@ type Request struct {
 	IngotDID string `json:"ingot_did,omitempty"`
 	PiriURL  string `json:"piri_url,omitempty"`
 	// PiriProof is the delegation the appliance signed for sprue, in whatever
-	// container ucantool wrote.
+	// container ucantool wrote, given as text.
 	PiriProof string `json:"piri_proof,omitempty"`
+	// PiriProofB64 is the same delegation base64-encoded, which is how
+	// scripts/onboard-appliance.sh sends it. A bare DAG-CBOR container is binary
+	// and carries NUL bytes, and neither a shell variable nor a JSON string can
+	// hold one, so the script encodes every proof file rather than guessing
+	// which form it holds. The two fields are mutually exclusive.
+	PiriProofB64 string `json:"piri_proof_b64,omitempty"`
 	// Weights default to smelt's 100/100.
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`

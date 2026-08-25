@@ -92,3 +92,13 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "allow_list_table_name" {
+  description = "The delegator's DynamoDB allow-list table. Only the onboard phase writes it."
+  type        = string
+}
+
+variable "allow_list_table_arn" {
+  description = "ARN of the same table, which is what the role's grant names."
+  type        = string
+}

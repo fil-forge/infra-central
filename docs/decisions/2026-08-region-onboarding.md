@@ -245,6 +245,12 @@ that error accepts a mismatch that breaks every subsequent request. smelt hit ex
 region rename, and its script now verifies the row. So does this phase, twice: once when reading, and
 again after its own write, because a write that reported success is not evidence of what it did.
 
+A region label this stage has never minted an unseal token for is refused before anything is read.
+hilt would otherwise register the Ingot under a mistyped `--region` permanently, and that row is the
+one mismatch with no repair short of editing hilt's database. The recorded token accessor is the
+evidence the label is real: an appliance cannot hold the DIDs this phase is given without having
+unsealed with a token minted for exactly that label.
+
 The allow list is written directly to DynamoDB rather than through the delegator's
 `registrar store allow-did` command. The command needs a shell in the delegator's task, and it runs
 as a Fargate task in a private subnet with ECS Exec off. The table takes a single `did` hash key, so
@@ -259,6 +265,11 @@ them again cannot change what a previous run established, and it repairs a provi
 whatever defaults sprue assigned. The proof is the opposite case, written once and read back
 afterwards, because a delegation carries a random nonce and re-issuing one produces bytes central
 would no longer recognise as the delegation it issued.
+
+The one thing that does force a reissue is a rotated hilt identity, which leaves every delegation the
+old key signed unverifiable: hilt's did:web document then publishes only the new key. The signing
+key's did:key is stored beside the proof, so a later run compares the two and reissues when they
+differ. The seed phase tracks the same dependency for the startup proofs.
 
 ## OpenBao tests run in-process
 

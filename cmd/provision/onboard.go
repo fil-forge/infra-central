@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 
@@ -43,14 +44,23 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
 
+	piriProof, err := decodePiriProof(req)
+	if err != nil {
+		return nil, err
+	}
+
 	onboardReq := onboard.Request{
 		Region:            req.Region,
 		PiriDID:           req.PiriDID,
 		IngotDID:          req.IngotDID,
 		PiriURL:           req.PiriURL,
-		PiriProof:         []byte(req.PiriProof),
+		PiriProof:         piriProof,
 		Weight:            intOrDefault(req.Weight, defaultWeight),
 		ReplicationWeight: intOrDefault(req.ReplicationWeight, defaultReplicationWeight),
+	}
+
+	if err := d.requireProvisionedRegion(ctx, req.Region); err != nil {
+		return nil, err
 	}
 
 	onboardDeps, err := d.onboardDeps(ctx, awsCfg.Region, dynamodb.NewFromConfig(awsCfg))
@@ -81,6 +91,50 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 
 	slog.Info("appliance onboarded", "region", req.Region, "performed", result.Performed)
 	return &Response{Phase: "onboard", OnboardResult: result}, nil
+}
+
+// decodePiriProof returns the appliance's proof bytes from whichever of the two
+// request fields carries it.
+//
+// Both forms are accepted because a textual container is something a person can
+// paste into a direct invocation, while the script cannot tell text from binary
+// and encodes either. Refusing both at once rather than preferring one keeps a
+// caller from sending two proofs and silently having one ignored.
+func decodePiriProof(req Request) ([]byte, error) {
+	switch {
+	case req.PiriProof != "" && req.PiriProofB64 != "":
+		return nil, fmt.Errorf("send the appliance's proof as piri_proof or piri_proof_b64, not both")
+	case req.PiriProofB64 != "":
+		proof, err := base64.StdEncoding.DecodeString(req.PiriProofB64)
+		if err != nil {
+			return nil, fmt.Errorf("decode piri_proof_b64: %w", err)
+		}
+		return proof, nil
+	default:
+		return []byte(req.PiriProof), nil
+	}
+}
+
+// requireProvisionedRegion refuses a region label this stage has never issued an
+// unseal token for.
+//
+// A mistyped --region is otherwise accepted, and hilt registers the Ingot under
+// the typo permanently: it has no command to move a provider, so the row has to
+// be corrected in its database by hand. The recorded token accessor is the
+// evidence that the label is real, because an appliance cannot hold the DIDs
+// this phase is given without having unsealed with a token minted for exactly
+// that label.
+func (d *deps) requireProvisionedRegion(ctx context.Context, region string) error {
+	_, found, err := d.store.LookupPublic(ctx, applianceService(region), unsealTokenAccessorKey)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf(
+			"no unseal token was ever minted for region %q, so either the label is a typo or the appliance is not provisioned; check the region against the stage's appliance_regions and run scripts/mint-appliance-token.sh first",
+			region)
+	}
+	return nil
 }
 
 func validateOnboardRequest(req Request) error {
@@ -138,6 +192,10 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 	}, nil
 }
 
+// proofIssuerKey names the parameter recording which hilt key signed a stored
+// appliance proof. It sits beside the proof, under the appliance's own prefix.
+const proofIssuerKey = ".issuer"
+
 // applianceProofIssuer returns a function that signs hilt's delegation to an
 // appliance's Ingot, once, and reads it back on every run afterwards.
 //
@@ -145,15 +203,26 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 // nonce per delegation, so re-issuing one produces different bytes and a
 // different CID, and an appliance holding the previous copy would be holding
 // something central no longer recognises as the one it issued.
+//
+// The exception is a rotated hilt identity, which makes every delegation the old
+// key signed unverifiable: hilt's did:web document then publishes only the new
+// key. The signing key's did:key is recorded beside the proof so a later run can
+// see the rotation and reissue, the same dependency the seed phase tracks for
+// the startup proofs.
 func (d *deps) applianceProofIssuer(hiltDIDWeb string) func(context.Context, string, string) (string, error) {
 	return func(ctx context.Context, region, ingotDID string) (string, error) {
 		proof := keygen.HiltIngotS3Proof(applianceService(region), hiltDIDWeb, ingotDID)
 
+		hiltPEM, err := d.store.GetSecret(ctx, "hilt", "identity")
+		if err != nil {
+			return "", fmt.Errorf("read hilt's identity to sign the proof: %w", err)
+		}
+		hiltIdentity, err := keygen.ParseIdentity([]byte(hiltPEM))
+		if err != nil {
+			return "", fmt.Errorf("derive hilt's key DID: %w", err)
+		}
+
 		stored, created, err := d.store.EnsurePublic(ctx, proof.Consumer, proof.Name, func() (string, error) {
-			hiltPEM, err := d.store.GetSecret(ctx, "hilt", "identity")
-			if err != nil {
-				return "", fmt.Errorf("read hilt's identity to sign the proof: %w", err)
-			}
 			return keygen.IssueProof([]byte(hiltPEM), proof)
 		})
 		if err != nil {
@@ -163,11 +232,42 @@ func (d *deps) applianceProofIssuer(hiltDIDWeb string) func(context.Context, str
 		if created {
 			slog.Info("issued hilt's S3 delegation to the appliance",
 				"region", region, "audience", ingotDID)
-		} else {
-			slog.Info("returning the delegation issued earlier", "region", region)
+			return stored, d.recordProofIssuer(ctx, proof, hiltIdentity.DID)
 		}
-		return stored, nil
+
+		issuer, found, err := d.store.LookupPublic(ctx, proof.Consumer, proof.Name+proofIssuerKey)
+		if err != nil {
+			return "", err
+		}
+		if found && issuer == hiltIdentity.DID {
+			slog.Info("returning the delegation issued earlier", "region", region)
+			return stored, nil
+		}
+		if !found {
+			// A proof stored before this record existed. Its issuer is unknown,
+			// and hilt's key is far more likely to be the original than a
+			// rotated one, so the record is stamped rather than the proof
+			// reissued: reissuing churns the bytes an appliance already holds.
+			slog.Info("recording which key signed the stored delegation", "region", region)
+			return stored, d.recordProofIssuer(ctx, proof, hiltIdentity.DID)
+		}
+
+		slog.Warn("hilt's identity was rotated, reissuing the appliance's delegation",
+			"region", region, "was", issuer, "now", hiltIdentity.DID)
+		reissued, err := keygen.IssueProof([]byte(hiltPEM), proof)
+		if err != nil {
+			return "", err
+		}
+		if err := d.store.PutPublic(ctx, proof.Consumer, proof.Name, reissued); err != nil {
+			return "", err
+		}
+		return reissued, d.recordProofIssuer(ctx, proof, hiltIdentity.DID)
 	}
+}
+
+// recordProofIssuer stamps a stored proof with the did:key that signed it.
+func (d *deps) recordProofIssuer(ctx context.Context, proof keygen.Proof, issuerDID string) error {
+	return d.store.PutPublic(ctx, proof.Consumer, proof.Name+proofIssuerKey, issuerDID)
 }
 
 // serviceIssuer builds an issuer that signs with a service's key and presents
