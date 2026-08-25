@@ -120,6 +120,6 @@ output "appliance_keys" {
 }
 
 output "retired_appliances" {
-  description = "Regions the most recent apply destroyed keys for. A non-empty list means a node lost its ability to unseal, permanently."
+  description = "Regions the last vault run destroyed keys for. Those nodes can never unseal again. The result stays in state until the next run, so a non-empty list records that retirement and does not mean this apply destroyed anything."
   value       = try(jsondecode(aws_lambda_invocation.vault.result).retired_appliances, [])
 }
