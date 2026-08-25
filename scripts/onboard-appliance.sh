@@ -18,20 +18,20 @@
 #      would change
 #   2. after you approve it, with confirmation, which performs the writes
 #
-# Run it after the appliance has provisioned its keys, so its DIDs exist.
+# Run it after the appliance has provisioned its keys, so its Piri DID exists.
+# Its Ingot identity is not asked for: Ingot is a did:web named after the region,
+# on a domain Forge owns, so central derives it.
 #
 # Usage:
 #   scripts/onboard-appliance.sh \
 #     --region us-east-9 \
 #     --piri-did did:key:z6Mk... \
-#     --ingot-did did:key:z6Mk... \
 #     --piri-url https://piri.dev.forge-sandbox.fil.one \
 #     --piri-proof-file piri-proof.txt
 #
 # Options:
 #   --region            appliance region label                    (required)
 #   --piri-did          the appliance's Piri did:key              (required)
-#   --ingot-did         the appliance's Ingot did:key             (required)
 #   --piri-url          where Piri answers publicly              (required)
 #   --piri-proof-file   the proof the appliance signed for sprue (required
 #                       unless sprue already has the provider)
@@ -43,13 +43,12 @@
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
-#   - the appliance provisioned, so its two DIDs exist
+#   - the appliance provisioned, so its Piri DID exists
 set -euo pipefail
 
 STAGE="${STAGE:-dev}"
 REGION=""
 PIRI_DID=""
-INGOT_DID=""
 PIRI_URL=""
 PROOF_FILE=""
 PROOF_OUT=""
@@ -61,7 +60,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --region)             REGION="$2"; shift 2 ;;
     --piri-did)           PIRI_DID="$2"; shift 2 ;;
-    --ingot-did)          INGOT_DID="$2"; shift 2 ;;
     --piri-url)           PIRI_URL="$2"; shift 2 ;;
     --piri-proof-file)    PROOF_FILE="$2"; shift 2 ;;
     --proof-out)          PROOF_OUT="$2"; shift 2 ;;
@@ -74,7 +72,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-for required in REGION PIRI_DID INGOT_DID PIRI_URL; do
+for required in REGION PIRI_DID PIRI_URL; do
   if [ -z "${!required}" ]; then
     echo "ERROR: --$(echo "$required" | tr 'A-Z_' 'a-z-') is required" >&2
     exit 2
@@ -106,13 +104,12 @@ invoke() {
     --argjson confirm "$confirm" \
     --arg region "$REGION" \
     --arg piri "$PIRI_DID" \
-    --arg ingot "$INGOT_DID" \
     --arg url "$PIRI_URL" \
     --arg proof "$PIRI_PROOF_B64" \
     --arg weight "$WEIGHT" \
     --arg replication "$REPLICATION_WEIGHT" \
     '{phase:"onboard", confirm:$confirm, region:$region, piri_did:$piri,
-      ingot_did:$ingot, piri_url:$url}
+      piri_url:$url}
      + (if $proof       == "" then {} else {piri_proof_b64:$proof} end)
      + (if $weight      == "" then {} else {weight:($weight|tonumber)} end)
      + (if $replication == "" then {} else {replication_weight:($replication|tonumber)} end)')"
@@ -139,7 +136,6 @@ invoke() {
 echo "=== Onboard the ${REGION} appliance with ${STAGE} ==="
 echo "  Lambda: $FUNCTION"
 echo "  Piri:   $PIRI_DID at $PIRI_URL"
-echo "  Ingot:  $INGOT_DID"
 echo
 
 echo "Reading sprue, hilt and the delegator (nothing is written yet)…"

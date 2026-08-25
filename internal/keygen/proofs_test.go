@@ -131,7 +131,7 @@ func TestIssueProofEncodesABinaryDelegation(t *testing.T) {
 // delegates them. A missing one fails at the request Ingot makes, not at
 // onboarding, so the list is worth pinning.
 func TestHiltIngotS3ProofCoversEveryCommandIngotInvokes(t *testing.T) {
-	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", "did:key:zIngot")
+	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", "did:web:us-east-9.s3.dev.example")
 
 	want := []string{
 		"/s3/request/authorize",

@@ -54,6 +54,7 @@ resource "aws_lambda_function" "this" {
 
       # Used only by the onboard phase, which Terraform never invokes.
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
+      FORGE_CONTENT_SUFFIX   = var.content_hostname_suffix
 
       # Used only by the fund phase, which Terraform never invokes.
       FORGE_CHAIN_RPC_URL        = var.chain.rpc_url

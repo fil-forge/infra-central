@@ -36,7 +36,8 @@ type Proof struct {
 // each service.
 //
 // Three of smelt's five apply here. The piri-0 and hilt-ingot proofs belong to
-// the storage-node side of the stack, which this project does not deploy.
+// the storage-node side of the stack, which this project does not deploy. The
+// per-region delegation to an appliance's Ingot is in HiltIngotS3Proof below.
 //
 // The first two exist only to satisfy the delegator's startup validation: it
 // requires an indexing-service and an egress-tracking delegation even though
@@ -80,10 +81,10 @@ func Proofs(did map[string]string) []Proof {
 // HiltIngotS3Proof returns the delegation hilt issues to a regional appliance's
 // Ingot, authorising the S3 commands Ingot invokes on hilt.
 //
-// This is the one proof that cannot be issued when a stage is brought up, which
-// is why it is not in Proofs above: its audience is the appliance's Ingot
-// did:key, and no such appliance exists yet. Central holds hilt's key, so
-// central signs it, on demand, with the appliance's DID as input.
+// It is not in Proofs above because it is per region rather than per stage: its
+// audience is the region's Ingot did:web, so a stage needs one of these for each
+// appliance it admits. The onboard phase issues it when an appliance is admitted,
+// which is also when central first knows the region is real.
 //
 // It is stored under the appliance's own prefix rather than a service's, because
 // the appliance is who reads it and retiring a region deletes that prefix whole.

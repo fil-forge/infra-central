@@ -73,12 +73,15 @@ type Request struct {
 
 	// --- onboard phase only ---
 
-	// The appliance presenting itself. None of this is derivable here: the DIDs
-	// belong to keys generated on the node, and the proof is signed by one of
-	// them, which central never holds.
-	PiriDID  string `json:"piri_did,omitempty"`
+	// The appliance presenting itself. Piri's DID belongs to a key generated on
+	// the node, and the proof is signed by it, so neither is derivable here.
+	// Ingot's is: it is a did:web named after the region, built from
+	// FORGE_CONTENT_SUFFIX.
+	PiriDID string `json:"piri_did,omitempty"`
+	PiriURL string `json:"piri_url,omitempty"`
+	// IngotDID is accepted only to be refused, so a caller working from the old
+	// contract is told the input is gone rather than having it ignored.
 	IngotDID string `json:"ingot_did,omitempty"`
-	PiriURL  string `json:"piri_url,omitempty"`
 	// PiriProof is the delegation the appliance signed for sprue, in whatever
 	// container ucantool wrote, given as text.
 	PiriProof string `json:"piri_proof,omitempty"`

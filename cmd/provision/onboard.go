@@ -49,10 +49,15 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
+	ingotDID, err := d.ingotDID(req.Region)
+	if err != nil {
+		return nil, err
+	}
+
 	onboardReq := onboard.Request{
 		Region:            req.Region,
 		PiriDID:           req.PiriDID,
-		IngotDID:          req.IngotDID,
+		IngotDID:          ingotDID,
 		PiriURL:           req.PiriURL,
 		PiriProof:         piriProof,
 		Weight:            intOrDefault(req.Weight, defaultWeight),
@@ -69,7 +74,7 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 	}
 
 	slog.Info("reading what sprue, hilt and the delegator hold",
-		"region", req.Region, "piri", req.PiriDID, "ingot", req.IngotDID)
+		"region", req.Region, "piri", req.PiriDID, "ingot", ingotDID)
 	state, err := onboard.Read(ctx, onboardDeps, onboardReq)
 	if err != nil {
 		return nil, err
@@ -138,12 +143,18 @@ func (d *deps) requireProvisionedRegion(ctx context.Context, region string) erro
 }
 
 func validateOnboardRequest(req Request) error {
+	// An Ingot DID in the request is a caller working from the old contract,
+	// where the appliance sent one. Refusing is what stops a stale script from
+	// onboarding a different appliance than the one it names.
+	if req.IngotDID != "" {
+		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from its region")
+	}
+
 	var missing []string
 	for name, value := range map[string]string{
-		"region":    req.Region,
-		"piri_did":  req.PiriDID,
-		"ingot_did": req.IngotDID,
-		"piri_url":  req.PiriURL,
+		"region":   req.Region,
+		"piri_did": req.PiriDID,
+		"piri_url": req.PiriURL,
 	} {
 		if value == "" {
 			missing = append(missing, name)
@@ -153,6 +164,20 @@ func validateOnboardRequest(req Request) error {
 		return fmt.Errorf("the onboard phase needs %v; all of it comes from the appliance", missing)
 	}
 	return nil
+}
+
+// ingotDID builds a regional appliance's Ingot identity from its region.
+//
+// Ingot is a did:web on a domain Forge owns, one name per region, so central
+// derives the DID rather than being told it. That removes the input an operator
+// could mistype and makes the identity survive a key rotation on the appliance:
+// the node publishes its current key in its own DID document, and nothing here
+// changes. See docs/decisions/2026-08-region-onboarding.md.
+func (d *deps) ingotDID(region string) (string, error) {
+	if d.cfg.ContentSuffix == "" {
+		return "", fmt.Errorf("FORGE_CONTENT_SUFFIX is required for the onboard phase: it builds the appliance's Ingot did:web")
+	}
+	return fmt.Sprintf("did:web:%s.%s", region, d.cfg.ContentSuffix), nil
 }
 
 // onboardDeps assembles the three clients and the proof issuer.

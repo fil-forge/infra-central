@@ -54,8 +54,9 @@ type Provider struct {
 	ReplicationWeight int64  `json:"replication_weight"`
 }
 
-// Request is the appliance presenting itself: its two DIDs, where its Piri
-// answers, and the delegation it signed for sprue.
+// Request is the appliance presenting itself: its Piri DID, where that Piri
+// answers, and the delegation it signed for sprue. IngotDID is derived from the
+// region by the caller rather than sent by the appliance.
 type Request struct {
 	Region   string
 	PiriDID  string

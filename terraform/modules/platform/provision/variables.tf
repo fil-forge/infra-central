@@ -102,3 +102,9 @@ variable "allow_list_table_arn" {
   description = "ARN of the same table, which is what the role's grant names."
   type        = string
 }
+
+variable "content_hostname_suffix" {
+  description = "Builds a regional appliance's Ingot did:web, which is the region prepended to it, e.g. s3.dev.filonecontent.com. Only the onboard phase uses it. Empty is allowed, because a stage that admits no appliance never reads it."
+  type        = string
+  default     = ""
+}

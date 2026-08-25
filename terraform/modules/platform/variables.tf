@@ -113,3 +113,17 @@ variable "vault_trigger" {
   type        = string
   default     = "1"
 }
+
+variable "content_hostname_suffix" {
+  description = <<-EOT
+    Where regional appliances serve S3, and therefore what their Ingot
+    identities are named after: `<region>.<suffix>`, e.g.
+    us-east-9.s3.dev.filonecontent.com.
+
+    Forge owns this domain, so an appliance's DID is derived here rather than
+    supplied by its operator. Renaming it changes every Ingot's identity, so it
+    is settled before a stage admits its first appliance.
+  EOT
+  type        = string
+  default     = ""
+}

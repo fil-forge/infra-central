@@ -41,6 +41,11 @@ type config struct {
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
 	// phase. Not validated at startup, because every other phase runs without it.
 	AllowListTable string
+
+	// ContentSuffix builds a regional appliance's Ingot did:web, which is
+	// <region> prepended to it, e.g. s3.dev.filonecontent.com. Not validated at
+	// startup, for the same reason as the table above.
+	ContentSuffix string
 }
 
 func loadConfig() (config, error) {
@@ -53,6 +58,7 @@ func loadConfig() (config, error) {
 		DBMasterSecret:  os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:     os.Getenv("FORGE_OPENBAO_ADDR"),
 		AllowListTable:  os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		ContentSuffix:   os.Getenv("FORGE_CONTENT_SUFFIX"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
