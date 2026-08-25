@@ -31,7 +31,7 @@ locals {
     listener "tcp" {
       address     = "0.0.0.0:${var.port}"
       tls_disable = 1
-
+  
       # An appliance authenticates here with a token bound to its Elastic IP,
       # and it arrives through the ALB, which connects from its own address.
       # Checking the raw connection would compare the ALB against the node's

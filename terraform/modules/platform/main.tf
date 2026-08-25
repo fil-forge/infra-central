@@ -104,6 +104,10 @@ module "provision" {
 
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
+
+  allow_list_table_name   = module.storage.allow_list_table_name
+  allow_list_table_arn    = module.storage.allow_list_table_arn
+  content_hostname_suffix = var.content_hostname_suffix
 }
 
 # Mints every identity, wallet and password, and creates the per-service
@@ -160,9 +164,13 @@ module "openbao" {
 resource "aws_lambda_invocation" "vault" {
   function_name = module.provision.function_name
 
+  # The region lists are part of the input, so committing a label is what
+  # re-invokes the phase to reconcile the keys against it.
   input = jsonencode({
-    phase   = "vault"
-    trigger = var.vault_trigger
+    phase                     = "vault"
+    trigger                   = var.vault_trigger
+    appliance_regions         = var.appliance_regions
+    retired_appliance_regions = var.retired_appliance_regions
   })
 
   depends_on = [module.openbao]

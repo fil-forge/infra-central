@@ -108,8 +108,34 @@ variable "seed_trigger" {
   default     = "1"
 }
 
+variable "appliance_regions" {
+  description = "Region labels of the appliances this stage serves. Each one gets a transit key its node's OpenBao seals against, created by the vault phase."
+  type        = list(string)
+  default     = []
+}
+
+variable "retired_appliance_regions" {
+  description = "Region labels whose appliance has been retired. The vault phase revokes the node's unseal token and destroys its transit key, and a label named by neither list fails the phase, so a retired label has to stay here rather than being deleted."
+  type        = list(string)
+  default     = []
+}
+
 variable "vault_trigger" {
   description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole."
   type        = string
   default     = "1"
+}
+
+variable "content_hostname_suffix" {
+  description = <<-EOT
+    Where regional appliances serve S3, and therefore what their Ingot
+    identities are named after: `<region>.<suffix>`, e.g.
+    us-east-9.s3.dev.filonecontent.com.
+
+    Forge owns this domain, so an appliance's DID is derived here rather than
+    supplied by its operator. Renaming it changes every Ingot's identity, so it
+    is settled before a stage admits its first appliance.
+  EOT
+  type        = string
+  default     = ""
 }

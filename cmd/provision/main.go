@@ -7,10 +7,15 @@
 // private key ever enters Terraform state, and nothing is written to a local
 // disk anywhere in the flow.
 //
-// Two phases, because the ordering is circular otherwise. OpenBao stores its
-// data in Postgres, so its database must exist before it starts; but OpenBao
-// must be running before it can be configured. Phase seed runs after RDS and
-// before OpenBao; phase vault runs once OpenBao is serving.
+// Terraform drives two phases, because the ordering is circular otherwise.
+// OpenBao stores its data in Postgres, so its database must exist before it
+// starts; but OpenBao must be running before it can be configured. Phase seed
+// runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
+//
+// Two more phases exist that Terraform must never invoke, because an apply must
+// not move money or issue a credential. Phase fund deposits USDFC for the payer
+// and phase appliance-token mints a regional appliance's unseal credential; both
+// are run by an operator through a script that shows the plan and asks first.
 package main
 
 import (
@@ -28,6 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/fil-forge/infra-central/internal/fund"
+	"github.com/fil-forge/infra-central/internal/onboard"
 	"github.com/fil-forge/infra-central/internal/ssmstore"
 )
 
@@ -39,12 +45,64 @@ type Request struct {
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
 
-	// --- fund phase only ---
+	// --- vault phase only ---
 
-	// Confirm must be true before the fund phase signs anything. Without it the
-	// phase reports its plan and stops, so no invocation moves money by
-	// accident.
+	// ApplianceRegions and RetiredApplianceRegions are the region labels this
+	// stage seals appliances for, and the ones it has retired. Both come from
+	// committed tfvars, so they reach the phase through the invocation input and
+	// changing either re-invokes on their own. Git is the source of truth: the
+	// phase reconciles OpenBao against these two lists and refuses to touch a
+	// key that neither one names.
+	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
+	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
+
+	// --- appliance-token phase only ---
+
+	// Region is the appliance's region label, naming its transit key and policy.
+	Region string `json:"region,omitempty"`
+	// NodeCIDR is the node's egress address, its Elastic IP as a /32. The token
+	// is bound to it and is worthless anywhere else.
+	NodeCIDR string `json:"node_cidr,omitempty"`
+	// Period and WrapTTL override the defaults in appliancetoken.go.
+	Period  string `json:"period,omitempty"`
+	WrapTTL string `json:"wrap_ttl,omitempty"`
+	// Reissue revokes the region's existing token before minting another.
+	// Without it a region that already has a live token is refused, because two
+	// standing credentials for one node is a state nothing can reason about.
+	Reissue bool `json:"reissue,omitempty"`
+
+	// --- onboard phase only ---
+
+	// The appliance presenting itself. Piri's DID belongs to a key generated on
+	// the node, and the proof is signed by it, so neither is derivable here.
+	// Ingot's is: it is a did:web named after the region, built from
+	// FORGE_CONTENT_SUFFIX.
+	PiriDID string `json:"piri_did,omitempty"`
+	PiriURL string `json:"piri_url,omitempty"`
+	// IngotDID is accepted only to be refused, so a caller working from the old
+	// contract is told the input is gone rather than having it ignored.
+	IngotDID string `json:"ingot_did,omitempty"`
+	// PiriProof is the delegation the appliance signed for sprue, in whatever
+	// container ucantool wrote, given as text.
+	PiriProof string `json:"piri_proof,omitempty"`
+	// PiriProofB64 is the same delegation base64-encoded, which is how
+	// scripts/onboard-appliance.sh sends it. A bare DAG-CBOR container is binary
+	// and carries NUL bytes, and neither a shell variable nor a JSON string can
+	// hold one, so the script encodes every proof file rather than guessing
+	// which form it holds. The two fields are mutually exclusive.
+	PiriProofB64 string `json:"piri_proof_b64,omitempty"`
+	// Weights default to smelt's 100/100.
+	Weight            int `json:"weight,omitempty"`
+	ReplicationWeight int `json:"replication_weight,omitempty"`
+
+	// --- fund, appliance-token and onboard phases ---
+
+	// Confirm must be true before a phase signs or mints anything. Without it
+	// the phase reports its plan and stops, so no invocation moves money or
+	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
+
+	// --- fund phase only ---
 
 	// Amounts are decimal USDFC strings exactly as the operator typed them, so
 	// the number shown in the confirmation prompt is the number that is signed.
@@ -74,10 +132,29 @@ type Response struct {
 	// Initialised reports whether this invocation initialised OpenBao.
 	Initialised bool `json:"initialised,omitempty"`
 
-	// DryRun is true when the fund phase reported a plan without signing.
+	// ApplianceKeys lists the transit keys this stage now holds, one per live
+	// region. Retired lists the regions this invocation destroyed keys for.
+	ApplianceKeys     []string `json:"appliance_keys,omitempty"`
+	RetiredAppliances []string `json:"retired_appliances,omitempty"`
+
+	// DryRun is true when a phase reported a plan without acting.
 	DryRun     bool         `json:"dry_run,omitempty"`
 	FundPlan   *fund.Plan   `json:"fund_plan,omitempty"`
 	FundResult *fund.Result `json:"fund_result,omitempty"`
+
+	// TokenPlan and TokenResult belong to the appliance-token phase.
+	//
+	// TokenResult is the one field in this struct that is not safe to put in
+	// Terraform state: it carries a wrapping token that exchanges for a live
+	// credential. That is why no aws_lambda_invocation calls that phase.
+	TokenPlan   *TokenPlan   `json:"token_plan,omitempty"`
+	TokenResult *TokenResult `json:"token_result,omitempty"`
+
+	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
+	// public: the result's proof is a delegation, which is useless without the
+	// audience's own key.
+	OnboardPlan   *onboard.Plan   `json:"onboard_plan,omitempty"`
+	OnboardResult *onboard.Result `json:"onboard_result,omitempty"`
 }
 
 func main() {
@@ -115,11 +192,16 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	case "seed":
 		return deps.seed(ctx)
 	case "vault":
-		return deps.vault(ctx)
+		return deps.vault(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
+	case "appliance-token":
+		return deps.applianceToken(ctx, req)
+	case "onboard":
+		return deps.onboardPhase(ctx, req)
 	default:
-		return nil, fmt.Errorf("unknown phase %q; want \"seed\", \"vault\" or \"fund\"", req.Phase)
+		return nil, fmt.Errorf(
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\" or \"onboard\"", req.Phase)
 	}
 }
 

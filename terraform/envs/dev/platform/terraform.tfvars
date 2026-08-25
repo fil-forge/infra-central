@@ -15,6 +15,10 @@ zone_name = "forge-sandbox.fil.one"
 # future PR-preview stage.
 hostname_suffix = "dev.forge-sandbox.fil.one"
 
+# Where the dev appliance serves S3. An appliance's Ingot identity is
+# did:web:<region>.<this>, so renaming it changes every appliance's identity.
+content_hostname_suffix = "s3.dev.filonecontent.com"
+
 # Calibration testnet proxy addresses, carried over from smelt's
 # environments/staging/smart-contracts.env. Public on-chain addresses, and a
 # contract redeployment should arrive as a reviewable diff.
@@ -34,3 +38,13 @@ chain = {
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
+
+# Appliance region labels. Adding one here creates the transit key its node's
+# OpenBao seals against; moving it to the retired list destroys that key and
+# revokes the node's unseal token. A retired label stays in the second list, and
+# docs/appliance-onboarding.md is the procedure for both.
+#
+# us-east-9 is the virtual S3 region label of the dev FilOne Appliance running
+# in us-east-2.
+appliance_regions         = ["us-east-9"]
+retired_appliance_regions = []

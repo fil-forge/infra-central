@@ -31,6 +31,11 @@ data "aws_iam_policy_document" "this" {
       "ssm:GetParameter",
       "ssm:GetParameters",
       "ssm:GetParametersByPath",
+      # Retiring an appliance region deletes its parameters, because the transit
+      # key they describe is gone and a record of a node that can never come
+      # back is worse than no record. Nothing else in this function deletes
+      # anything.
+      "ssm:DeleteParameters",
     ]
 
     resources = [
@@ -53,6 +58,20 @@ data "aws_iam_policy_document" "this" {
       variable = "kms:ViaService"
       values   = ["ssm.${var.region}.amazonaws.com"]
     }
+  }
+
+  # The delegator's allow list, written by the onboard phase. An appliance whose
+  # DID is absent from it is refused at `piri init` with a 403, and the
+  # delegator's own CLI needs a shell in its task that no service exposes.
+  statement {
+    sid = "WriteDelegatorAllowList"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ]
+
+    resources = [var.allow_list_table_arn]
   }
 
   # The RDS master credentials, which Terraform never sees because

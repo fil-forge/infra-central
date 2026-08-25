@@ -52,6 +52,13 @@ resource "aws_lambda_function" "this" {
       FORGE_OPENBAO_ADDR         = var.openbao_address
       FORGE_PRIVATE_CIDRS        = join(",", var.private_cidrs)
 
+      # Used only by the onboard phase, which Terraform never invokes. The phase
+      # reaches sprue and hilt at their public hostnames, built from the suffix
+      # above, out through the NAT gateway — the same path hilt already takes to
+      # resolve sprue's did:web document.
+      FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
+      FORGE_CONTENT_SUFFIX   = var.content_hostname_suffix
+
       # Used only by the fund phase, which Terraform never invokes.
       FORGE_CHAIN_RPC_URL        = var.chain.rpc_url
       FORGE_CHAIN_ID             = tostring(var.chain.chain_id)

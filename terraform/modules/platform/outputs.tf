@@ -113,3 +113,13 @@ output "created_parameters" {
 output "openbao_initialised" {
   value = try(jsondecode(aws_lambda_invocation.vault.result).initialised, false)
 }
+
+output "appliance_keys" {
+  description = "Transit key names this stage holds, one per live appliance region. Empty after adding a region label means the vault phase did not run or did not see the label."
+  value       = try(jsondecode(aws_lambda_invocation.vault.result).appliance_keys, [])
+}
+
+output "retired_appliances" {
+  description = "Regions the last vault run destroyed keys for. Those nodes can never unseal again. The result stays in state until the next run, so a non-empty list records that retirement and does not mean this apply destroyed anything."
+  value       = try(jsondecode(aws_lambda_invocation.vault.result).retired_appliances, [])
+}

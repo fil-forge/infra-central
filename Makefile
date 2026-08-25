@@ -84,6 +84,36 @@ DEPOSIT   ?= 3
 fund-payer:
 	scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
 
+# Mint a regional appliance's unseal credential. The region's transit key must
+# already exist, which means its label committed to appliance_regions and merged.
+#
+#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7
+#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7 TOKEN_ARGS=--reissue
+REGION     ?=
+NODE_IP    ?=
+TOKEN_ARGS ?=
+
+.PHONY: mint-appliance-token
+mint-appliance-token:
+	scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
+
+# Register an appliance with sprue, hilt and the delegator, and return the
+# delegation its Ingot needs. Run it once the appliance has provisioned its keys.
+#
+#   make onboard-appliance REGION=us-east-9 PIRI_DID=did:key:… \
+#     PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
+#     PIRI_PROOF=piri-proof.txt
+PIRI_DID      ?=
+PIRI_URL      ?=
+PIRI_PROOF    ?=
+ONBOARD_ARGS  ?=
+
+.PHONY: onboard-appliance
+onboard-appliance:
+	scripts/onboard-appliance.sh --stage $(STAGE) --region $(REGION) \
+	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
+	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
+
 .PHONY: test
 test:
 	go test ./...
