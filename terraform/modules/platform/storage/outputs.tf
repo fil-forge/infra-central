@@ -11,6 +11,8 @@ output "allow_list_table_name" {
   value = aws_dynamodb_table.allow_list.name
 }
 
+# Named separately from table_arns below, which is the pair the delegator's task
+# role is granted. The provision role is granted this one alone.
 output "allow_list_table_arn" {
   value = aws_dynamodb_table.allow_list.arn
 }

@@ -56,13 +56,17 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The delegator's allow list, which the onboard phase adds an appliance's Piri
-  # DID to. Reading it is what lets the dry run report whether the DID is
-  # already listed, so both actions are needed even for a run that writes
-  # nothing.
+  # The delegator's allow list, written by the onboard phase. An appliance whose
+  # DID is absent from it is refused at `piri init` with a 403, and the
+  # delegator's own CLI needs a shell in its task that no service exposes.
   statement {
-    sid       = "ManageDelegatorAllowList"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    sid = "WriteDelegatorAllowList"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ]
+
     resources = [var.allow_list_table_arn]
   }
 
