@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/hashicorp/go-secure-stdlib/parseutil"
 	"github.com/openbao/openbao/api/v2"
 
 	"github.com/fil-forge/infra-central/internal/vaultinit"
@@ -118,6 +119,10 @@ func (d *deps) planApplianceToken(ctx context.Context, client *api.Client, req R
 		WrapTTL:  valueOr(req.WrapTTL, defaultWrapTTL),
 	}
 
+	if err := validateTokenDurations(plan); err != nil {
+		return nil, err
+	}
+
 	accessor, found, err := d.store.LookupPublic(ctx, applianceService(req.Region), unsealTokenAccessorKey)
 	if err != nil {
 		return nil, err
@@ -136,6 +141,24 @@ func (d *deps) planApplianceToken(ctx context.Context, client *api.Client, req R
 	}
 	plan.Action = decideTokenAction(plan.TokenLive, req.Reissue)
 	return plan, nil
+}
+
+// validateTokenDurations refuses an unparseable period or wrap TTL while nothing
+// has been changed yet.
+//
+// OpenBao would reject these values itself, but only once the role write and the
+// mint are already under way. Refusing during the dry run is what keeps a typo
+// from being discovered halfway through a reissue.
+func validateTokenDurations(plan *TokenPlan) error {
+	for _, d := range []struct{ flag, value string }{
+		{"--period", plan.Period},
+		{"--wrap-ttl", plan.WrapTTL},
+	} {
+		if _, err := parseutil.ParseDurationSecond(d.value); err != nil {
+			return fmt.Errorf("%s %q is not a duration openbao accepts: %w", d.flag, d.value, err)
+		}
+	}
+	return nil
 }
 
 // decideTokenAction settles what to do about a region that already has an
@@ -159,14 +182,13 @@ func decideTokenAction(tokenLive, reissue bool) string {
 }
 
 // mintApplianceToken writes the region's token role and issues the wrapped token.
+//
+// A reissue revokes the region's previous token last, once the replacement is
+// minted and recorded. Revoking first would leave the appliance with no
+// renewable credential every time the role write or the mint that follows it
+// failed, and the node would stop being able to unseal at its next restart
+// because of a reissue that never produced anything.
 func (d *deps) mintApplianceToken(ctx context.Context, client *api.Client, req Request, plan *TokenPlan) (*Response, error) {
-	if plan.Action == tokenActionReissue {
-		slog.Warn("revoking the previous unseal token", "region", req.Region, "accessor", plan.Accessor)
-		if err := vaultinit.RevokeTokenByAccessor(ctx, client, plan.Accessor); err != nil {
-			return nil, err
-		}
-	}
-
 	cfg := vaultinit.ApplianceTokenConfig{
 		Region:   req.Region,
 		NodeCIDR: plan.NodeCIDR,
@@ -185,21 +207,26 @@ func (d *deps) mintApplianceToken(ctx context.Context, client *api.Client, req R
 		return nil, err
 	}
 
-	// Record the accessor before returning. An unrecorded accessor is a token
-	// nothing can revoke, which is worse than a failed mint the operator can
-	// simply run again.
-	//
-	// A crash between the mint above and this write strands a token nothing
-	// records, and the operator's retry mints a second one. The stranded token
-	// needs no clean-up: its wrapping token was returned to nobody, it is bound
-	// to the node's own address, and unrenewed it dies at the end of its period.
-	if err := d.store.PutPublic(ctx, applianceService(req.Region), unsealTokenAccessorKey, accessor); err != nil {
+	if err := recordMintedAccessor(ctx, client, d.store, applianceService(req.Region), accessor); err != nil {
 		return nil, err
 	}
 
 	// The accessor is logged and the token is not. This is the only value in the
 	// project that must stay out of CloudWatch.
 	slog.Info("minted the unseal token", "region", req.Region, "accessor", accessor)
+
+	if plan.Action == tokenActionReissue {
+		slog.Warn("revoking the previous unseal token", "region", req.Region, "accessor", plan.Accessor)
+		if err := vaultinit.RevokeTokenByAccessor(ctx, client, plan.Accessor); err != nil {
+			// The replacement is live and recorded, so the old accessor is no
+			// longer anywhere but here. Naming it is what lets the operator
+			// finish the revocation by hand, and the node keeps renewing that
+			// token until they do.
+			return nil, fmt.Errorf(
+				"the %s replacement token was minted and recorded, but the previous one is still live and is no longer on record; revoke accessor %s by hand: %w",
+				req.Region, plan.Accessor, err)
+		}
+	}
 
 	return &Response{
 		Phase: "appliance-token",
@@ -217,6 +244,36 @@ func (d *deps) mintApplianceToken(ctx context.Context, client *api.Client, req R
 			UnsealAddress: "https://ssm." + d.cfg.HostnameSuffix,
 		},
 	}, nil
+}
+
+// accessorRecorder writes a minted token's accessor to the parameter store.
+type accessorRecorder interface {
+	PutPublic(ctx context.Context, service, name, value string) error
+}
+
+// recordMintedAccessor records the accessor of a freshly minted token, revoking
+// that token if the write fails.
+//
+// An unrecorded accessor is a token nothing can revoke, which is worse than a
+// failed mint the operator can simply run again. Revoking here turns the first
+// into the second.
+//
+// A crash rather than an error between the mint and this write still strands a
+// token nothing records, and the operator's retry mints a second one. That one
+// needs no clean-up: its wrapping token was returned to nobody, it is bound to
+// the node's own address, and unrenewed it dies at the end of its period.
+func recordMintedAccessor(ctx context.Context, client *api.Client, store accessorRecorder, service, accessor string) error {
+	err := store.PutPublic(ctx, service, unsealTokenAccessorKey, accessor)
+	if err == nil {
+		return nil
+	}
+
+	if revokeErr := vaultinit.RevokeTokenByAccessor(ctx, client, accessor); revokeErr != nil {
+		// Naming the accessor is what lets an operator finish the job by hand.
+		return fmt.Errorf("record the minted accessor: %w, and revoking accessor %s failed: %w",
+			err, accessor, revokeErr)
+	}
+	return fmt.Errorf("record the minted accessor, so the token was revoked: %w", err)
 }
 
 // TokenResult carries the wrapped credential back to the operator.
