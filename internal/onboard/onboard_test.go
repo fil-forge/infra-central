@@ -169,16 +169,30 @@ func TestApplyFailsWhenHiltsRowDisagreesAfterTheWrite(t *testing.T) {
 }
 
 // Registering with sprue is the one write that needs something only the
-// appliance can produce.
-func TestApplyRefusesToRegisterWithoutThePiriProof(t *testing.T) {
+// appliance can produce, so a request without it is a blocker the dry run
+// reports rather than an error the writes run into.
+func TestPlanFromBlocksAFreshApplianceWithoutThePiriProof(t *testing.T) {
+	req := testRequest()
+	req.PiriProof = nil
+
+	plan := PlanFrom(&State{Region: req.Region}, req)
+
+	if len(plan.Blockers) != 1 || !strings.Contains(plan.Blockers[0], "proof") {
+		t.Fatalf("blockers = %v, want one naming the missing proof", plan.Blockers)
+	}
+}
+
+func TestApplyWritesNothingWithoutThePiriProof(t *testing.T) {
 	fakes := newFakes()
 	req := testRequest()
 	req.PiriProof = nil
 	plan := PlanFrom(&State{Region: req.Region}, req)
 
-	_, err := Apply(context.Background(), fakes.deps(), req, plan)
-	if err == nil || !strings.Contains(err.Error(), "proof") {
-		t.Fatalf("Apply() error = %v, want one naming the missing proof", err)
+	if _, err := Apply(context.Background(), fakes.deps(), req, plan); err == nil {
+		t.Fatal("Apply() error = nil, want one naming the missing proof")
+	}
+	if fakes.allowList.added != "" {
+		t.Errorf("allow-listed %q, want nothing written", fakes.allowList.added)
 	}
 }
 

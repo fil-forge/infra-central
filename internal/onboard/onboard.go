@@ -143,6 +143,14 @@ func PlanFrom(state *State, req Request) *Plan {
 	}
 
 	switch {
+	case state.Sprue == nil && len(req.PiriProof) == 0:
+		// Central cannot produce this proof, so no run can get past sprue
+		// registration without it. It is a blocker rather than an error raised
+		// during the writes, so a dry run says so and a confirmed run leaves
+		// the appliance half-admitted.
+		plan.Blockers = append(plan.Blockers, fmt.Sprintf(
+			"registering %s with sprue needs the proof the appliance signed with its Piri key, and the request carries none",
+			req.PiriDID))
 	case state.Sprue == nil:
 		plan.Actions = append(plan.Actions,
 			fmt.Sprintf("register %s with sprue at %s", req.PiriDID, req.PiriURL))
@@ -205,9 +213,6 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 	}
 
 	if plan.Sprue == nil {
-		if len(req.PiriProof) == 0 {
-			return nil, fmt.Errorf("registering %s with sprue needs the proof the appliance signed with its Piri key", req.PiriDID)
-		}
 		if err := deps.Sprue.Register(ctx, req.PiriDID, req.PiriURL, req.PiriProof); err != nil {
 			return nil, fmt.Errorf("register %s with sprue: %w", req.PiriDID, err)
 		}
