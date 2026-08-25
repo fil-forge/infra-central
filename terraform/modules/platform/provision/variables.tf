@@ -92,3 +92,19 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "allow_list_table_name" {
+  description = "The delegator's allow-list table. Only the onboard phase writes it."
+  type        = string
+}
+
+variable "allow_list_table_arn" {
+  description = "ARN of the same table, which is what the role is granted on."
+  type        = string
+}
+
+variable "content_hostname_suffix" {
+  description = "Builds a regional appliance's Ingot did:web, which is the region prepended to it, e.g. s3.dev.filonecontent.com. Only the onboard phase uses it. Empty is allowed, because a stage that admits no appliance never reads it."
+  type        = string
+  default     = ""
+}

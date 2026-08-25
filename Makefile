@@ -97,6 +97,23 @@ TOKEN_ARGS ?=
 mint-appliance-token:
 	scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
 
+# Register an appliance with sprue, hilt and the delegator, and return the
+# delegation its Ingot needs. Run it once the appliance has provisioned its keys.
+#
+#   make onboard-appliance REGION=us-east-9 PIRI_DID=did:key:… \
+#     PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
+#     PIRI_PROOF=piri-proof.txt
+PIRI_DID      ?=
+PIRI_URL      ?=
+PIRI_PROOF    ?=
+ONBOARD_ARGS  ?=
+
+.PHONY: onboard-appliance
+onboard-appliance:
+	scripts/onboard-appliance.sh --stage $(STAGE) --region $(REGION) \
+	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
+	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
+
 .PHONY: test
 test:
 	go test ./...

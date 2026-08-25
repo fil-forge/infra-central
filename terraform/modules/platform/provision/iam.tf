@@ -56,6 +56,20 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
+  # The delegator's allow list, written by the onboard phase. An appliance whose
+  # DID is absent from it is refused at `piri init` with a 403, and the
+  # delegator's own CLI needs a shell in its task that no service exposes.
+  statement {
+    sid = "WriteDelegatorAllowList"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ]
+
+    resources = [var.allow_list_table_arn]
+  }
+
   # The RDS master credentials, which Terraform never sees because
   # manage_master_user_password keeps them out of state.
   statement {

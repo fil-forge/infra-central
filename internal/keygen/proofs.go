@@ -36,7 +36,8 @@ type Proof struct {
 // each service.
 //
 // Three of smelt's five apply here. The piri-0 and hilt-ingot proofs belong to
-// the storage-node side of the stack, which this project does not deploy.
+// the storage-node side of the stack, which this project does not deploy. The
+// per-region delegation to an appliance's Ingot is in HiltIngotS3Proof below.
 //
 // The first two exist only to satisfy the delegator's startup validation: it
 // requires an indexing-service and an egress-tracking delegation even though
@@ -74,6 +75,37 @@ func Proofs(did map[string]string) []Proof {
 			commands:  []string{"/customer/add"},
 			codec:     "base64+gzip",
 		},
+	}
+}
+
+// HiltIngotS3Proof returns the delegation hilt issues to a regional appliance's
+// Ingot, authorising the S3 commands Ingot invokes on hilt.
+//
+// It is not in Proofs above because it is per region rather than per stage: its
+// audience is the region's Ingot did:web, so a stage needs one of these for each
+// appliance it admits. The onboard phase issues it when an appliance is admitted,
+// which is also when central first knows the region is real.
+//
+// It is stored under the appliance's own prefix rather than a service's, because
+// the appliance is who reads it and retiring a region deletes that prefix whole.
+func HiltIngotS3Proof(consumer, hiltDIDWeb, ingotDID string) Proof {
+	return Proof{
+		Consumer:  consumer,
+		Name:      "hilt-ingot-s3-proof",
+		Issuer:    "hilt",
+		issuerDID: hiltDIDWeb,
+		audience:  ingotDID,
+		subject:   hiltDIDWeb,
+		commands: []string{
+			"/s3/request/authorize",
+			"/s3/bucket/create",
+			"/s3/bucket/delete",
+			"/s3/bucket/info",
+			"/s3/bucket/list",
+		},
+		// Textual, matching what smelt's generate-proofs.sh writes and what
+		// Ingot reads from a file.
+		codec: "base64+gzip",
 	}
 }
 

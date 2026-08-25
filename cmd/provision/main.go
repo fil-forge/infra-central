@@ -33,6 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/fil-forge/infra-central/internal/fund"
+	"github.com/fil-forge/infra-central/internal/onboard"
 	"github.com/fil-forge/infra-central/internal/ssmstore"
 )
 
@@ -70,7 +71,31 @@ type Request struct {
 	// standing credentials for one node is a state nothing can reason about.
 	Reissue bool `json:"reissue,omitempty"`
 
-	// --- fund and appliance-token phases ---
+	// --- onboard phase only ---
+
+	// The appliance presenting itself. Piri's DID belongs to a key generated on
+	// the node, and the proof is signed by it, so neither is derivable here.
+	// Ingot's is: it is a did:web named after the region, built from
+	// FORGE_CONTENT_SUFFIX.
+	PiriDID string `json:"piri_did,omitempty"`
+	PiriURL string `json:"piri_url,omitempty"`
+	// IngotDID is accepted only to be refused, so a caller working from the old
+	// contract is told the input is gone rather than having it ignored.
+	IngotDID string `json:"ingot_did,omitempty"`
+	// PiriProof is the delegation the appliance signed for sprue, in whatever
+	// container ucantool wrote, given as text.
+	PiriProof string `json:"piri_proof,omitempty"`
+	// PiriProofB64 is the same delegation base64-encoded, which is how
+	// scripts/onboard-appliance.sh sends it. A bare DAG-CBOR container is binary
+	// and carries NUL bytes, and neither a shell variable nor a JSON string can
+	// hold one, so the script encodes every proof file rather than guessing
+	// which form it holds. The two fields are mutually exclusive.
+	PiriProofB64 string `json:"piri_proof_b64,omitempty"`
+	// Weights default to smelt's 100/100.
+	Weight            int `json:"weight,omitempty"`
+	ReplicationWeight int `json:"replication_weight,omitempty"`
+
+	// --- fund, appliance-token and onboard phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
@@ -124,6 +149,12 @@ type Response struct {
 	// credential. That is why no aws_lambda_invocation calls that phase.
 	TokenPlan   *TokenPlan   `json:"token_plan,omitempty"`
 	TokenResult *TokenResult `json:"token_result,omitempty"`
+
+	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
+	// public: the result's proof is a delegation, which is useless without the
+	// audience's own key.
+	OnboardPlan   *onboard.Plan   `json:"onboard_plan,omitempty"`
+	OnboardResult *onboard.Result `json:"onboard_result,omitempty"`
 }
 
 func main() {
@@ -166,9 +197,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.fund(ctx, req)
 	case "appliance-token":
 		return deps.applianceToken(ctx, req)
+	case "onboard":
+		return deps.onboardPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\" or \"appliance-token\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\" or \"onboard\"", req.Phase)
 	}
 }
 

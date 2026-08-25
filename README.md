@@ -968,14 +968,14 @@ because both involve a key that does not exist when a stage is brought up:
   granting `/blob/allocate`, `/blob/accept`, `/blob/replica/allocate` and
   `/pdp/info`. Central never holds that key, so this proof arrives from the
   appliance and is handed to sprue as the third argument of `provider register`.
-- `hilt-ingot-s3-proof` — signed by hilt, audience ingot's `did:key`, granting
-  `/s3/request/authorize` and the four `/s3/bucket/*` commands. Central holds
-  hilt's key, but ingot has no did:web and its `did:key` is not known until the
-  appliance is provisioned, so this one is issued on demand with the appliance's
-  DID as input and returned to it.
+- `hilt-ingot-s3-proof` — signed by hilt, audience the region's ingot
+  `did:web:<region>.<content suffix>`, granting `/s3/request/authorize` and the
+  four `/s3/bucket/*` commands. Central holds hilt's key and derives the audience
+  from the region, so this one is issued per appliance rather than per stage and
+  returned to the node.
 
-That asymmetry is the shape of the missing tool: onboarding is a request
-carrying the appliance's two DIDs and its public URL.
+That asymmetry is the shape of the missing tool: onboarding is a request carrying
+the appliance's Piri DID and its public URL.
 
 **There is no shell to run the admin CLIs in.**
 

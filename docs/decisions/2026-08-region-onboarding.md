@@ -23,7 +23,7 @@ So there are two operator steps with the node's bring-up between them.
 Onboarding is a conversation between someone at Forge Central and the node's operator, and the
 tooling serves that conversation rather than replacing it.
 
-- Central needs the node's egress CIDR to mint the unseal token, and its two DIDs and Piri proof to register it.
+- Central needs the node's egress CIDR to mint the unseal token, and its Piri DID and proof to register it.
 - The operator needs the wrapped token, and the S3 delegation that comes back.
 
 Each script takes what the other side sent and prints what to send in return.
@@ -228,6 +228,49 @@ something. The steps an operator follows, and the delivery and compromise-handli
 them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,
 and handle secrets differently.
 
+## An appliance's Ingot is a did:web named after its region
+
+Ingot's identity is `did:web:<region>.<content suffix>`, where the suffix is
+`s3.<stage>.filonecontent.com` outside production and `s3.filonecontent.com` in it.
+Central derives it from the region rather than being told it, which is the shape
+[RFC 16](https://github.com/fil-one/RFC/pull/16) proposes for the network's service
+identities. Piri keeps its `did:key` on the provider's own domain, and that split is
+deliberate: Forge owns the S3 hostname and the operator owns Piri's.
+
+Two things follow. An appliance can rotate its Ingot key without telling anyone,
+because its DID document publishes the current key and the DID does not move. And
+the identity can no longer disagree with the region, which removes the input an
+operator could mistype and the hilt row that would then have to be corrected by
+hand.
+
+The alternative was `did:key`, which the appliance mints locally and hands over in
+the onboarding exchange. It verifies with no network and no third party, and it is
+the shape this phase first shipped with. It was dropped because a rotation makes it
+a new identity: a new hilt row, which hilt has no command to write, and a reissued
+delegation. The security argument for keeping it is thinner than it looks. The
+appliance's identity PEM lives in its own OpenBao, so an attacker holding the box
+holds the key under either scheme, and both end at the same lever, which is pulling
+the region's DNS record.
+
+The cost is that the hostname scheme is now identity. Renaming the domain, or moving
+a region between stages, changes every Ingot DID, every hilt row and every stored
+delegation. That is why the scheme is settled before a stage admits its first
+appliance, and why the suffix is committed configuration rather than something a
+script passes in.
+
+This assumes Ingot serves a DID document at that hostname. Until it does, onboarding
+registers an identity nothing can resolve.
+
+## The appliance's delegation is still issued on demand
+
+Now that the audience is derivable, hilt's S3 delegation to an appliance could be
+signed when a stage is brought up, alongside the proofs the services need at startup.
+It is not, and the reason is the region list rather than the audience: the vault phase
+is what knows `appliance_regions`, and the seed phase that issues proofs does not.
+Issuing it there is a worthwhile follow-up and needs the region list threaded into
+seed. Until then the onboard phase signs it when an appliance is admitted, which is
+idempotent and needs nothing that does not already exist.
+
 ## A mismatch is a refusal, not a repair
 
 The onboard phase reads all three services before it writes, and it distinguishes two kinds of
@@ -245,6 +288,12 @@ that error accepts a mismatch that breaks every subsequent request. smelt hit ex
 region rename, and its script now verifies the row. So does this phase, twice: once when reading, and
 again after its own write, because a write that reported success is not evidence of what it did.
 
+A region label this stage has never minted an unseal token for is refused before anything is read.
+The label now names the Ingot as well as the transit key, so a mistyped `--region` would register a
+hostname nobody serves, and hilt has no command to correct that row afterwards. The recorded token
+accessor is the evidence the label is real: an appliance cannot hold the Piri DID this phase is given
+without having unsealed with a token minted for exactly that label.
+
 The allow list is written directly to DynamoDB rather than through the delegator's
 `registrar store allow-did` command. The command needs a shell in the delegator's task, and it runs
 as a Fargate task in a private subnet with ECS Exec off. The table takes a single `did` hash key, so
@@ -259,6 +308,11 @@ them again cannot change what a previous run established, and it repairs a provi
 whatever defaults sprue assigned. The proof is the opposite case, written once and read back
 afterwards, because a delegation carries a random nonce and re-issuing one produces bytes central
 would no longer recognise as the delegation it issued.
+
+The one thing that does force a reissue is a rotated hilt identity, which leaves every delegation the
+old key signed unverifiable: hilt's did:web document then publishes only the new key. The signing
+key's did:key is stored beside the proof, so a later run compares the two and reissues when they
+differ. The seed phase tracks the same dependency for the startup proofs.
 
 ## OpenBao tests run in-process
 
