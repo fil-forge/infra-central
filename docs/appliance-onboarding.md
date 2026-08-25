@@ -11,8 +11,8 @@ it is: [decisions/2026-08-region-onboarding.md](decisions/2026-08-region-onboard
 
 This is a conversation, not a pipeline. Someone at Forge Central runs the two commands below and the
 node's operator runs the node; each side sends the other what it cannot produce itself. Central needs
-the node's egress address, then its two DIDs and its Piri proof. The operator needs the wrapped
-unseal token, then the S3 delegation that comes back.
+the node's egress address, then its Piri DID and proof. The operator needs the wrapped unseal token,
+then the S3 delegation that comes back.
 
 ## The order
 
@@ -23,7 +23,7 @@ unseal token, then the S3 delegation that comes back.
 | Mint the unseal token         | this repo   | that IP                                    |
 | Deliver the token             | a person    | the node operator                          |
 | Boot the node, generate keys  | infra-nodes | the token                                  |
-| Register the node             | this repo   | the node's two DIDs, its URL and its proof |
+| Register the node             | this repo   | the node's Piri DID, its URL and its proof |
 | Install the returned proof    | infra-nodes | the delegation registration returns        |
 
 ## Adding a region
@@ -114,15 +114,19 @@ that has been offline longer than the 72-hour renewal period. The script reports
 
 ## Registering the node
 
-Run this once the appliance has provisioned its keys, so its two DIDs exist. It needs the proof the
+Run this once the appliance has provisioned its keys, so its Piri DID exists. It needs the proof the
 appliance signed with its own Piri key, which central never holds.
 
 ```bash
 make onboard-appliance STAGE=dev REGION=us-east-9 \
-  PIRI_DID=did:key:z6Mk… INGOT_DID=did:key:z6Mk… \
+  PIRI_DID=did:key:z6Mk… \
   PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
   PIRI_PROOF=piri-proof.txt
 ```
+
+The Ingot identity is not asked for. It is `did:web:<region>.s3.<stage>.filonecontent.com`, derived
+from the region label, so the node operator has nothing to send and nothing to mistype. The appliance
+can rotate that key on its own afterwards, because its DID document publishes the current one.
 
 Four things happen, and each one has a failure that names nothing useful if it is skipped:
 
@@ -144,10 +148,11 @@ something central no longer recognises.
 
 Two conditions stop the run, and both need a decision rather than a retry.
 
-**hilt has the Ingot registered for a different region.** hilt raises the same "already registered"
-error whether the DID is held for this region or another one, and it ships no command to move a
-provider, so the row has to be corrected in hilt's database by hand. Trusting that error is what
-smelt did once, and the mismatch it hid broke every request afterwards.
+**hilt has the Ingot registered for a different region.** Since the Ingot DID is named after the
+region, the two can only disagree if hilt's row was written by hand. hilt raises the same "already
+registered" error whether the DID is held for this region or another one, and it ships no command to
+move a provider, so such a row has to be corrected in its database by hand as well. Trusting that
+error is what smelt did once, and the mismatch it hid broke every request afterwards.
 
 **sprue has the Piri registered at a different endpoint.** Re-registering would move where uploads
 are sent, so deregister the provider deliberately first if that is what you mean.
