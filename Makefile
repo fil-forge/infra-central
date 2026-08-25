@@ -101,10 +101,9 @@ mint-appliance-token:
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
 #
 #   make onboard-appliance REGION=us-east-9 PIRI_DID=did:key:… \
-#     INGOT_DID=did:key:… PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
+#     PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
 #     PIRI_PROOF=piri-proof.txt
 PIRI_DID      ?=
-INGOT_DID     ?=
 PIRI_URL      ?=
 PIRI_PROOF    ?=
 ONBOARD_ARGS  ?=
@@ -112,7 +111,7 @@ ONBOARD_ARGS  ?=
 .PHONY: onboard-appliance
 onboard-appliance:
 	scripts/onboard-appliance.sh --stage $(STAGE) --region $(REGION) \
-	  --piri-did $(PIRI_DID) --ingot-did $(INGOT_DID) --piri-url $(PIRI_URL) \
+	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
 	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
 
 .PHONY: test
