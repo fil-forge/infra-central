@@ -31,6 +31,21 @@ locals {
     listener "tcp" {
       address     = "0.0.0.0:${var.port}"
       tls_disable = 1
+
+      # An appliance's unseal token is bound to the node's Elastic IP, and the
+      # token store evaluates that binding against the address it sees. The node
+      # reaches OpenBao through the public ALB, so without this the address is
+      # the ALB's and every renewal and transit call from the node is rejected.
+      #
+      # The ALB appends the real client address as the last X-Forwarded-For
+      # entry, and hop_skips defaults to 0, so the address taken is the one the
+      # ALB observed rather than anything a client put in the header. Believing
+      # the header only from the ALB's own subnets is what keeps that true.
+      x_forwarded_for_authorized_addrs = "${join(",", var.alb_cidrs)}"
+
+      # hilt and the provision Lambda connect to this listener directly and send
+      # no such header. The option defaults to rejecting them.
+      x_forwarded_for_reject_not_present = "false"
     }
 
     seal "awskms" {
