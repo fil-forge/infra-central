@@ -48,3 +48,8 @@ output "appliance_keys" {
 output "openbao_public_url" {
   value = module.platform.openbao_public_url
 }
+
+output "retired_appliances" {
+  description = "Regions this apply destroyed keys for. A non-empty list means a node lost its ability to unseal, permanently."
+  value       = module.platform.retired_appliances
+}

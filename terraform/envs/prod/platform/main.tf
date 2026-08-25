@@ -62,6 +62,18 @@ variable "provision_image_digest" {
   type        = string
 }
 
+variable "appliance_regions" {
+  description = "Region labels of the appliances this stage serves, in terraform.tfvars. See docs/appliance-onboarding.md."
+  type        = list(string)
+  default     = []
+}
+
+variable "retired_appliance_regions" {
+  description = "Region labels whose appliance has been retired, in terraform.tfvars. Labels stay here for good: the apply refuses a key that neither list names."
+  type        = list(string)
+  default     = []
+}
+
 module "platform" {
   source = "../../../modules/platform"
 
@@ -76,6 +88,9 @@ module "platform" {
   provision_image_digest         = var.provision_image_digest
 
   chain = var.chain
+
+  appliance_regions         = var.appliance_regions
+  retired_appliance_regions = var.retired_appliance_regions
 
   # Three availability zones with a NAT gateway in each, where dev accepts two
   # and a single shared gateway. Appliances depend on this stage being

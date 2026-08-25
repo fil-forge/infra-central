@@ -118,3 +118,8 @@ output "appliance_keys" {
   description = "Transit key names this stage holds, one per live appliance region. Empty after adding a region label means the vault phase did not run or did not see the label."
   value       = try(jsondecode(aws_lambda_invocation.vault.result).appliance_keys, [])
 }
+
+output "retired_appliances" {
+  description = "Regions the most recent apply destroyed keys for. A non-empty list means a node lost its ability to unseal, permanently."
+  value       = try(jsondecode(aws_lambda_invocation.vault.result).retired_appliances, [])
+}
