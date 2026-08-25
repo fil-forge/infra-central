@@ -167,7 +167,9 @@ exactly what retirement and reissue need. The token itself is stored nowhere in 
 That makes minting the one operation in this repository that is deliberately not idempotent. A
 second run would leave two standing credentials for one node, so a region whose accessor is
 recorded and whose token still lives is refused unless the operator passes `--reissue`, which
-revokes the old token before minting the new one.
+revokes the old token before minting the new one. A lookup that cannot answer at all stops the
+phase, because minting on an unanswered question is how a node ends up with the second credential
+the refusal exists to prevent.
 
 A mint writes the token first and the accessor second, so a Lambda that dies between the two leaves
 a token no parameter records, and the retry mints a second one. The window is accepted because the

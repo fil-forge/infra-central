@@ -127,7 +127,13 @@ func (d *deps) planApplianceToken(ctx context.Context, client *api.Client, req R
 	}
 
 	plan.Accessor = accessor
-	plan.TokenLive = vaultinit.TokenLive(ctx, client, accessor)
+	// A lookup that cannot answer stops the phase rather than falling through to
+	// a mint. Treating it as "no token" is how one node ends up with two live
+	// credentials and no record of which it is using.
+	plan.TokenLive, err = vaultinit.TokenLive(ctx, client, accessor)
+	if err != nil {
+		return nil, err
+	}
 	plan.Action = decideTokenAction(plan.TokenLive, req.Reissue)
 	return plan, nil
 }
