@@ -10,14 +10,14 @@ output "private_subnet_ids" {
   value = [for subnet in aws_subnet.private : subnet.id]
 }
 
+output "public_subnet_cidrs" {
+  description = "Where the ALB's own interfaces live, which is the address a request through it arrives from. OpenBao trusts a forwarded-for header only from these."
+  value       = [for subnet in aws_subnet.public : subnet.cidr_block]
+}
+
 output "private_subnet_cidrs" {
   description = "Bounds hilt's AppRole token to the VPC. Coarse by nature: it separates the VPC from the internet, not one task from another."
   value       = [for subnet in aws_subnet.private : subnet.cidr_block]
-}
-
-output "public_subnet_cidrs" {
-  description = "Where the ALB runs. OpenBao trusts the forwarded client address only from here, which is what makes an appliance token's CIDR binding evaluate against the node's own IP."
-  value       = [for subnet in aws_subnet.public : subnet.cidr_block]
 }
 
 output "alb_security_group_id" {

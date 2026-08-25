@@ -31,21 +31,26 @@ locals {
     listener "tcp" {
       address     = "0.0.0.0:${var.port}"
       tls_disable = 1
-
-      # An appliance's unseal token is bound to the node's Elastic IP, and the
-      # token store evaluates that binding against the address it sees. The node
-      # reaches OpenBao through the public ALB, so without this the address is
-      # the ALB's and every renewal and transit call from the node is rejected.
+  
+      # An appliance authenticates here with a token bound to its Elastic IP,
+      # and it arrives through the ALB, which connects from its own address.
+      # Checking the raw connection would compare the ALB against the node's
+      # address and refuse every one of those tokens at first unseal.
       #
-      # The ALB appends the real client address as the last X-Forwarded-For
-      # entry, and hop_skips defaults to 0, so the address taken is the one the
-      # ALB observed rather than anything a client put in the header. Believing
-      # the header only from the ALB's own subnets is what keeps that true.
+      # The ALB appends the caller's address as the last entry of
+      # X-Forwarded-For, and with no hops skipped that last entry is what the
+      # listener takes as the client. A header a client sends itself arrives
+      # earlier in the chain and loses to the append.
       x_forwarded_for_authorized_addrs = "${join(",", var.alb_cidrs)}"
+      x_forwarded_for_hop_skips        = 0
 
-      # hilt and the provision Lambda connect to this listener directly and send
-      # no such header. The option defaults to rejecting them.
-      x_forwarded_for_reject_not_present = "false"
+      # hilt and the provision Lambda connect directly inside the VPC and send
+      # no header, so a request without one is checked on its own address.
+      # One that carries a header from anywhere but the ALB is refused rather
+      # than quietly downgraded, which turns a workload trying to claim a
+      # node's address into an error somebody sees.
+      x_forwarded_for_reject_not_present    = false
+      x_forwarded_for_reject_not_authorized = true
     }
 
     seal "awskms" {

@@ -77,11 +77,6 @@ variable "security_group_id" {
   type = string
 }
 
-variable "alb_cidrs" {
-  description = "Subnets the ALB runs in. Only a connection from one of these has its X-Forwarded-For header believed."
-  type        = list(string)
-}
-
 variable "kms_key_id" {
   type = string
 }
@@ -93,6 +88,11 @@ variable "kms_key_arn" {
 variable "ssm_prefix" {
   description = "Parameter prefix for openbao, e.g. /forge-central/dev/openbao."
   type        = string
+}
+
+variable "alb_cidrs" {
+  description = "The ALB's own subnets. A forwarded-for header is trusted from these addresses and from nowhere else, which is what lets OpenBao check a CIDR-bound token against the caller rather than the ALB. Widening this to the whole VPC would let any workload inside it claim an appliance's address."
+  type        = list(string)
 }
 
 variable "listener_arn" {
