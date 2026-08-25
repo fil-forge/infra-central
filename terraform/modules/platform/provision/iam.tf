@@ -31,6 +31,7 @@ data "aws_iam_policy_document" "this" {
       "ssm:GetParameter",
       "ssm:GetParameters",
       "ssm:GetParametersByPath",
+      "ssm:DeleteParameters",
     ]
 
     resources = [
