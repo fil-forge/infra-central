@@ -77,6 +77,11 @@ variable "security_group_id" {
   type = string
 }
 
+variable "alb_cidrs" {
+  description = "Subnets the ALB runs in. Only a connection from one of these has its X-Forwarded-For header believed."
+  type        = list(string)
+}
+
 variable "kms_key_id" {
   type = string
 }

@@ -146,7 +146,11 @@ address.
 ## The token is orphan, periodic, 72 hours, CIDR-bound
 
 Orphan so revoking an operator's own token does not cascade into the node. CIDR-bound to the node's
-Elastic IP so the credential is worthless anywhere else. Periodic so it renews forever with no
+Elastic IP so the credential is worthless anywhere else. The token store evaluates that binding
+against the address its listener sees, and the node arrives through the public ALB, so central
+OpenBao is configured to take the client address from `X-Forwarded-For` and to believe that header
+only on connections from the ALB's own subnets. Without it the address seen is the ALB's, and every
+renewal and transit call from the node is rejected. Periodic so it renews forever with no
 expiry cliff, which leaves only the period to choose: how long the node may fail to renew before
 its token dies and the whole delivery ceremony repeats.
 
@@ -167,13 +171,24 @@ exactly what retirement and reissue need. The token itself is stored nowhere in 
 That makes minting the one operation in this repository that is deliberately not idempotent. A
 second run would leave two standing credentials for one node, so a region whose accessor is
 recorded and whose token still lives is refused unless the operator passes `--reissue`, which
-revokes the old token before minting the new one.
+revokes the old token before minting the new one. A lookup that cannot answer at all stops the
+phase, because minting on an unanswered question is how a node ends up with the second credential
+the refusal exists to prevent.
 
 A mint writes the token first and the accessor second, so a Lambda that dies between the two leaves
 a token no parameter records, and the retry mints a second one. The window is accepted because the
 stranded token is contained without anyone acting: its wrapping token was returned to nobody, it is
 bound to the node's own address, it carries only the region's unseal policy, and unrenewed it dies
-at the end of its 72-hour period.
+at the end of its 72-hour period. A failed write rather than a crash is not in that window: the
+phase revokes the token it just minted, turning an unrecordable token into a failed mint the
+operator can run again.
+
+A reissue revokes the old token last, after the replacement has been minted and recorded. Revoking
+first would leave the appliance with no renewable credential whenever the mint that was supposed to
+replace it failed, and the node would stop being able to unseal at its next restart because of a
+reissue that produced nothing. The one state this ordering can still leave is an old token that is
+live and no longer on record, which is why the error names its accessor: the node keeps renewing
+that token until someone revokes it by hand.
 
 It is also the one phase whose response carries a secret, where every other phase response is
 documented as safe for anyone with Terraform state access. The phase is therefore never wired to an
@@ -209,7 +224,8 @@ loader.
 
 `scripts/mint-appliance-token.sh` and `scripts/onboard-appliance.sh` both ship here, in
 `fund-payer.sh`'s shape: dry run, printed plan, typed confirmation, then the run that changes
-something. Two scripts rather than one command with subcommands, because they take different inputs,
+something. The steps an operator follows, and the delivery and compromise-handling rules around
+them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,
 and handle secrets differently.
 
 ## A mismatch is a refusal, not a repair

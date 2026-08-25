@@ -135,6 +135,7 @@ module "openbao" {
   vpc_id            = module.network.vpc_id
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.service_security_group_id
+  alb_cidrs         = module.network.public_subnet_cidrs
 
   kms_key_id  = module.kms.key_id
   kms_key_arn = module.kms.key_arn

@@ -15,6 +15,11 @@ output "private_subnet_cidrs" {
   value       = [for subnet in aws_subnet.private : subnet.cidr_block]
 }
 
+output "public_subnet_cidrs" {
+  description = "Where the ALB runs. OpenBao trusts the forwarded client address only from here, which is what makes an appliance token's CIDR binding evaluate against the node's own IP."
+  value       = [for subnet in aws_subnet.public : subnet.cidr_block]
+}
+
 output "alb_security_group_id" {
   value = aws_security_group.alb.id
 }
