@@ -108,6 +108,18 @@ variable "seed_trigger" {
   default     = "1"
 }
 
+variable "appliance_regions" {
+  description = "Region labels of the appliances this stage serves. Each one gets a transit key its node's OpenBao seals against, created by the vault phase."
+  type        = list(string)
+  default     = []
+}
+
+variable "retired_appliance_regions" {
+  description = "Region labels whose appliance has been retired. The vault phase revokes the node's unseal token and destroys its transit key, and a label named by neither list fails the phase, so a retired label has to stay here rather than being deleted."
+  type        = list(string)
+  default     = []
+}
+
 variable "vault_trigger" {
   description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole."
   type        = string
