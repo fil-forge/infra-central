@@ -15,6 +15,10 @@ zone_name = "forge-sandbox.fil.one"
 # future PR-preview stage.
 hostname_suffix = "dev.forge-sandbox.fil.one"
 
+# Where the dev appliance serves S3. An appliance's Ingot identity is
+# did:web:<region>.<this>, so renaming it changes every appliance's identity.
+content_hostname_suffix = "s3.dev.filonecontent.com"
+
 # Calibration testnet proxy addresses, carried over from smelt's
 # environments/staging/smart-contracts.env. Public on-chain addresses, and a
 # contract redeployment should arrive as a reviewable diff.
