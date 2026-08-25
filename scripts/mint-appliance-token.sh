@@ -71,15 +71,20 @@ command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 
 FUNCTION="fc-${STAGE}-provision"
 
+# The one file the Lambda's response is written to, created with a private umask
+# and removed however this script ends. On the confirming call it holds the
+# wrapping token, and this is the only place on an operator's disk it ever
+# exists. The signals are trapped so an interrupted script still cleans up:
+# bash runs no EXIT trap when an untrapped signal kills it, and the file would
+# be left holding a live wrapping token for the rest of its 24 hours.
+RESPONSE="$(umask 077; mktemp)"
+trap 'rm -f "$RESPONSE"' EXIT INT TERM HUP
+
 # invoke <confirm> — call the appliance-token phase and print its JSON response.
 # A Lambda error is reported as a successful invocation with FunctionError set,
 # so that is checked separately.
-#
-# The response file is created with a private umask and removed on return. On
-# the confirming call it holds the wrapping token, and this is the only place on
-# an operator's disk it ever exists.
 invoke() {
-  local confirm="$1" payload response out
+  local confirm="$1" payload response
   payload="$(jq -nc \
     --argjson confirm "$confirm" \
     --arg region "$REGION" \
@@ -92,23 +97,20 @@ invoke() {
      + (if $period == "" then {} else {period:$period} end)
      + (if $wrap   == "" then {} else {wrap_ttl:$wrap} end)')"
 
-  out="$(umask 077; mktemp)"
-  trap 'rm -f "$out"' RETURN
-
   response="$(aws lambda invoke \
     --function-name "$FUNCTION" \
     --cli-binary-format raw-in-base64-out \
     --payload "$payload" \
     --cli-read-timeout 900 \
-    "$out")"
+    "$RESPONSE")"
 
   if [ "$(jq -r '.FunctionError // empty' <<<"$response")" != "" ]; then
     echo "ERROR: the appliance-token phase failed:" >&2
-    jq -r '.errorMessage // .' "$out" >&2
+    jq -r '.errorMessage // .' "$RESPONSE" >&2
     return 1
   fi
 
-  cat "$out"
+  cat "$RESPONSE"
 }
 
 echo "=== Mint the ${REGION} unseal token ==="
