@@ -40,6 +40,11 @@ output "created_parameters" {
   value       = module.platform.created_parameters
 }
 
+output "appliance_keys" {
+  description = "Transit key names this stage holds, one per live appliance region. This is what confirms a committed region label reached OpenBao."
+  value       = module.platform.appliance_keys
+}
+
 output "openbao_public_url" {
   value = module.platform.openbao_public_url
 }

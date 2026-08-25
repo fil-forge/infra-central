@@ -177,8 +177,11 @@ An apply that fails partway has revoked the token and left the key standing, whi
 the region back to the next apply to finish the rest. Read what the phase reported rather than
 assuming the cleanup completed.
 
-Keep the retired label in the list. Removing it from both lists is what the apply refuses, and that
-refusal is what protects every other region's key from a typo.
+Keep the retired label in the list. While the key still stands, a key named by neither list fails
+the apply, and that refusal is what protects every other region's key from a typo. Once the key is
+destroyed the check has nothing left to catch, so from then on the label is a note to the next
+reader: dropping it and adding it back to `appliance_regions` creates a fresh key under a name whose
+node was retired.
 
 ### Retiring a node you no longer trust
 
