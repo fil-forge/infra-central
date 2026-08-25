@@ -49,15 +49,6 @@ That list is reconciled against the committed one on every apply. A key in OpenB
 names fails the apply rather than being deleted or ignored, so a mistyped label stops the pipeline
 instead of stranding a node.
 
-**The merge has to carry a current provision image.** The region lists reach the Lambda in its
-invocation input, and a Lambda still running an older image accepts the input, ignores the fields it
-does not know and reports success having created nothing. The only symptom is an empty
-`appliance_keys`. Publish and commit the digest in the same change:
-
-```bash
-make publish STAGE=dev     # writes terraform/envs/dev/platform/image.auto.tfvars
-```
-
 ## Minting the unseal token
 
 The token is bound to the node's egress address, so this waits until the node's own apply has
@@ -87,15 +78,14 @@ Send the wrapping token to whoever operates the node. Chat is acceptable: it can
 it expires in 24 hours, and once spent or expired it is inert wherever it was pasted. A view-once
 1Password link is better and keeps it out of channel history; use one when it is easy.
 
-On the node, exchange it and write the result to the root-only `0400` file the node reads:
+What the operator does with it is in infra-nodes'
+[runbook](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md), under "Bringing up a
+node": `provision-platform.sh` asks for the token and stores it `0400` root. The node has no `bao`
+binary of its own, so every OpenBao command there runs inside the container.
 
-```bash
-BAO_ADDR=https://ssm.dev.forge-sandbox.fil.one bao unwrap s.XXXXXXXXXXXXXXXXXXXX
-```
-
-**If that unwrap fails, somebody else spent the token.** Treat it as a compromise rather than a
-retry: re-run the mint with `TOKEN_ARGS=--reissue`, which revokes the token that was taken, and find
-out who could read the channel.
+**If the node cannot exchange the token, somebody else spent it.** Treat it as a compromise rather
+than a retry: re-run the mint with `TOKEN_ARGS=--reissue`, which revokes the token that was taken,
+and find out who could read the channel.
 
 ### Minting again
 
@@ -121,7 +111,8 @@ appliance signed with its own Piri key, which central never holds.
 make onboard-appliance STAGE=dev REGION=us-east-9 \
   PIRI_DID=did:key:z6Mk… \
   PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
-  PIRI_PROOF=piri-proof.txt
+  PIRI_PROOF=piri-proof.txt \
+  ONBOARD_ARGS="--proof-out ingot-proof.txt"
 ```
 
 The Ingot identity is not asked for. It is `did:web:<region>.s3.<stage>.filonecontent.com`, derived
@@ -144,6 +135,10 @@ run is safe: it performs only what is missing and returns the delegation issued 
 byte for byte, because a delegation carries a random nonce and re-issuing one would produce
 something central no longer recognises.
 
+The sprue weights are the exception. They are written on every confirmed run, from the request or
+from the 100/100 default, so a rerun of a provider whose weights were tuned afterwards has to carry
+the current values in `ONBOARD_ARGS`, as `--weight` and `--replication-weight`.
+
 ### When it refuses
 
 Two conditions stop the run, and both need a decision rather than a retry.
@@ -161,8 +156,8 @@ are sent, so deregister the provider deliberately first if that is what you mean
 
 What comes back is hilt's delegation to the appliance's Ingot, authorising `/s3/request/authorize`
 and the four `/s3/bucket/*` commands. Hand it to the appliance as the proof its Ingot presents. It is
-not a secret: a delegation is useless without the audience's own key. Write it straight to a file
-with `ONBOARD_ARGS="--proof-out ingot-proof.txt"`.
+not a secret: a delegation is useless without the audience's own key. The `--proof-out` in the
+example above writes it to a file; without that flag it goes to stdout.
 
 ## Retiring a region
 
@@ -174,10 +169,13 @@ appliance_regions         = []
 retired_appliance_regions = ["us-east-9"]
 ```
 
-The apply revokes the node's unseal token, deletes its token role, destroys its transit key and
-deletes its parameters. **This is not reversible and it is not partial.** The node behind that key
-can never unseal again, and everything on its disks stays encrypted with a key that no longer
-exists.
+The apply revokes the node's unseal token, deletes its token role, deletes its parameters and
+destroys its transit key. **This is not reversible.** The node behind that key can never unseal
+again, and everything on its disks stays encrypted with a key that no longer exists.
+
+An apply that fails partway has revoked the token and left the key standing, which is what brings
+the region back to the next apply to finish the rest. Read what the phase reported rather than
+assuming the cleanup completed.
 
 Keep the retired label in the list. Removing it from both lists is what the apply refuses, and that
 refusal is what protects every other region's key from a typo.
@@ -188,13 +186,7 @@ The apply takes effect at the node's next unseal. Transit unseal happens at boot
 that is already running holds its key in memory and keeps serving traffic until it restarts, which
 an operator you are retiring against has no reason to do.
 
-Evicting such a node starts at the registries, and the apply comes last. Both eviction steps are
-manual, and hilt's provider row has no command yet:
-
-- **sprue** stops sending uploads once the Piri is deregistered, with `sprue client admin`.
-- **The delegator** refuses the appliance's next `piri init` once its DID is deleted from the
-  allow list.
-- **hilt** keeps its provider row, because hilt ships no command to remove one. Correcting it means
-  editing hilt's database by hand.
-
-With those done, merge the retirement and the node cannot come back after any restart.
+Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last. None of the
+three has tooling for it yet, so every step is manual:
+[FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) carries the procedure and the
+tooling, and [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) hilt's half of it.

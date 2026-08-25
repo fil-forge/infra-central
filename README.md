@@ -955,22 +955,10 @@ buys less: a push to `main` has already been reviewed.
 
 ### Retiring a region should deregister the node
 
-Moving a label to `retired_appliance_regions` revokes the node's unseal token
-and destroys its transit key, which is what contains it. Its rows stay behind in
-sprue, hilt and the delegator's allow list, and they should be removed in the
-same pass: a retired region leaves a provider sprue can still select and a DID
-the delegator still approves.
-
-The work is uneven across the three. sprue has `provider deregister`. The
-delegator's allow list is a `DeleteItem` on the table the onboard phase already
-writes. hilt ships no command to remove a provider at all, so that row means
-either a change in hilt or a delete against its database, and which of those is
-right is the part worth deciding first.
-
-Retirement's ordering already accounts for a longer sequence: the unseal token is
-revoked first so a run that fails halfway has still contained the node, and the
-transit key is destroyed last so its presence is what brings an unfinished
-retirement back to the next apply.
+Moving a label to `retired_appliance_regions` contains the node by revoking its
+unseal token and destroying its transit key. Its rows stay behind in sprue, hilt
+and the delegator's allow list, and they should be removed in the same pass:
+[FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090).
 
 ### A region mismatch has to be fixed by hand
 
