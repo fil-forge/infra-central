@@ -124,6 +124,50 @@ func TestMintApplianceTokenRefusesAnUnwrappedResponse(t *testing.T) {
 	}
 }
 
+// The create has already succeeded when the response comes back unwrapped, so
+// the live token it carries has to go before the error does.
+func TestMintApplianceTokenRevokesATokenThatCameBackUnwrapped(t *testing.T) {
+	f := &fakeOpenBao{initialised: true, refuseToWrap: true, accessorKnown: true}
+	client := newClient(t, f)
+
+	if _, _, err := MintApplianceToken(context.Background(), client, ApplianceTokenConfig{
+		Region: "us-east-9",
+	}, "24h"); err == nil {
+		t.Fatal("MintApplianceToken() error = nil, want a refusal")
+	}
+
+	if want := []string{"acc-1"}; !reflect.DeepEqual(f.revokedAccessors, want) {
+		t.Errorf("revoked = %v, want %v", f.revokedAccessors, want)
+	}
+}
+
+// Wrapping is what keeps the credential out of the channel, and an empty TTL
+// asks for it unwrapped. Refusing before the mint means there is no token to
+// clean up.
+func TestMintApplianceTokenRefusesAnEmptyWrapTTL(t *testing.T) {
+	f := &fakeOpenBao{initialised: true}
+	client := newClient(t, f)
+
+	_, _, err := MintApplianceToken(context.Background(), client, ApplianceTokenConfig{
+		Region: "us-east-9",
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "in the clear") {
+		t.Fatalf("MintApplianceToken() error = %v, want a refusal naming the risk", err)
+	}
+}
+
+func TestMintApplianceTokenRefusesAnEmptyWrapTTLBeforeMinting(t *testing.T) {
+	f := &fakeOpenBao{initialised: true}
+	client := newClient(t, f)
+
+	_, _, _ = MintApplianceToken(context.Background(), client, ApplianceTokenConfig{
+		Region: "us-east-9",
+	}, "")
+	if f.tokenCreateBody != nil {
+		t.Errorf("token create body = %v, want no create request at all", f.tokenCreateBody)
+	}
+}
+
 func TestMintApplianceTokenAsksForTheWrapTTL(t *testing.T) {
 	f := &fakeOpenBao{initialised: true}
 	client := newClient(t, f)
@@ -141,7 +185,11 @@ func TestMintApplianceTokenAsksForTheWrapTTL(t *testing.T) {
 func TestTokenLiveReportsAKnownAccessor(t *testing.T) {
 	client := newClient(t, &fakeOpenBao{initialised: true, accessorKnown: true})
 
-	if !TokenLive(context.Background(), client, "acc-1") {
+	live, err := TokenLive(context.Background(), client, "acc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !live {
 		t.Error("TokenLive() = false, want true")
 	}
 }
@@ -149,8 +197,24 @@ func TestTokenLiveReportsAKnownAccessor(t *testing.T) {
 func TestTokenLiveReportsALapsedAccessor(t *testing.T) {
 	client := newClient(t, &fakeOpenBao{initialised: true})
 
-	if TokenLive(context.Background(), client, "acc-gone") {
+	live, err := TokenLive(context.Background(), client, "acc-gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live {
 		t.Error("TokenLive() = true, want false")
+	}
+}
+
+// A lookup that fails for any other reason says nothing about the token. The
+// caller mints when this reports not live, so a denied or timed-out lookup
+// answered that way would give a node a second standing credential.
+func TestTokenLiveReturnsALookupFailure(t *testing.T) {
+	client := newClient(t, &fakeOpenBao{initialised: true, lookupFails: true})
+
+	_, err := TokenLive(context.Background(), client, "acc-1")
+	if err == nil {
+		t.Fatal("TokenLive() error = nil, want the lookup failure")
 	}
 }
 

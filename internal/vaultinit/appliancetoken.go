@@ -72,6 +72,10 @@ func EnsureApplianceTokenRole(ctx context.Context, client *api.Client, cfg Appli
 // The returned accessor belongs to the wrapped token and is what revocation and
 // liveness checks use later. It cannot authenticate.
 func MintApplianceToken(ctx context.Context, client *api.Client, cfg ApplianceTokenConfig, wrapTTL string) (wrappingToken, accessor string, err error) {
+	if wrapTTL == "" {
+		return "", "", fmt.Errorf("a wrapping TTL is required; without one the token comes back in the clear")
+	}
+
 	name := ApplianceKeyName(cfg.Region)
 
 	// Wrapping is requested per call, through a header the client adds when its
@@ -97,21 +101,52 @@ func MintApplianceToken(ctx context.Context, client *api.Client, cfg ApplianceTo
 		return "", "", fmt.Errorf("mint the %s unseal token: %w", cfg.Region, err)
 	}
 	if resp == nil || resp.WrapInfo == nil {
-		return "", "", fmt.Errorf("the %s unseal token came back unwrapped; refusing to return it", cfg.Region)
+		return "", "", refuseUnwrappedToken(ctx, client, cfg.Region, resp)
 	}
 
 	return resp.WrapInfo.Token, resp.WrapInfo.WrappedAccessor, nil
 }
 
+// refuseUnwrappedToken turns a response that came back unwrapped into an error,
+// revoking the token it carries on the way out.
+//
+// The create has already succeeded by this point, so the response holds a live
+// credential with the region's policy. Returning the error alone would drop its
+// accessor, leaving a token nothing can revoke and an operator whose retry mints
+// a second one.
+func refuseUnwrappedToken(ctx context.Context, client *api.Client, region string, resp *api.Secret) error {
+	refusal := fmt.Errorf("the %s unseal token came back unwrapped; refusing to return it", region)
+	if resp == nil || resp.Auth == nil || resp.Auth.Accessor == "" {
+		return refusal
+	}
+
+	if err := RevokeTokenByAccessor(ctx, client, resp.Auth.Accessor); err != nil {
+		// Naming the accessor is what lets an operator finish the job by hand.
+		return fmt.Errorf("%w, and revoking it failed; revoke accessor %s: %w",
+			refusal, resp.Auth.Accessor, err)
+	}
+	return refusal
+}
+
 // TokenLive reports whether the token behind an accessor still exists.
 //
-// A lookup that fails means the token is gone, which is an answer rather than a
-// problem: an accessor outlives the token it names, so a recorded accessor whose
-// token has expired is the ordinary state of a node that has been offline past
-// its period.
-func TokenLive(ctx context.Context, client *api.Client, accessor string) bool {
+// An accessor OpenBao no longer knows is an answer rather than a problem: an
+// accessor outlives the token it names, so a recorded accessor whose token has
+// expired is the ordinary state of a node that has been offline past its period.
+//
+// Every other failure is returned. A caller decides whether to mint from this,
+// and a timeout reported as "not live" would mint a second standing credential
+// for a node that already has one.
+func TokenLive(ctx context.Context, client *api.Client, accessor string) (bool, error) {
 	secret, err := client.Auth().Token().LookupAccessorWithContext(ctx, accessor)
-	return err == nil && secret != nil
+	switch {
+	case err == nil:
+		return secret != nil, nil
+	case isUnknownAccessor(err):
+		return false, nil
+	default:
+		return false, fmt.Errorf("look up token %s: %w", accessor, err)
+	}
 }
 
 // RevokeTokenByAccessor revokes a token and treats an accessor OpenBao no longer

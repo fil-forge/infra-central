@@ -237,6 +237,7 @@ type fakeOpenBao struct {
 	transitKeys   map[string]bool // key name -> exists
 	accessorKnown bool
 	refuseToWrap  bool
+	lookupFails   bool
 
 	mountedPaths     []string
 	enabledAuths     []string
@@ -411,6 +412,10 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case key == "POST /v1/auth/token/lookup-accessor":
+		if f.lookupFails {
+			http.Error(w, `{"errors":["permission denied"]}`, http.StatusForbidden)
+			return
+		}
 		if !f.accessorKnown {
 			// A lapsed accessor is reported as a 400 naming it, not a 404.
 			http.Error(w, `{"errors":["invalid accessor"]}`, http.StatusBadRequest)
