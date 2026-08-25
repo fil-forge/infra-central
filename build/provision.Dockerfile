@@ -4,7 +4,10 @@
 # machine while iterating. Terraform never builds it; it only references the
 # resulting manifest digest.
 
-FROM golang:1.25-bookworm AS build
+# Track the go directive in go.mod. The image sets GOTOOLCHAIN=local, so a base
+# older than that directive fails at `go mod download` rather than fetching a
+# newer toolchain. hilt's own go.mod is what currently sets the floor at 1.26.4.
+FROM golang:1.26-bookworm AS build
 
 WORKDIR /src
 
