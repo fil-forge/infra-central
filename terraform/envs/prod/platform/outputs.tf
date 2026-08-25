@@ -43,3 +43,13 @@ output "created_parameters" {
 output "openbao_public_url" {
   value = module.platform.openbao_public_url
 }
+
+output "appliance_keys" {
+  description = "Transit key names this stage holds, one per live appliance region. This is what confirms a committed region label reached OpenBao."
+  value       = module.platform.appliance_keys
+}
+
+output "retired_appliances" {
+  description = "Regions the last vault run destroyed keys for. Those nodes can never unseal again. The result stays in state until the next run, so a non-empty list records that retirement and does not mean this apply destroyed anything."
+  value       = module.platform.retired_appliances
+}

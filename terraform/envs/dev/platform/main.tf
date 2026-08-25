@@ -53,6 +53,11 @@ variable "chain" {
   })
 }
 
+variable "content_hostname_suffix" {
+  description = "Where appliances serve S3, and what their Ingot did:web identities are named after, in terraform.tfvars."
+  type        = string
+}
+
 variable "appliance_regions" {
   description = "Region labels of the appliances this stage serves, in terraform.tfvars. See docs/appliance-onboarding.md."
   type        = list(string)
@@ -88,6 +93,7 @@ module "platform" {
 
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
+  content_hostname_suffix   = var.content_hostname_suffix
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.

@@ -31,6 +31,10 @@ data "aws_iam_policy_document" "this" {
       "ssm:GetParameter",
       "ssm:GetParameters",
       "ssm:GetParametersByPath",
+      # Retiring an appliance region deletes its parameters, because the transit
+      # key they describe is gone and a record of a node that can never come
+      # back is worse than no record. Nothing else in this function deletes
+      # anything.
       "ssm:DeleteParameters",
     ]
 
