@@ -925,7 +925,9 @@ Dependabot did not write.
 
 Dependabot rebases its pull requests in place, and the workflow runs again on
 each new head, so a branch that stops qualifying also loses the auto-merge it
-was given earlier.
+was given earlier. Each auto-merge is bound to the head the workflow inspected,
+which is what stops a head that arrives mid-run from merging on the previous
+head's decision.
 
 ## Planned work
 
