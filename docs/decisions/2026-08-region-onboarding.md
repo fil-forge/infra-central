@@ -91,8 +91,9 @@ decision recorded below.
 
 The Lambda mints the node's periodic token and immediately hands it to OpenBao's response wrapping,
 so what comes back to the operator is a single-use wrapping token with a short TTL. That is what
-travels to the node's operator, who may be a third party. On the node, one `bao unwrap` against
-`ssm.<stage>` yields the real token, which goes straight into a root-only `0400` file.
+travels to the node's operator, who may be a third party. On the node, `provision-platform.sh` asks
+for it, exchanges it against `ssm.<stage>` and writes the real token straight into a root-only
+`0400` file.
 
 The real token therefore never transits any channel, any laptop or any third-party service. What
 travels can be spent exactly once, and interception is _detectable_: an attacker who unwraps first
