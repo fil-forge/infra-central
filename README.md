@@ -979,7 +979,7 @@ The right mechanism is OpenBao's AWS IAM auth method: the task signs an
 bound to that role ARN. No shared secret is distributed at all, nothing needs
 rotating, and identity derives from the task role itself.
 
-It needs a change in hilt: `HILT_VAULT_HASHICORP_AUTH_METHOD` accepts only
+It needs a change in hilt: `HILT_VAULT_OPENBAO_AUTH_METHOD` accepts only
 `approle` or `token` today, so its vault package needs the new auth method plus
 the config value to select it.
 

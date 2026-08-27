@@ -151,12 +151,12 @@ module "hilt" {
 
     HILT_STORAGE_TYPE = "postgres"
 
-    HILT_VAULT_TYPE                  = "hashicorp"
-    HILT_VAULT_HASHICORP_ADDRESS     = var.openbao_internal_address
-    HILT_VAULT_HASHICORP_AUTH_METHOD = "approle"
+    HILT_VAULT_TYPE                = "openbao"
+    HILT_VAULT_OPENBAO_ADDRESS     = var.openbao_internal_address
+    HILT_VAULT_OPENBAO_AUTH_METHOD = "approle"
     # Mounting KV v2 at forge-central/hilt puts every tenant secret under that
     # prefix without changing hilt, whose path builder is already mount-relative.
-    HILT_VAULT_HASHICORP_MOUNT = "forge-central/hilt"
+    HILT_VAULT_OPENBAO_MOUNT = "forge-central/hilt"
 
     HILT_PLC_DIRECTORY = local.plc_directory
 
@@ -169,12 +169,12 @@ module "hilt" {
   }
 
   secrets = {
-    HILT_STORAGE_POSTGRES_DSN              = "${local.ssm}/hilt/postgres-dsn"
-    HILT_AUTH_PARTNER_KEY                  = "${local.ssm}/hilt/partner-key"
-    HILT_VAULT_HASHICORP_APPROLE_ROLE_ID   = "${local.ssm}/hilt/vault-role-id"
-    HILT_VAULT_HASHICORP_APPROLE_SECRET_ID = "${local.ssm}/hilt/vault-secret-id"
-    HILT_IDENTITY_KEY_PEM                  = "${local.ssm}/hilt/identity"
-    HILT_UPLOAD_PROOF                      = "${local.ssm}/hilt/upload-proof"
+    HILT_STORAGE_POSTGRES_DSN            = "${local.ssm}/hilt/postgres-dsn"
+    HILT_AUTH_PARTNER_KEY                = "${local.ssm}/hilt/partner-key"
+    HILT_VAULT_OPENBAO_APPROLE_ROLE_ID   = "${local.ssm}/hilt/vault-role-id"
+    HILT_VAULT_OPENBAO_APPROLE_SECRET_ID = "${local.ssm}/hilt/vault-secret-id"
+    HILT_IDENTITY_KEY_PEM                = "${local.ssm}/hilt/identity"
+    HILT_UPLOAD_PROOF                    = "${local.ssm}/hilt/upload-proof"
   }
 
   secret_files = {
