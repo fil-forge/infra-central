@@ -6,7 +6,7 @@
 # the token: it is a single-use wrapping token with a short TTL, which the node
 # exchanges for the real one against central OpenBao. So the credential itself
 # never transits the channel that carries the hand-off, and an interception makes
-# the node's own unwrap fail rather than passing unnoticed. See
+# the node's own exchange fail rather than passing unnoticed. See
 # docs/appliance-onboarding.md for the delivery rules, which matter.
 #
 # Two invocations, always in this order:
@@ -166,13 +166,13 @@ jq -r '
   "",
   "It can be exchanged once, within \(.token_result.wrap_ttl), and only for this",
   "node'"'"'s credential. Chat is an acceptable channel; a view-once 1Password link",
-  "is better. On the node:",
+  "is better.",
   "",
-  "    BAO_ADDR=\(.token_result.unseal_address) bao unwrap <token>",
+  "On the node, scripts/host/provision-platform.sh asks for this token, exchanges",
+  "it at central and stores what comes back 0400 root. There is nothing for the",
+  "operator to unwrap or write by hand.",
   "",
-  "and write the result to the root-only 0400 file the node reads.",
-  "",
-  "If that unwrap fails, treat it as a compromise rather than a hiccup: someone",
+  "If that exchange fails, treat it as a compromise rather than a hiccup: someone",
   "else spent the token. Re-run this script with --reissue and find out who read",
   "the channel."
 ' <<<"$result"

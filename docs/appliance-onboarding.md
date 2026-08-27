@@ -80,8 +80,9 @@ it expires in 24 hours, and once spent or expired it is inert wherever it was pa
 
 What the operator does with it is in infra-nodes'
 [runbook](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md), under "Bringing up a
-node": `provision-platform.sh` asks for the token and stores it `0400` root. The node has no `bao`
-binary of its own, so every OpenBao command there runs inside the container.
+node": `provision-platform.sh` asks for the wrapping token, exchanges it at central and stores what
+comes back `0400` root. The node has no `bao` binary of its own, so every OpenBao command there runs
+inside the container.
 
 **If the node cannot exchange the token, somebody else spent it.** Treat it as a compromise rather
 than a retry: re-run the mint with `TOKEN_ARGS=--reissue`, which revokes the token that was taken,
