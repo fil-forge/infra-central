@@ -298,3 +298,39 @@ func TestDeletePrefixBatchesAtTheAPILimit(t *testing.T) {
 		t.Errorf("batch sizes = %v, want %v", sizes, want)
 	}
 }
+
+func TestDeleteRemovesOnlyTheNamesItIsGiven(t *testing.T) {
+	fake := newFakeSSM()
+	store := newTestStore(fake)
+	accessor := store.Path("appliance/us-east-9", "unseal-token.accessor")
+	fake.params[accessor] = "hmac-1"
+	fake.params[store.Path("appliance/us-east-9", "hilt-ingot-s3-proof")] = "proof"
+	fake.params[store.Path("appliance/us-east-9", "hilt-ingot-s3-proof.issuer")] = "did:key:zHilt"
+
+	deleted, err := store.Delete(context.Background(), "appliance/us-east-9",
+		"hilt-ingot-s3-proof", "hilt-ingot-s3-proof.issuer")
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if len(deleted) != 2 {
+		t.Errorf("Delete() = %v, want the two proof parameters", deleted)
+	}
+	if _, found := fake.params[accessor]; !found {
+		t.Errorf("%s was deleted, want the node's unseal credential left alone", accessor)
+	}
+}
+
+// A retirement that failed halfway has to be safe to run again, so a name that
+// is already gone is neither reported nor an error.
+func TestDeleteIgnoresAnAbsentParameter(t *testing.T) {
+	fake := newFakeSSM()
+	store := newTestStore(fake)
+
+	deleted, err := store.Delete(context.Background(), "appliance/us-east-9", "hilt-ingot-s3-proof")
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if len(deleted) != 0 || len(fake.deleteBatches) != 0 {
+		t.Errorf("Delete() = %v with %d API calls, want neither", deleted, len(fake.deleteBatches))
+	}
+}

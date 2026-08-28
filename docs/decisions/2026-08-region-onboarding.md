@@ -84,8 +84,9 @@ Retirement does not deregister the node from sprue, hilt or the delegator, and t
 contains a node at its next unseal rather than immediately: an appliance that is already unsealed
 holds its key in memory and keeps receiving traffic until it restarts. Evicting a live node
 therefore starts at the registries, with sprue's deregister command and a delete against the
-delegator's allow list, and fires the lever after. Those steps stay manual; hilt's row is the open
-decision recorded below.
+delegator's allow list, and fires the lever after. Those steps stay manual. hilt's rows go with
+`make retire-region`, which is described below and deletes them along with the delegation central
+stored for that appliance.
 
 ## The unseal token is delivered wrapped
 
@@ -229,20 +230,27 @@ something. The steps an operator follows, and the delivery and compromise-handli
 them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,
 and handle secrets differently.
 
-## An appliance's Ingot is a did:web named after its region
+## An appliance's Ingot is a stage-level did:web
 
-Ingot's identity is `did:web:<region>.<content suffix>`, where the suffix is
-`s3.<stage>.filonecontent.com` outside production and `s3.filonecontent.com` in it.
-Central derives it from the region rather than being told it, which is the shape
-[RFC 16](https://github.com/fil-one/RFC/pull/16) proposes for the network's service
-identities. Piri keeps its `did:key` on the provider's own domain, and that split is
-deliberate: Forge owns the S3 hostname and the operator owns Piri's.
+Ingot's identity is `did:web:ingot.<hostname suffix>`, so the dev appliance is
+`did:web:ingot.dev.forge-sandbox.fil.one`. That is the hostname the node already
+serves, which makes Ingot a peer of hilt and sprue rather than a name of its own
+shape, and central derives it from the same suffix `serviceIssuer` builds those
+two from. Piri keeps its `did:key` on the provider's own domain, and that split is
+deliberate: Forge owns the Ingot hostname and the operator owns Piri's.
 
 Two things follow. An appliance can rotate its Ingot key without telling anyone,
 because its DID document publishes the current key and the DID does not move. And
-the identity can no longer disagree with the region, which removes the input an
-operator could mistype and the hilt row that would then have to be corrected by
-hand.
+the identity can no longer disagree with what the node is configured with, which
+removes the input an operator could mistype.
+
+The name is per stage, so **a stage holds one appliance.** A second one would
+collide on this DID and on hilt's `region TEXT UNIQUE` column. This is an interim
+name while the S3 endpoint naming under `filonecontent.com` is settled, and the
+reason to revisit it is the earlier region-derived scheme's one real advantage:
+deriving the name from the region removed the hilt row that would otherwise have
+to be corrected by hand when an identity and a region disagreed. A per-region
+name under a settled S3 domain gets that back and admits more than one appliance.
 
 The alternative was `did:key`, which the appliance mints locally and hands over in
 the onboarding exchange. It verifies with no network and no third party, and it is
@@ -253,14 +261,34 @@ appliance's identity PEM lives in its own OpenBao, so an attacker holding the bo
 holds the key under either scheme, and both end at the same lever, which is pulling
 the region's DNS record.
 
-The cost is that the hostname scheme is now identity. Renaming the domain, or moving
-a region between stages, changes every Ingot DID, every hilt row and every stored
-delegation. That is why the scheme is settled before a stage admits its first
-appliance, and why the suffix is committed configuration rather than something a
-script passes in.
+The cost is that the hostname scheme is now identity. Renaming the domain changes
+every Ingot DID, every hilt row and every stored delegation, and none of those heal
+on a re-run. That is what the retire phase below is for.
 
-This assumes Ingot serves a DID document at that hostname. Until it does, onboarding
-registers an identity nothing can resolve.
+## Changing the derived DID needs a retire phase
+
+`make retire-region STAGE=dev REGION=us-east-9` deletes the region's rows from
+hilt and the delegation central stored for the old audience, and it is the step
+that makes a re-onboard take effect.
+
+Without it a re-onboard reports success and changes nothing. The stored proof is
+keyed by the appliance's prefix and the proof's name, neither of which mentions
+the audience, so `applianceProofIssuer` finds the old delegation and returns it;
+its only reissue trigger is a rotated hilt key. Deleting the stored proof is what
+re-arms it. A `tofu destroy` of the stage does not clear it either, because SSM
+parameters outlive a stage by design.
+
+The phase runs inside the Lambda, which already holds hilt's DSN and the network
+path to RDS. A temporary `enable_execute_command` on hilt's service was rejected
+for the reason recorded above: it is a standing shell somebody has to remember to
+revert.
+
+It deletes by DID rather than by cascade. hilt's `delegation` table has no foreign
+key to anything, so the region's delegations can only be found by collecting every
+DID under its provider first: the tenants, their buckets and their access keys.
+The three `ON DELETE RESTRICT` constraints then fix the delete order. It names the
+two parameters holding the delegation rather than deleting the appliance's prefix,
+because that prefix also holds the node's live unseal credential's accessor.
 
 ## The appliance's delegation is still issued on demand
 
@@ -331,8 +359,11 @@ accessor endpoints are `POST`.
 
 Recorded here as they are settled during implementation and review.
 
-- How hilt's provider row should be removed when a region is retired. sprue has a deregister command
-  and the delegator's allow list is a delete against a table this already writes; hilt has neither,
-  so that row means either a change in hilt or a delete against its database.
+- Whether hilt should own the removal that the retire phase does against its database. That phase
+  answers the mechanical question, since sprue has a deregister command and the delegator's allow
+  list is a delete against a table this already writes, while hilt has neither. A delete command in
+  hilt would replace it, and the phase's transaction is the specification for what one has to do.
+- What an appliance's Ingot did:web is named once the S3 endpoint naming under `filonecontent.com`
+  is settled. The current stage-level name admits one appliance per stage.
 
 [RFC 21]: https://github.com/fil-one/RFC/pull/21

@@ -183,14 +183,46 @@ func (s *Store) GetSecret(ctx context.Context, service, name string) (string, er
 	return value, nil
 }
 
+// Delete removes named parameters under a service prefix and returns the names
+// that existed, which is what it actually deleted.
+//
+// It exists because retiring a region's DID is narrower than retiring the region:
+// the appliance's prefix also holds its live unseal credential's accessor, so
+// DeletePrefix would take a working node's credential with it. Naming the
+// parameters is what keeps that from happening.
+//
+// Deleting a parameter that is not there is a no-op, so a caller that failed
+// halfway can run again.
+func (s *Store) Delete(ctx context.Context, service string, names ...string) ([]string, error) {
+	var present []string
+	for _, name := range names {
+		path := s.Path(service, name)
+		if _, found, err := s.get(ctx, path, false); err != nil {
+			return nil, err
+		} else if found {
+			present = append(present, path)
+		}
+	}
+	if len(present) == 0 {
+		return nil, nil
+	}
+
+	// DeleteParameters takes at most ten names per call.
+	for batch := range slices.Chunk(present, 10) {
+		if _, err := s.client.DeleteParameters(ctx, &ssm.DeleteParametersInput{Names: batch}); err != nil {
+			return nil, fmt.Errorf("delete under %s: %w", s.Prefix(service), err)
+		}
+	}
+	return present, nil
+}
+
 // DeletePrefix removes every parameter under a service prefix and returns the
 // names it deleted.
 //
-// The one deliberate exception to this package's never-destroy rule, and it
-// exists for retiring a region: the transit key those parameters describe is
+// One of this package's two deliberate exceptions to its never-destroy rule, and
+// it exists for retiring a region: the transit key those parameters describe is
 // gone, so leaving them would leave a record of a node that can never come back.
-// Nothing else here deletes anything, and no caller should reach for this to
-// tidy up.
+// Delete above is the other. No caller should reach for either to tidy up.
 func (s *Store) DeletePrefix(ctx context.Context, service string) ([]string, error) {
 	prefix := s.Prefix(service)
 

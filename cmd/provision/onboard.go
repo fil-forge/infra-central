@@ -49,7 +49,7 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	ingotDID, err := d.ingotDID(req.Region)
+	ingotDID, err := d.ingotDID()
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func validateOnboardRequest(req Request) error {
 	// where the appliance sent one. Refusing is what stops a stale script from
 	// onboarding a different appliance than the one it names.
 	if req.IngotDID != "" {
-		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from its region")
+		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from the stage's hostname suffix")
 	}
 
 	var missing []string
@@ -166,18 +166,20 @@ func validateOnboardRequest(req Request) error {
 	return nil
 }
 
-// ingotDID builds a regional appliance's Ingot identity from its region.
+// ingotDID builds an appliance's Ingot identity from the stage's hostname
+// suffix, the same shape serviceIssuer builds for hilt and sprue.
 //
-// Ingot is a did:web on a domain Forge owns, one name per region, so central
-// derives the DID rather than being told it. That removes the input an operator
-// could mistype and makes the identity survive a key rotation on the appliance:
-// the node publishes its current key in its own DID document, and nothing here
-// changes. See docs/decisions/2026-08-region-onboarding.md.
-func (d *deps) ingotDID(region string) (string, error) {
-	if d.cfg.ContentSuffix == "" {
-		return "", fmt.Errorf("FORGE_CONTENT_SUFFIX is required for the onboard phase: it builds the appliance's Ingot did:web")
-	}
-	return fmt.Sprintf("did:web:%s.%s", region, d.cfg.ContentSuffix), nil
+// Ingot is a did:web on a domain Forge owns, so central derives the DID rather
+// than being told it. That removes the input an operator could mistype and makes
+// the identity survive a key rotation on the appliance: the node publishes its
+// current key in its own DID document, and nothing here changes.
+//
+// The name is per stage rather than per region, so a stage holds one appliance.
+// A second one would collide on this DID and on hilt's region column, which is
+// UNIQUE. It is an interim name until the S3 endpoint naming under
+// filonecontent.com is settled. See docs/decisions/2026-08-region-onboarding.md.
+func (d *deps) ingotDID() (string, error) {
+	return fmt.Sprintf("did:web:ingot.%s", d.cfg.HostnameSuffix), nil
 }
 
 // onboardDeps assembles the three clients and the proof issuer.

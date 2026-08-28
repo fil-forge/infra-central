@@ -45,26 +45,17 @@ func TestDecodePiriProof(t *testing.T) {
 	}
 }
 
-// Ingot's identity is derived from the region rather than supplied, so the
-// region label is the only thing that decides it.
-func TestIngotDIDIsNamedAfterTheRegion(t *testing.T) {
-	d := &deps{cfg: config{ContentSuffix: "s3.dev.filonecontent.com"}}
+// Ingot's identity is derived from the stage rather than supplied, and it is the
+// hostname the node already serves.
+func TestIngotDIDIsNamedAfterTheStage(t *testing.T) {
+	d := &deps{cfg: config{HostnameSuffix: "dev.forge-sandbox.fil.one"}}
 
-	got, err := d.ingotDID("us-east-9")
+	got, err := d.ingotDID()
 	if err != nil {
 		t.Fatalf("ingotDID: %v", err)
 	}
-	if want := "did:web:us-east-9.s3.dev.filonecontent.com"; got != want {
+	if want := "did:web:ingot.dev.forge-sandbox.fil.one"; got != want {
 		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestIngotDIDRefusesAnUnsetContentSuffix(t *testing.T) {
-	d := &deps{cfg: config{}}
-
-	_, err := d.ingotDID("us-east-9")
-	if err == nil || !strings.Contains(err.Error(), "FORGE_CONTENT_SUFFIX") {
-		t.Fatalf("got %v, want an error naming the variable", err)
 	}
 }
 

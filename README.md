@@ -137,6 +137,7 @@ build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
+scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/set-dev-pin.sh        pins one dev service at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
@@ -298,8 +299,11 @@ nothing else, and what it protects is meant to die with the stage: OpenBao's
 storage sits in the same RDS instance and goes at the same time.
 
 So **a destroyed and recreated stage silently comes back with its previous
-identities and wallets.** That is usually what you want, and it is occasionally
-a surprise, so check before assuming a rebuilt stage is fresh:
+identities and wallets.** An appliance's stored delegation is one of them: a
+rebuilt stage still holds the proof hilt signed for whatever Ingot DID it was
+addressed to, and onboarding returns that copy rather than issuing a new one.
+That is usually what you want, and it is occasionally a surprise, so check before
+assuming a rebuilt stage is fresh:
 
 ```bash
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
@@ -962,12 +966,14 @@ unseal token and destroying its transit key. Its rows stay behind in sprue, hilt
 and the delegator's allow list, and they should be removed in the same pass:
 [FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090).
 
-### A region mismatch has to be fixed by hand
+### A region mismatch is fixed by deleting the row
 
 hilt raises one error for a DID registered under this region and for one
 registered under another, and ships no command to move a provider. The onboard
 phase reads hilt's `provider` row to tell the two apart and refuses to continue
-on a mismatch, but correcting the row means editing hilt's database.
+on a mismatch. Correcting it means deleting the row, which `make retire-region`
+does inside the Lambda along with everything under that provider; hilt owning the
+operation is [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091).
 
 ### hilt should authenticate to OpenBao with AWS IAM auth
 

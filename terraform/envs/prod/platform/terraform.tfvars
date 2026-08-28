@@ -6,10 +6,6 @@
 zone_name       = "forge.fil.one"
 hostname_suffix = "forge.fil.one"
 
-# Where appliances serve S3. An appliance's Ingot identity is
-# did:web:<region>.<this>, so renaming it changes every appliance's identity.
-content_hostname_suffix = "s3.filonecontent.com"
-
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish` prints the line to paste here.
 #
