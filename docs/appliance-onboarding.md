@@ -49,6 +49,23 @@ That list is reconciled against the committed one on every apply. A key in OpenB
 names fails the apply rather than being deleted or ignored, so a mistyped label stops the pipeline
 instead of stranding a node.
 
+## The stage's plc directory
+
+Ingot resolves and creates `did:plc` identities against the stage's plc, which answers on a public
+hostname:
+
+```
+https://plc.<hostname suffix>
+```
+
+So `https://plc.dev.forge-sandbox.fil.one` in dev. The name follows from the stage, and
+`tofu -chdir=terraform/envs/dev/apps output service_urls` prints it alongside the rest. The route
+carries no authentication, because a `did:plc` operation is signed by the DID's own rotation key:
+anyone can create a DID there, and nobody but the holder can move one.
+
+sprue, hilt and swarf reach the same service over private DNS inside the VPC, so the public hostname
+is the appliance's path and not theirs.
+
 ## Minting the unseal token
 
 The token is bound to the node's egress address, so this waits until the node's own apply has

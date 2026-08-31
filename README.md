@@ -2,11 +2,10 @@
 
 Deployment configuration for Forge central services on AWS ECS/Fargate.
 
-Six services plus their dependencies, across as many stages as you need: five
-with public hostnames — **sprue**, **hilt**, **swarf**,
-**piri-signing-service** and **delegator** — and **plc**, which runs internally
-with no hostname of its own, matching smelt. All of them are backed by a shared
-RDS Postgres instance and an OpenBao that also serves as the root of trust for
+Six services plus their dependencies, across as many stages as you need:
+**sprue**, **hilt**, **swarf**, **piri-signing-service**, **delegator** and
+**plc**, each on its own public hostname. All of them are backed by a shared RDS
+Postgres instance and an OpenBao that also serves as the root of trust for
 regional appliances.
 
 This replaces the single-VM Docker Compose deployment in
@@ -31,20 +30,22 @@ Lambda rather than on an operator's laptop.
 ## How it fits together
 
 ```
-                       ALB  (*.<stage>.forge-sandbox.fil.one)
-                        │
-   ┌────────┬───────────┼───────────┬──────────────┬─────────┐
- sprue    hilt        swarf     delegator   signing-service  ssm
-   │        │           │           │              │      (OpenBao)
-   │        └─ AppRole ─┼───────────┼──────────────┼─────────┘
-   │                    │           │
-   ├──────── RDS Postgres (one database per service) ────────┤
-   │                    │           │
-   S3              plc (internal)  DynamoDB
+                                 ALB  (*.<stage>.forge-sandbox.fil.one)
+                                  │
+   ┌───────┬────────────┬─────────┼─────────┬───────────────┬───────────┐
+ sprue    hilt        swarf      plc    delegator    signing-service   ssm
+   │       │            │         │         │                       (OpenBao)
+   │       └── AppRole ─┼─────────┼─────────┼───────────────┼───────────┘
+   │       │            │         │         │
+   ├──────── RDS Postgres (one database per service) ───────┤
+   │                                        │
+   S3                                   DynamoDB
 ```
 
 Regional appliances reach OpenBao at `ssm.<stage>.forge-sandbox.fil.one` to
-unseal at boot.
+unseal at boot, and the Ingot on an appliance reaches plc at
+`plc.<stage>.forge-sandbox.fil.one`. sprue, hilt and swarf reach plc over
+private DNS instead, which keeps the call inside the VPC.
 
 `piri-signing-service` is spelled `signing-service` in AWS resource names and
 SSM parameter paths; both spellings refer to the same service.
@@ -79,7 +80,7 @@ registration writes central performs on its behalf.
 | swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
 | delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
 | piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
-| plc                  | 3000 | `/_health`     | yes      | internal only                |
+| plc                  | 3000 | `/_health`     | yes      | nothing else                 |
 
 Two more names appear in the parameter store: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
@@ -828,12 +829,10 @@ Services are probed concurrently: a task that accepts the connection and never
 replies waits out the whole timeout, and several of those in sequence is a
 minute of nothing.
 
-Two gaps it names in its own output rather than passing over:
-
-- **plc** has no public hostname, so nothing here reaches it.
-- **piri-signing-service** takes a `did:web` but serves no document at it. It is
-  the only service no other service addresses by DID, so nothing resolves it
-  today.
+plc and piri-signing-service get the health check alone, and the output says so
+rather than passing over it. plc publishes no identity. piri-signing-service
+takes a `did:web` and serves no document at it, so nothing resolves it today: it
+is the only service no other service addresses by DID.
 
 Run by hand it also says nothing about which revision answered. No service
 reports its build, so a stage mid-rollout can pass on the old task. In CI the

@@ -13,9 +13,6 @@
 # OpenBao is covered too. It answers at ssm.<suffix> rather than at its own name,
 # because regional appliances authenticate there at boot to unseal.
 #
-# plc is not covered. It has no public hostname, and reaching it would need AWS
-# credentials and an `ecs describe-services` call.
-#
 # Usage:
 #   scripts/smoke-test.sh <stage>
 #
@@ -31,7 +28,7 @@
 set -euo pipefail
 
 case "${1-}" in
-  -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "")        echo "usage: scripts/smoke-test.sh <stage>" >&2; exit 2 ;;
   -*)        echo "unknown option: $1" >&2; exit 2 ;;
 esac
@@ -61,7 +58,7 @@ SUFFIX="$(sed -n 's/^hostname_suffix[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]
 #
 # Health paths disagree per service, which is why this is a table and not a
 # constant. The hostname label is spelled out for the same reason: openbao is
-# reached at ssm.<suffix>. plc is absent because it has no public hostname.
+# reached at ssm.<suffix>.
 #
 # openbao's path omits the uninitcode=200 the ALB health check passes. ECS has to
 # keep a fresh task alive for the provision Lambda to initialise it; a stage that
@@ -70,6 +67,10 @@ SUFFIX="$(sed -n 's/^hostname_suffix[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]
 # piri-signing-service takes a did:web through SIGNING_SERVICE_SERVICE_DID but
 # serves no document at it, so its DID resolves nowhere. Nothing resolves it
 # today: it is the only service no other service addresses by DID.
+#
+# plc has no identity of its own to publish, so its route gets the health check
+# alone. Its public hostname is what an appliance Ingot reaches; the services in
+# the VPC call it over private DNS, which this cannot see.
 SERVICES=(
   "sprue:sprue:/health:yes"
   "hilt:hilt:/health:yes"
@@ -77,6 +78,7 @@ SERVICES=(
   "delegator:delegator:/healthcheck:yes"
   "signing-service:signing-service:/healthcheck:no"
   "openbao:ssm:/v1/sys/health?standbyok=true:no"
+  "plc:plc:/_health:no"
 )
 
 # Every request is bounded. A hung smoke test is worse than a failing one, and
@@ -169,10 +171,6 @@ for entry in "${SERVICES[@]}"; do
   cat "$results/$service"
   echo
 done
-
-echo "plc"
-echo "  – not checked: no public hostname"
-echo
 
 failures="$(cat "$results"/* | grep -c "^${FAIL} " || true)"
 

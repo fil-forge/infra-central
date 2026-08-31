@@ -1,7 +1,6 @@
-# Public routing, created only for services that need a public identity.
-#
-# plc has no hostname here, matching smelt, which gives it no Caddy route and no
-# DNS record. It is reachable only over the private namespace.
+# Public routing, created only for services that need a public identity. Every
+# service has one today. A null hostname leaves the service reachable over the
+# private namespace alone.
 
 resource "aws_lb_target_group" "this" {
   count = var.hostname == null ? 0 : 1
@@ -65,7 +64,8 @@ resource "aws_route53_record" "this" {
 }
 
 # Private DNS for callers inside the VPC. hilt reaches OpenBao this way, and
-# sprue and hilt reach plc this way.
+# sprue, hilt and swarf reach plc this way rather than out through the NAT
+# gateway and back in at the ALB.
 resource "aws_service_discovery_service" "this" {
   count = var.register_internal ? 1 : 0
 

@@ -1,11 +1,12 @@
 output "service_urls" {
-  description = "Public URL per service. plc is absent because it has no public hostname."
+  description = "Public URL per service."
   value = {
     sprue             = module.sprue.public_url
     hilt              = module.hilt.public_url
     swarf             = module.swarf.public_url
     delegator         = module.delegator.public_url
     "signing-service" = module.signing_service.public_url
+    plc               = module.plc.public_url
   }
 }
 
@@ -15,7 +16,8 @@ output "service_dids" {
 }
 
 output "plc_internal_url" {
-  value = local.plc_directory
+  description = "What the services in the VPC use, over private DNS. An appliance Ingot uses service_urls.plc instead."
+  value       = local.plc_directory
 }
 
 output "log_groups" {

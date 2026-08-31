@@ -174,8 +174,9 @@ resource "aws_flow_log" "this" {
   tags = { Name = local.name }
 }
 
-# Private DNS for service-to-service calls that do not need a public identity:
-# plc, which smelt also keeps unrouted, and OpenBao's internal address for hilt.
+# Private DNS for service-to-service calls that need no trip through the ALB:
+# plc, which the services in the VPC call here rather than at its public
+# hostname, and OpenBao's internal address for hilt.
 resource "aws_service_discovery_private_dns_namespace" "internal" {
   name = "forge-central.internal"
   vpc  = aws_vpc.this.id
