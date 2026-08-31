@@ -143,8 +143,8 @@ hilt and sprue each cache a resolved DID document for three hours, in process an
 API, so a restart is the only way to clear one:
 
 ```bash
-aws ecs update-service --cluster fc-$STAGE --service hilt --force-new-deployment
-aws ecs update-service --cluster fc-$STAGE --service sprue --force-new-deployment
+aws ecs update-service --cluster fc-$STAGE --service fc-$STAGE-hilt --force-new-deployment
+aws ecs update-service --cluster fc-$STAGE --service fc-$STAGE-sprue --force-new-deployment
 ```
 
 That matters on every Ingot key rotation. The DID does not move, but the key in the document does,
