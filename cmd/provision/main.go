@@ -12,10 +12,12 @@
 // starts; but OpenBao must be running before it can be configured. Phase seed
 // runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
 //
-// Two more phases exist that Terraform must never invoke, because an apply must
-// not move money or issue a credential. Phase fund deposits USDFC for the payer
-// and phase appliance-token mints a regional appliance's unseal credential; both
-// are run by an operator through a script that shows the plan and asks first.
+// Four more phases exist that Terraform must never invoke, because an apply must
+// not move money, issue a credential or delete a registration. Phase fund
+// deposits USDFC for the payer, appliance-token mints a regional appliance's
+// unseal credential, onboard admits an appliance and retire removes a region's
+// Ingot identity so it can be admitted again under a different DID. All four are
+// run by an operator through a script that shows the plan and asks first.
 package main
 
 import (
@@ -56,10 +58,15 @@ type Request struct {
 	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
 	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
 
+	// --- appliance-token and retire phases ---
+
+	// Region is the appliance's region label, naming its transit key and policy
+	// for the appliance-token phase, and the provider row and parameter prefix
+	// for retire.
+	Region string `json:"region,omitempty"`
+
 	// --- appliance-token phase only ---
 
-	// Region is the appliance's region label, naming its transit key and policy.
-	Region string `json:"region,omitempty"`
 	// NodeCIDR is the node's egress address, its Elastic IP as a /32. The token
 	// is bound to it and is worthless anywhere else.
 	NodeCIDR string `json:"node_cidr,omitempty"`
@@ -75,8 +82,8 @@ type Request struct {
 
 	// The appliance presenting itself. Piri's DID belongs to a key generated on
 	// the node, and the proof is signed by it, so neither is derivable here.
-	// Ingot's is: it is a did:web named after the region, built from
-	// FORGE_CONTENT_SUFFIX.
+	// Ingot's is: it is did:web:ingot.<hostname suffix>, the hostname the node
+	// already serves, which makes it a peer of hilt and sprue.
 	PiriDID string `json:"piri_did,omitempty"`
 	PiriURL string `json:"piri_url,omitempty"`
 	// IngotDID is accepted only to be refused, so a caller working from the old
@@ -155,6 +162,11 @@ type Response struct {
 	// audience's own key.
 	OnboardPlan   *onboard.Plan   `json:"onboard_plan,omitempty"`
 	OnboardResult *onboard.Result `json:"onboard_result,omitempty"`
+
+	// RetirePlan and RetireResult belong to the retire phase, and carry only
+	// DIDs, row counts and parameter names.
+	RetirePlan   *RetirePlan   `json:"retire_plan,omitempty"`
+	RetireResult *RetireResult `json:"retire_result,omitempty"`
 }
 
 func main() {
@@ -199,9 +211,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.applianceToken(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
+	case "retire":
+		return deps.retirePhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\" or \"onboard\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\" or \"retire\"", req.Phase)
 	}
 }
 

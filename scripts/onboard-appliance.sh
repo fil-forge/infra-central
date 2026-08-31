@@ -19,8 +19,9 @@
 #   2. after you approve it, with confirmation, which performs the writes
 #
 # Run it after the appliance has provisioned its keys, so its Piri DID exists.
-# Its Ingot identity is not asked for: Ingot is a did:web named after the region,
-# on a domain Forge owns, so central derives it.
+# Its Ingot identity is not asked for: Ingot is did:web:ingot.<hostname suffix>,
+# the hostname the node already serves on a domain Forge owns, so central derives
+# it. One appliance per stage, until the S3 endpoint naming is settled.
 #
 # Usage:
 #   scripts/onboard-appliance.sh \
@@ -67,7 +68,7 @@ while [ $# -gt 0 ]; do
     --weight)             WEIGHT="$2"; shift 2 ;;
     --replication-weight) REPLICATION_WEIGHT="$2"; shift 2 ;;
     --yes|-y)             ASSUME_YES=true; shift ;;
-    -h|--help)            sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)            sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                    echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done

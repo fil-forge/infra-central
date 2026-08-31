@@ -114,6 +114,17 @@ onboard-appliance:
 	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
 	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
 
+# Remove a region's Ingot identity from hilt and SSM, so it can be onboarded
+# again under a different DID. Run it before re-onboarding, or the onboard phase
+# returns the delegation it issued the first time.
+#
+#   make retire-region STAGE=dev REGION=us-east-9
+RETIRE_ARGS ?=
+
+.PHONY: retire-region
+retire-region:
+	scripts/retire-region.sh --stage $(STAGE) --region $(REGION) $(RETIRE_ARGS)
+
 .PHONY: test
 test:
 	go test ./...

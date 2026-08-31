@@ -116,9 +116,22 @@ make onboard-appliance STAGE=dev REGION=us-east-9 \
   ONBOARD_ARGS="--proof-out ingot-proof.txt"
 ```
 
-The Ingot identity is not asked for. It is `did:web:<region>.s3.<stage>.filonecontent.com`, derived
-from the region label, so the node operator has nothing to send and nothing to mistype. The appliance
-can rotate that key on its own afterwards, because its DID document publishes the current one.
+The Ingot identity is not asked for. It is `did:web:ingot.<hostname suffix>`, so
+`did:web:ingot.dev.forge-sandbox.fil.one` in dev: the hostname the node already serves, derived from
+the stage, so the node operator has nothing to send and nothing to mistype. The name is per stage, so
+a stage admits one appliance. The appliance can rotate that key on its own afterwards, because its
+DID document publishes the current one.
+
+hilt and sprue each cache a resolved DID document for three hours, in process and with no eviction
+API, so a restart is the only way to clear one:
+
+```bash
+aws ecs update-service --cluster fc-$STAGE --service hilt --force-new-deployment
+aws ecs update-service --cluster fc-$STAGE --service sprue --force-new-deployment
+```
+
+That matters on every Ingot key rotation. The DID does not move, but the key in the document does,
+and until both services re-resolve they verify against the old one.
 
 Four things happen, and each one has a failure that names nothing useful if it is skipped:
 
@@ -144,11 +157,10 @@ the current values in `ONBOARD_ARGS`, as `--weight` and `--replication-weight`.
 
 Two conditions stop the run, and both need a decision rather than a retry.
 
-**hilt has the Ingot registered for a different region.** Since the Ingot DID is named after the
-region, the two can only disagree if hilt's row was written by hand. hilt raises the same "already
-registered" error whether the DID is held for this region or another one, and it ships no command to
-move a provider, so such a row has to be corrected in its database by hand as well. Trusting that
-error is what smelt did once, and the mismatch it hid broke every request afterwards.
+**hilt has the Ingot registered for a different region.** hilt raises the same "already registered"
+error whether the DID is held for this region or another one, and it ships no command to move a
+provider. Trusting that error is what smelt did once, and the mismatch it hid broke every request
+afterwards. `make retire-region` on the region hilt names is what clears such a row.
 
 **sprue has the Piri registered at a different endpoint.** Re-registering would move where uploads
 are sent, so deregister the provider deliberately first if that is what you mean.
@@ -159,6 +171,32 @@ What comes back is hilt's delegation to the appliance's Ingot, authorising `/s3/
 and the four `/s3/bucket/*` commands. Hand it to the appliance as the proof its Ingot presents. It is
 not a secret: a delegation is useless without the audience's own key. The `--proof-out` in the
 example above writes it to a file; without that flag it goes to stdout.
+
+## Changing an appliance's Ingot DID
+
+When the derived Ingot DID changes, retire the region's old identity before re-onboarding:
+
+```bash
+make retire-region STAGE=dev REGION=us-east-9
+```
+
+It deletes hilt's provider row for the region, every tenant, bucket, access key and delegation under
+it, and the delegation central stored for the old audience. It reads and prints all of that first,
+and asks before deleting anything. It leaves sprue, the delegator and the node's unseal credential
+alone, so Piri's identity and the node's ability to unseal are unaffected.
+
+Without it a re-onboard reports success and changes nothing. The stored delegation is keyed by the
+appliance's prefix and the proof's name, neither of which mentions the audience, so onboarding finds
+the old one and returns it. The log line to look for on the re-onboard is **"issued hilt's S3
+delegation to the appliance"** with the new audience; **"returning the delegation issued earlier"**
+means the retire did not happen.
+
+A `tofu destroy` of the stage does not clear it either. See [What survives a
+destroy](../README.md#what-survives-a-destroy).
+
+The full sequence is retire, re-onboard with `--proof-out`, force a new deployment of hilt and sprue
+so they re-resolve the DID document, then hand the new proof to the node operator for
+`store-hilt-proof.sh` and `deploy-apps.sh`.
 
 ## Retiring a region
 
