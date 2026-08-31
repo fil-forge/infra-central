@@ -220,21 +220,28 @@ jobs:
       # the smoke test below can pass against the revision this push replaced and
       # a deploy whose new task never starts still goes green.
       #
-      # Every service in the cluster, discovered by the script rather than named
-      # here, so a service added to the apps root is waited on without this step
-      # being edited. That covers openbao too, which the platform apply above
-      # rolls out.
+      # Every service in the cluster, listed rather than named, so a service added
+      # to the apps root is waited on without this step being edited. That covers
+      # openbao too, which the platform apply above rolls out.
+      #
+      # Twenty minutes rather than the ten `aws ecs wait services-stable` allows
+      # and will not let anyone change. The first deploy that gives a service a
+      # public hostname is the slow one: the new task has to start, wait out its
+      # ninety-second health check grace period and pass two ALB checks thirty
+      # seconds apart before the old one drains, and on 2026-08-31 plc ran past
+      # ten minutes doing exactly that. The stage was healthy; the run was red.
       #
       # No deployment circuit breaker is configured, so a task that never becomes
-      # healthy leaves the deployment unstable rather than being rolled back: the
-      # wait runs out after ten minutes and the job fails. The script names the
-      # services it is still waiting on and prints their ECS events when it gives
-      # up, which is what the run needs to be worth reading; `aws ecs wait
-      # services-stable` reports only that it ran out of attempts.
+      # healthy leaves the deployment unstable rather than being rolled back. The
+      # script names the services still moving and prints their ECS events when
+      # the wait runs out, which is the part CloudWatch cannot show: an
+      # application that never started writes no logs.
       - name: wait for every service to reach steady state
+        timeout-minutes: 25
+        # An absolute path because this job's working directory is the apps root,
+        # where `tofu output` has to run.
         run: |
-          cluster="$(tofu output -raw cluster_arn)"
-          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$cluster"
+          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
   # The check the applies cannot make: that the stage answers from the outside.
   # A service reaching steady state says its task passes its own container health
@@ -303,11 +310,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-diagnose-${{ github.run_id }}
 
-      # Half an hour covers the whole run: ten minutes waiting for steady state,
+      # Forty-five minutes covers the whole run: twenty waiting for steady state,
       # four of smoke-test retries, and the applies before them. Fifty lines per
       # service rather than the script's default ten, because this is the only
       # look anyone gets before opening the console.
-      - run: scripts/tail-logs.sh dev --since 30m --lines 50
+      - run: scripts/tail-logs.sh dev --since 45m --lines 50
 
   # One job for the whole workflow rather than a notification step in each: a
   # failed apply and a failed smoke test want the same message, and `failure()`

@@ -374,7 +374,7 @@ service means a task definition was registered rather than that a task is
 serving traffic on it. `apply-apps` therefore ends by running
 `scripts/wait-services-stable.sh`, which waits for every service in the cluster
 to reach steady state, and a task that never becomes healthy fails the job after
-ten minutes. Without that wait a smoke test can pass against the revision the
+twenty minutes. Without that wait a smoke test can pass against the revision the
 push replaced, because a rolling update keeps the old task answering. The script
 names the services it is still waiting on as it polls and prints their ECS
 events before it fails, so the run says which service did not come up and what
