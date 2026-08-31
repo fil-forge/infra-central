@@ -388,12 +388,15 @@ either root is covered. It runs on the apply role, because reading log events
 needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
 
 A failed run on `main` posts to `#filone-alerts` in Slack with the commit
-subject, its author and a link to the run. Any failed job triggers it, from
-`make check` through the smoke test. Pull request failures are not announced,
-because the author already sees the red check on the pull request. The job reads
-one repository secret, `SLACK_BOT_TOKEN`, holding the bot token of a Slack app
-with the `chat:write` scope; without the secret the notification step fails and
-nothing else about the run changes.
+subject, its author and a link to the run. When the commit is an image bump, a
+second line names the service commit that produced the image and who wrote it,
+looked up from the source commit link Bump deployed image puts in the commit
+body. A lookup that fails drops the line and still sends the alert. Any failed
+job triggers it, from `make check` through the smoke test. Pull request failures
+are not announced, because the author already sees the red check on the pull
+request. The job reads one repository secret, `SLACK_BOT_TOKEN`, holding the bot
+token of a Slack app with the `chat:write` scope; without the secret the
+notification step fails and nothing else about the run changes.
 
 AWS credentials are never stored. Each job assumes an IAM role in the target
 account through GitHub's OIDC federation, and the credentials expire with the job.
