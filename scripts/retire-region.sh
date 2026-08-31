@@ -62,6 +62,9 @@ FUNCTION="fc-${STAGE}-provision"
 # invoke <confirm> — call the retire phase and print its JSON response. A Lambda
 # error is reported as a successful invocation with FunctionError set, so that is
 # checked separately.
+#
+# Every failure has to become an explicit return: bash drops errexit inside
+# command substitution, and the callers read this function through one.
 invoke() {
   local confirm="$1" payload response out
   payload="$(jq -nc \
@@ -69,15 +72,18 @@ invoke() {
     --arg region "$REGION" \
     '{phase:"retire", confirm:$confirm, region:$region}')"
 
-  out="$(mktemp)"
+  out="$(mktemp)" || return 1
   trap 'rm -f "$out"' RETURN
 
-  response="$(aws lambda invoke \
+  if ! response="$(aws lambda invoke \
     --function-name "$FUNCTION" \
     --cli-binary-format raw-in-base64-out \
     --payload "$payload" \
     --cli-read-timeout 900 \
-    "$out")"
+    "$out")"; then
+    echo "ERROR: aws lambda invoke failed" >&2
+    return 1
+  fi
 
   if [ "$(jq -r '.FunctionError // empty' <<<"$response")" != "" ]; then
     echo "ERROR: the retire phase failed:" >&2
