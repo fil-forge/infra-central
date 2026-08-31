@@ -121,7 +121,7 @@ variable "health_check_start_period" {
 }
 
 variable "hostname" {
-  description = "Public hostname. Null gives the service no ALB route and no public DNS, as with plc."
+  description = "Public hostname. Null gives the service no ALB route and no public DNS, leaving it reachable over the private namespace alone."
   type        = string
   default     = null
 }

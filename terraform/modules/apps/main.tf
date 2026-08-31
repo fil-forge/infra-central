@@ -10,7 +10,8 @@
 #   hilt, swarf    accept the identity key only as a file path
 #   delegator      needs its UCAN proofs as files; the inline form panics
 #   delegator      uses DynamoDB and no Postgres at all
-#   plc            has no public hostname, matching smelt
+#   plc            answers on a public hostname so appliance Ingots reach it,
+#                  while the services in the VPC keep calling it over private DNS
 #   health paths   /health, /healthcheck and /_health all appear below
 
 data "aws_caller_identity" "current" {}
@@ -33,7 +34,11 @@ locals {
 
   did = { for service, hostname in local.host : service => "did:web:${hostname}" }
 
+  # plc is addressed two ways. Tasks in the VPC use private DNS, which keeps the
+  # call off the NAT gateway and the public internet. Ingot on an appliance node
+  # is outside the VPC, so it needs the ALB.
   plc_directory = "http://plc.${var.namespace_name}:3000"
+  plc_host      = "plc.${var.hostname_suffix}"
 
   # Where the entrypoint wrapper drops file-borne secrets.
   keys = "/tmp/forge"
@@ -427,9 +432,19 @@ module "plc" {
   health_check_command = "wget -q --spider http://127.0.0.1:3000/_health"
   health_check_path    = "/_health"
 
-  # No public hostname, matching smelt, which gives plc no route and no DNS
-  # record. Only sprue and hilt call it, both from inside the VPC.
-  hostname          = null
+  # Public so Ingot on an appliance node can reach the directory, and registered
+  # internally so sprue, hilt and swarf keep reaching it over private DNS.
+  #
+  # The route carries no authentication, because plc has none to carry: a did:plc
+  # operation is signed by the DID's own rotation key, so anyone can create a DID
+  # here and nobody but the holder can move one. This is what plc.directory does.
+  hostname          = local.plc_host
+  listener_arn      = var.listener_arn
+  listener_priority = 160
+  route53_zone_id   = var.route53_zone_id
+  alb_dns_name      = var.alb_dns_name
+  alb_zone_id       = var.alb_zone_id
+
   register_internal = true
   namespace_id      = var.namespace_id
   namespace_name    = var.namespace_name

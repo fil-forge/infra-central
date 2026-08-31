@@ -12,7 +12,7 @@ output "internal_hostname" {
 }
 
 output "public_url" {
-  description = "Null when the service has no public hostname, as with plc."
+  description = "Null when the service has no public hostname."
   value       = var.hostname == null ? null : "https://${var.hostname}"
 }
 
