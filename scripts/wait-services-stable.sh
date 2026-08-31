@@ -105,14 +105,19 @@ PENDING_NAMES='
 # The name, what it is waiting for, and the reason ECS gives, for everything
 # still moving when the wait runs out. rolloutStateReason is where a task that
 # keeps failing its health check shows up.
+#
+# AWS CLI v2 returns createdAt as an ISO-8601 string and v1 as epoch seconds,
+# and jq aborts the whole filter on the wrong type, which would drop the events
+# and everything after them exactly when a service times out.
 PENDING_DETAIL='
+  def fmtdate: if type == "number" then floor | todate else . end;
   (.services[]
   | select((.deployments | length) != 1 or .runningCount != .desiredCount)
   | "--- \(.serviceName) ---",
     "  running \(.runningCount)/\(.desiredCount), \(.deployments | length) deployment(s)",
     (.deployments[] | "  \(.status) \(.rolloutState // "-"): \(.rolloutStateReason // "-")"),
     "  recent events:",
-    (.events[:10][] | "    \(.createdAt | floor | todate) \(.message)")),
+    (.events[:10][] | "    \(.createdAt | fmtdate) \(.message)")),
   (.failures[]? | "--- \(.arn) ---", "  describe-services: \(.reason)")
 '
 
