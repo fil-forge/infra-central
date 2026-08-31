@@ -143,6 +143,7 @@ scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/set-dev-pin.sh        pins one dev service at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
+scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach steady state
 
 # Documentation beyond this file
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
@@ -370,11 +371,14 @@ apps plan only after platform applies.
 
 An apply reports success as soon as AWS accepted the change, which for an ECS
 service means a task definition was registered rather than that a task is
-serving traffic on it. `apply-apps` therefore ends by waiting for every service
-in the cluster to reach steady state, and a task that never becomes healthy
-fails the job after ten minutes. Without that wait a smoke test can pass against
-the revision the push replaced, because a rolling update keeps the old task
-answering.
+serving traffic on it. `apply-apps` therefore ends by running
+`scripts/wait-services-stable.sh`, which waits for every service in the cluster
+to reach steady state, and a task that never becomes healthy fails the job after
+twenty minutes. Without that wait a smoke test can pass against the revision the
+push replaced, because a rolling update keeps the old task answering. The script
+names the services it is still waiting on as it polls and prints their ECS
+events before it fails, so the run says which service did not come up and what
+ECS tried.
 
 `make smoke STAGE=dev` runs after it and retries for four minutes. Steady state
 covers the task; a newly created Route53 record or listener rule in front of it
