@@ -220,21 +220,21 @@ jobs:
       # the smoke test below can pass against the revision this push replaced and
       # a deploy whose new task never starts still goes green.
       #
-      # Every service in the cluster, listed rather than named, so a service added
-      # to the apps root is waited on without this step being edited. That covers
-      # openbao too, which the platform apply above rolls out.
+      # Every service in the cluster, discovered by the script rather than named
+      # here, so a service added to the apps root is waited on without this step
+      # being edited. That covers openbao too, which the platform apply above
+      # rolls out.
       #
       # No deployment circuit breaker is configured, so a task that never becomes
       # healthy leaves the deployment unstable rather than being rolled back: the
-      # wait runs out after ten minutes and the job fails. `wait services-stable`
-      # takes at most ten services per call, hence the xargs.
+      # wait runs out after ten minutes and the job fails. The script names the
+      # services it is still waiting on and prints their ECS events when it gives
+      # up, which is what the run needs to be worth reading; `aws ecs wait
+      # services-stable` reports only that it ran out of attempts.
       - name: wait for every service to reach steady state
         run: |
-          set -o pipefail
           cluster="$(tofu output -raw cluster_arn)"
-          aws ecs list-services --cluster "$cluster" --query 'serviceArns[]' --output text \
-            | tr '\t' '\n' \
-            | xargs -r -n 10 aws ecs wait services-stable --cluster "$cluster" --services
+          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$cluster"
 
   # The check the applies cannot make: that the stage answers from the outside.
   # A service reaching steady state says its task passes its own container health
