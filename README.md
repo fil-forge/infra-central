@@ -376,9 +376,9 @@ serving traffic on it. `apply-apps` therefore ends by running
 to reach steady state, and a task that never becomes healthy fails the job after
 twenty minutes. Without that wait a smoke test can pass against the revision the
 push replaced, because a rolling update keeps the old task answering. The script
-names the services it is still waiting on as it polls and prints their ECS
-events before it fails, so the run says which service did not come up and what
-ECS tried.
+names the services it is still waiting on as it polls, and every two minutes
+prints their task counts, their deployments and their recent ECS events, so a
+long wait says whether a rollout is slow or has stopped moving.
 
 `make smoke STAGE=dev` runs after it and retries for four minutes. Steady state
 covers the task; a newly created Route53 record or listener rule in front of it

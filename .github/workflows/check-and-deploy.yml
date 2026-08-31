@@ -233,9 +233,9 @@ jobs:
       #
       # No deployment circuit breaker is configured, so a task that never becomes
       # healthy leaves the deployment unstable rather than being rolled back. The
-      # script names the services still moving and prints their ECS events when
-      # the wait runs out, which is the part CloudWatch cannot show: an
-      # application that never started writes no logs.
+      # script names the services still moving, and every two minutes prints their
+      # counts, deployments and ECS events, which is the part CloudWatch cannot
+      # show: an application that never started writes no logs.
       - name: wait for every service to reach steady state
         timeout-minutes: 25
         # An absolute path because this job's working directory is the apps root,

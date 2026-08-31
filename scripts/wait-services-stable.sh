@@ -19,6 +19,7 @@
 # Options:
 #   --timeout   seconds to wait before giving up   (default: 1200)
 #   --interval  seconds between polls              (default: 15)
+#   --detail    seconds between full reports       (default: 120)
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the cluster
@@ -28,6 +29,7 @@ set -euo pipefail
 CLUSTER=""
 TIMEOUT="${TIMEOUT:-1200}"
 INTERVAL="${INTERVAL:-15}"
+DETAIL="${DETAIL:-120}"
 
 require_value() {
   [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 2; }
@@ -37,7 +39,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --timeout)  require_value "$@"; TIMEOUT="$2"; shift 2 ;;
     --interval) require_value "$@"; INTERVAL="$2"; shift 2 ;;
-    -h|--help)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --detail)   require_value "$@"; DETAIL="$2"; shift 2 ;;
+    -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)         echo "unknown option: $1" >&2; exit 2 ;;
     *)
       [ -z "$CLUSTER" ] || { echo "ERROR: unexpected argument: $1" >&2; exit 2; }
@@ -75,21 +78,23 @@ echo "=== Waiting up to ${TIMEOUT}s for ${count} service(s) to reach steady stat
 # describe <jq filter> <service...> — one describe-services call per ten
 # services, with the filter applied to each response.
 #
-# With more than ten services a batch that fails while a later one succeeds
-# returns 0, and its error text is printed as if it were a pending service name.
-# The next poll corrects it; the cluster holds seven services today.
+# Every batch is attempted and any batch that fails is reported, so a throttled
+# call is retried by the caller rather than printed as if its error text were a
+# pending service name. `set -e` does not reach a command substitution in a
+# condition, which is where this runs, so the status is collected by hand.
 describe() {
   local filter="$1"; shift
-  local batch
+  local batch status=0
   while [ $# -gt 0 ]; do
     batch=$(($# < BATCH ? $# : BATCH))
     aws ecs describe-services \
       --cluster "$CLUSTER" \
       --services "${@:1:batch}" \
       --output json \
-      | jq -r "$filter"
+      | jq -r "$filter" || status=$?
     shift "$batch"
   done
+  return "$status"
 }
 
 # A service the describe call cannot return counts as pending rather than
@@ -103,8 +108,11 @@ PENDING_NAMES='
 '
 
 # The name, what it is waiting for, and the reason ECS gives, for everything
-# still moving when the wait runs out. rolloutStateReason is where a task that
-# keeps failing its health check shows up.
+# still moving. rolloutStateReason is where a task that keeps failing its health
+# check shows up. Printed every two minutes while the wait runs and again when it
+# runs out: a wait that says only which service is moving, for twenty minutes,
+# reads as a hung script, and the counts are what show a rollout that has stopped
+# moving rather than one that is slow.
 #
 # AWS CLI v2 returns createdAt as an ISO-8601 string and v1 as epoch seconds,
 # and jq aborts the whole filter on the wrong type, which would drop the events
@@ -124,14 +132,19 @@ PENDING_DETAIL='
 started="$SECONDS"
 last_report=""
 last_heartbeat=0
+# Negative so the first poll with anything pending reports in full rather than
+# two minutes into the wait.
+last_detail=$((-DETAIL))
 
 while true; do
   # A describe call that fails is a reason to poll again, not to fail the
   # deploy: only the deadline below ends this loop unhappily. Without the
   # guard a single throttled call would report every service as pending.
+  described=true
   if ! pending="$(describe "$PENDING_NAMES" "${SERVICES[@]}" 2>&1)"; then
     echo "  (describe-services failed, retrying: $(printf '%s' "$pending" | tail -n 1))"
     pending="?"
+    described=false
   elif [ -z "$pending" ]; then
     echo "All ${count} service(s) reached steady state after $((SECONDS - started))s."
     exit 0
@@ -145,6 +158,14 @@ while true; do
     printf '  [%4ds] waiting on: %s\n' "$elapsed" "$(printf '%s' "$pending" | tr '\n' ' ')"
     last_report="$pending"
     last_heartbeat="$elapsed"
+  fi
+
+  # Skipped when the describe above failed, which has nothing to report and
+  # would only fail again.
+  if [ "$described" = true ] && [ $((elapsed - last_detail)) -ge "$DETAIL" ]; then
+    printf '  [%4ds] detail:\n' "$elapsed"
+    describe "$PENDING_DETAIL" "${SERVICES[@]}" || true
+    last_detail="$elapsed"
   fi
 
   if [ "$elapsed" -ge "$TIMEOUT" ]; then
