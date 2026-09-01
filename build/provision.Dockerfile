@@ -7,7 +7,7 @@
 # Track the go directive in go.mod. The image sets GOTOOLCHAIN=local, so a base
 # older than that directive fails at `go mod download` rather than fetching a
 # newer toolchain. hilt's own go.mod is what currently sets the floor at 1.26.4.
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 WORKDIR /src
 
