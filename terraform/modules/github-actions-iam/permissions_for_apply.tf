@@ -135,6 +135,22 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
+  # CreateDBInstance calls both of these itself when manage_master_user_password
+  # is set, to create and tag the master password's own secret. Nothing else
+  # here ever created a DB instance under this role: the stage's original one
+  # was never destroyed and recreated, so the gap went unnoticed until a reset
+  # did both for the first time. No DeleteSecret: RDS deletes the secret itself
+  # on instance deletion without needing this role to hold that action.
+  statement {
+    sid       = "ManageStageMasterPasswordSecret"
+    resources = ["*"]
+
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:TagResource",
+    ]
+  }
+
   statement {
     sid = "ReadWriteState"
 
