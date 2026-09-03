@@ -163,6 +163,10 @@ func validateOnboardRequest(req Request) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("the onboard phase needs %v; all of it comes from the appliance", missing)
 	}
+
+	if _, err := piriParameterName(req.PiriDID); err != nil {
+		return fmt.Errorf("piri_did: %w", err)
+	}
 	return nil
 }
 
