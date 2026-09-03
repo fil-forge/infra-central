@@ -12,6 +12,10 @@
 //     tenant in that region
 //   - its Ingot holds hilt's S3 delegation, which only central can sign
 //
+// Central also records the appliance's Piri DID under its region. Nothing else
+// pairs the two: sprue's provider record carries no region and hilt's carries
+// no Piri.
+//
 // Every step reads before it writes, and reports what it found before anything
 // is changed. That is not only for the operator's benefit: hilt raises the same
 // "already registered" error whether the DID is registered for this region or a
@@ -23,6 +27,7 @@ package onboard
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -71,7 +76,7 @@ type Request struct {
 	ReplicationWeight int
 }
 
-// Deps are the four things the phase talks to.
+// Deps are the services and record the phase talks to.
 type Deps struct {
 	AllowList AllowList
 	Sprue     SprueAdmin
@@ -81,6 +86,15 @@ type Deps struct {
 	// a delegation carries a random nonce and re-issuing one produces different
 	// bytes and a different CID.
 	IssueProof func(ctx context.Context, region, ingotDID string) (string, error)
+	// PiriRecord reads and writes the set of Piri DIDs a region has onboarded.
+	PiriRecord PiriRecord
+}
+
+// PiriRecord is central's temporary record of which Piri belong to which
+// region.
+type PiriRecord interface {
+	Recorded(ctx context.Context, region string) ([]string, error)
+	Record(ctx context.Context, region, piriDID string) error
 }
 
 // State is what the three services hold for this appliance right now.
@@ -90,7 +104,8 @@ type State struct {
 	Sprue       *Provider `json:"sprue,omitempty"`
 	// HiltRegion is the region hilt has this Ingot registered for, empty when it
 	// has no row at all.
-	HiltRegion string `json:"hilt_region"`
+	HiltRegion   string `json:"hilt_region"`
+	PiriRecorded bool   `json:"piri_recorded"`
 }
 
 // Plan is State plus what would be done about it.
@@ -125,6 +140,12 @@ func Read(ctx context.Context, deps Deps, req Request) (*State, error) {
 		return nil, fmt.Errorf("read hilt's provider row: %w", err)
 	}
 	state.HiltRegion = region
+
+	recorded, err := deps.PiriRecord.Recorded(ctx, req.Region)
+	if err != nil {
+		return nil, fmt.Errorf("read the region's recorded Piri DIDs: %w", err)
+	}
+	state.PiriRecorded = slices.Contains(recorded, req.PiriDID)
 
 	return state, nil
 }
@@ -166,6 +187,11 @@ func PlanFrom(state *State, req Request) *Plan {
 		state.Sprue.ReplicationWeight != int64(req.ReplicationWeight) {
 		plan.Actions = append(plan.Actions, fmt.Sprintf(
 			"set %s's weights to %d and %d", req.PiriDID, req.Weight, req.ReplicationWeight))
+	}
+
+	if !state.PiriRecorded {
+		plan.Actions = append(plan.Actions, fmt.Sprintf(
+			"record %s as a Piri of region %s", req.PiriDID, req.Region))
 	}
 
 	switch {
@@ -247,6 +273,14 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 				req.IngotDID, region, req.Region)
 		}
 		result.Performed = append(result.Performed, "registered "+req.IngotDID+" with hilt for "+req.Region)
+	}
+
+	if !plan.PiriRecorded {
+		if err := deps.PiriRecord.Record(ctx, req.Region, req.PiriDID); err != nil {
+			return nil, fmt.Errorf("record %s as a Piri of region %s: %w", req.PiriDID, req.Region, err)
+		}
+		result.Performed = append(result.Performed,
+			"recorded "+req.PiriDID+" as a Piri of "+req.Region)
 	}
 
 	proof, err := deps.IssueProof(ctx, req.Region, req.IngotDID)

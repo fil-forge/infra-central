@@ -26,7 +26,7 @@ func TestReadReportsAFreshAppliance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &State{Region: "us-east-9", AllowListed: false, Sprue: nil, HiltRegion: ""}
+	want := &State{Region: "us-east-9", AllowListed: false, Sprue: nil, HiltRegion: "", PiriRecorded: false}
 	if !reflect.DeepEqual(state, want) {
 		t.Errorf("Read() = %+v, want %+v", state, want)
 	}
@@ -35,18 +35,19 @@ func TestReadReportsAFreshAppliance(t *testing.T) {
 func TestPlanFromListsEveryWriteForAFreshAppliance(t *testing.T) {
 	plan := PlanFrom(&State{Region: "us-east-9"}, testRequest())
 
-	if len(plan.Actions) != 4 {
-		t.Errorf("actions = %v, want four", plan.Actions)
+	if len(plan.Actions) != 5 {
+		t.Errorf("actions = %v, want five", plan.Actions)
 	}
 }
 
 func TestPlanFromPlansNothingForARegisteredAppliance(t *testing.T) {
 	req := testRequest()
 	state := &State{
-		Region:      req.Region,
-		AllowListed: true,
-		Sprue:       &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
-		HiltRegion:  req.Region,
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:   req.Region,
+		PiriRecorded: true,
 	}
 
 	plan := PlanFrom(state, req)
@@ -61,10 +62,11 @@ func TestPlanFromPlansNothingForARegisteredAppliance(t *testing.T) {
 func TestPlanFromResetsMismatchedWeights(t *testing.T) {
 	req := testRequest()
 	state := &State{
-		Region:      req.Region,
-		AllowListed: true,
-		Sprue:       &Provider{Endpoint: req.PiriURL, Weight: 1, ReplicationWeight: 1},
-		HiltRegion:  req.Region,
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 1, ReplicationWeight: 1},
+		HiltRegion:   req.Region,
+		PiriRecorded: true,
 	}
 
 	plan := PlanFrom(state, req)
@@ -139,6 +141,7 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 		"sprueProof":   string(fakes.sprue.registeredProof),
 		"hiltRegion":   fakes.hilt.region,
 		"weight":       fakes.sprue.weight,
+		"piriRecord":   fakes.piri.added,
 		"proofReturns": result.HiltIngotS3Proof,
 	}
 	want := map[string]any{
@@ -147,6 +150,7 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 		"sprueProof":   "proof-bytes",
 		"hiltRegion":   "us-east-9",
 		"weight":       100,
+		"piriRecord":   "us-east-9 did:key:zPiri",
 		"proofReturns": "the-proof",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -203,10 +207,11 @@ func TestApplyNeedsNoProofWhenSprueAlreadyHoldsTheProvider(t *testing.T) {
 	req := testRequest()
 	req.PiriProof = nil
 	state := &State{
-		Region:      req.Region,
-		AllowListed: true,
-		Sprue:       &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
-		HiltRegion:  req.Region,
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:   req.Region,
+		PiriRecorded: true,
 	}
 
 	if _, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req)); err != nil {
@@ -218,10 +223,11 @@ func TestApplyReturnsTheProofOnEveryRun(t *testing.T) {
 	fakes := newFakes()
 	req := testRequest()
 	state := &State{
-		Region:      req.Region,
-		AllowListed: true,
-		Sprue:       &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
-		HiltRegion:  req.Region,
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:   req.Region,
+		PiriRecorded: true,
 	}
 
 	result, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req))
@@ -239,6 +245,7 @@ type fakes struct {
 	allowList *fakeAllowList
 	sprue     *fakeSprue
 	hilt      *fakeHilt
+	piri      *fakePiriRecord
 }
 
 func newFakes() *fakes {
@@ -246,6 +253,7 @@ func newFakes() *fakes {
 		allowList: &fakeAllowList{},
 		sprue:     &fakeSprue{},
 		hilt:      &fakeHilt{},
+		piri:      &fakePiriRecord{},
 	}
 }
 
@@ -257,6 +265,7 @@ func (f *fakes) deps() Deps {
 		IssueProof: func(ctx context.Context, region, ingotDID string) (string, error) {
 			return "the-proof", nil
 		},
+		PiriRecord: f.piri,
 	}
 }
 
@@ -301,6 +310,20 @@ type fakeHilt struct {
 	// a region mismatch is simulated.
 	regionAfterAdd string
 	added          bool
+}
+
+type fakePiriRecord struct {
+	recorded []string
+	added    string
+}
+
+func (p *fakePiriRecord) Recorded(_ context.Context, _ string) ([]string, error) {
+	return p.recorded, nil
+}
+
+func (p *fakePiriRecord) Record(_ context.Context, region, piriDID string) error {
+	p.added = region + " " + piriDID
+	return nil
 }
 
 func (h *fakeHilt) ProviderRegion(ctx context.Context, did string) (string, error) {

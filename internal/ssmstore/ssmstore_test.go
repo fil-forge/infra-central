@@ -59,9 +59,9 @@ func (f *fakeSSM) GetParametersByPath(ctx context.Context, in *ssm.GetParameters
 	prefix := strings.TrimSuffix(aws.ToString(in.Path), "/") + "/"
 
 	var found []types.Parameter
-	for name := range f.params {
+	for name, value := range f.params {
 		if strings.HasPrefix(name, prefix) {
-			found = append(found, types.Parameter{Name: aws.String(name)})
+			found = append(found, types.Parameter{Name: aws.String(name), Value: aws.String(value)})
 		}
 	}
 	// Real SSM returns no guaranteed order; sorting keeps assertions stable.
@@ -238,6 +238,37 @@ func TestLookupSecretReportsAMissingParameterWithoutFailing(t *testing.T) {
 	}
 	if found || value != "" {
 		t.Errorf("LookupSecret() = (%q, %v), want (%q, false)", value, found, "")
+	}
+}
+
+// A region's set of Piri DIDs is one parameter per DID under a sub-prefix, keyed
+// by the last segment of the name.
+func TestListPublicReturnsEveryValueUnderASubPrefix(t *testing.T) {
+	fake := newFakeSSM()
+	store := newTestStore(fake)
+	fake.params[store.Path("appliance/us-east-9", "piri/z6MkOne")] = "did:key:z6MkOne"
+	fake.params[store.Path("appliance/us-east-9", "piri/z6MkTwo")] = "did:key:z6MkTwo"
+	fake.params[store.Path("appliance/us-east-9", "unseal-token.accessor")] = "hmac-1"
+
+	got, err := store.ListPublic(context.Background(), "appliance/us-east-9", "piri")
+	if err != nil {
+		t.Fatalf("ListPublic() error = %v", err)
+	}
+	want := map[string]string{"z6MkOne": "did:key:z6MkOne", "z6MkTwo": "did:key:z6MkTwo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListPublic() = %v, want %v", got, want)
+	}
+}
+
+func TestListPublicReturnsNothingForAnAbsentSubPrefix(t *testing.T) {
+	store := newTestStore(newFakeSSM())
+
+	got, err := store.ListPublic(context.Background(), "appliance/us-east-9", "piri")
+	if err != nil {
+		t.Fatalf("ListPublic() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListPublic() = %v, want nothing", got)
 	}
 }
 

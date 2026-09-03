@@ -9,6 +9,9 @@
 # its region, without which hilt rejects every tenant there. And hilt signs the
 # S3 delegation its Ingot presents, which only Central can issue.
 #
+# Central also records the Piri DID under the region. The record will let region
+# retirement find every Piri provider to deregister.
+#
 # The writes are made by the provision Lambda, in AWS, because sprue and hilt
 # accept an admin call only when it is signed by their own identity key. Those
 # keys stay in SSM and never reach a laptop.
