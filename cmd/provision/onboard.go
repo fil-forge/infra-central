@@ -147,7 +147,7 @@ func validateOnboardRequest(req Request) error {
 	// where the appliance sent one. Refusing is what stops a stale script from
 	// onboarding a different appliance than the one it names.
 	if req.IngotDID != "" {
-		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from the stage's hostname suffix")
+		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from its region and the stage's Ingot hostname suffix")
 	}
 
 	var missing []string
