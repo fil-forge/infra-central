@@ -35,7 +35,12 @@ variable "zone_name" {
 }
 
 variable "hostname_suffix" {
-  description = "Suffix every service hostname shares. Stated explicitly rather than derived from zone_name, because the delegation point and the hostname shape need not match: one forge.fil.one zone can serve dev.forge.fil.one and prod.forge.fil.one alike."
+  description = "Suffix every central service hostname shares. Stated explicitly because the hosted-zone delegation and stage-specific hostname shape differ."
+  type        = string
+}
+
+variable "ingot_hostname_suffix" {
+  description = "Suffix for region-qualified Ingot identities."
   type        = string
 }
 
@@ -74,9 +79,10 @@ variable "provision_image_digest" {
 module "platform" {
   source = "../../../modules/platform"
 
-  stage           = "dev"
-  zone_name       = var.zone_name
-  hostname_suffix = var.hostname_suffix
+  stage                 = "dev"
+  zone_name             = var.zone_name
+  hostname_suffix       = var.hostname_suffix
+  ingot_hostname_suffix = var.ingot_hostname_suffix
 
   # The repository the bootstrap workspace for this account and region created.
   # Derived rather than copied from its output: a Lambda can pull only from its
@@ -104,8 +110,15 @@ module "platform" {
   # leaves headroom for sprue, hilt and swarf at 10 each.
   openbao_max_parallel = 8
 
-  # Bumped to re-issue the delegator's two proofs, which were deleted from SSM
-  # so the seed phase would write them base64-encoded, and to rewrite plc's
-  # db-creds-json with an sslmode RDS accepts.
-  seed_trigger = "2"
+  # Bumped to re-issue proofs with the stable service identities from the Forge
+  # identity RFC. Stored proofs retain their original issuer and audience, so a
+  # hostname migration must explicitly replace them.
+  seed_trigger = "3"
+
+  # Bumped as part of the dev reset that destroys the RDS instance OpenBao's
+  # database lives on. The vault phase does not run on its own just because
+  # OpenBao's storage came back empty, so without this its KV mount, transit
+  # engine and per-region transit keys stay unconfigured after the instance is
+  # recreated.
+  vault_trigger = "2"
 }

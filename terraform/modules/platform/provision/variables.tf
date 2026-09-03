@@ -39,6 +39,11 @@ variable "hostname_suffix" {
   type        = string
 }
 
+variable "ingot_hostname_suffix" {
+  description = "Builds region-qualified Ingot did:web identities."
+  type        = string
+}
+
 variable "chain" {
   description = "Chain and contract configuration for the stage. Single source of truth: the apps workspace reads it from this workspace's outputs rather than keeping its own copy, mirroring smelt's shared smart-contracts.env."
   type = object({

@@ -101,7 +101,7 @@ mint-appliance-token:
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
 #
 #   make onboard-appliance REGION=us-east-9 PIRI_DID=did:key:… \
-#     PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
+#     PIRI_URL=https://piri-0.latest.dev.fil-forge.com \
 #     PIRI_PROOF=piri-proof.txt
 PIRI_DID      ?=
 PIRI_URL      ?=

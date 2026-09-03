@@ -5,6 +5,7 @@ output "platform" {
   value = {
     stage                     = module.platform.stage
     hostname_suffix           = module.platform.hostname_suffix
+    ingot_hostname_suffix     = module.platform.ingot_hostname_suffix
     cluster_arn               = module.platform.cluster_arn
     vpc_id                    = module.platform.vpc_id
     private_subnet_ids        = module.platform.private_subnet_ids

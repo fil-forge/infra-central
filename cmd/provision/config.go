@@ -17,6 +17,9 @@ type config struct {
 	// HostnameSuffix builds the did:web identities the proofs are addressed
 	// to, e.g. dev.fil.one.
 	HostnameSuffix string
+	// IngotHostnameSuffix builds region-qualified Ingot identities, e.g.
+	// latest.dev.filonecontent.com.
+	IngotHostnameSuffix string
 
 	DBHost          string
 	DBPort          int
@@ -45,14 +48,15 @@ type config struct {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Stage:           os.Getenv("FORGE_STAGE"),
-		Region:          os.Getenv("AWS_REGION"),
-		HostnameSuffix:  os.Getenv("FORGE_HOSTNAME_SUFFIX"),
-		DBHost:          os.Getenv("FORGE_DB_HOST"),
-		DBAdminDatabase: envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
-		DBMasterSecret:  os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
-		OpenBaoAddr:     os.Getenv("FORGE_OPENBAO_ADDR"),
-		AllowListTable:  os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		Stage:               os.Getenv("FORGE_STAGE"),
+		Region:              os.Getenv("AWS_REGION"),
+		HostnameSuffix:      os.Getenv("FORGE_HOSTNAME_SUFFIX"),
+		IngotHostnameSuffix: os.Getenv("FORGE_INGOT_HOSTNAME_SUFFIX"),
+		DBHost:              os.Getenv("FORGE_DB_HOST"),
+		DBAdminDatabase:     envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
+		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
+		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
+		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
@@ -81,10 +85,11 @@ func loadConfig() (config, error) {
 	// Fail on the whole set at once rather than one redeploy at a time.
 	var missing []string
 	for name, value := range map[string]string{
-		"FORGE_STAGE":                cfg.Stage,
-		"FORGE_DB_HOST":              cfg.DBHost,
-		"FORGE_DB_MASTER_SECRET_ARN": cfg.DBMasterSecret,
-		"FORGE_HOSTNAME_SUFFIX":      cfg.HostnameSuffix,
+		"FORGE_STAGE":                 cfg.Stage,
+		"FORGE_DB_HOST":               cfg.DBHost,
+		"FORGE_DB_MASTER_SECRET_ARN":  cfg.DBMasterSecret,
+		"FORGE_HOSTNAME_SUFFIX":       cfg.HostnameSuffix,
+		"FORGE_INGOT_HOSTNAME_SUFFIX": cfg.IngotHostnameSuffix,
 	} {
 		if value == "" {
 			missing = append(missing, name)

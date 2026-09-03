@@ -49,7 +49,7 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	ingotDID, err := d.ingotDID()
+	ingotDID, err := d.ingotDID(req.Region)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func validateOnboardRequest(req Request) error {
 	// where the appliance sent one. Refusing is what stops a stale script from
 	// onboarding a different appliance than the one it names.
 	if req.IngotDID != "" {
-		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from the stage's hostname suffix")
+		return fmt.Errorf("ingot_did is no longer an input: an appliance's Ingot did:web is derived from its region and the stage's Ingot hostname suffix")
 	}
 
 	var missing []string
@@ -170,20 +170,15 @@ func validateOnboardRequest(req Request) error {
 	return nil
 }
 
-// ingotDID builds an appliance's Ingot identity from the stage's hostname
-// suffix, the same shape serviceIssuer builds for hilt and sprue.
+// ingotDID builds an appliance's region-qualified Ingot identity in the
+// filonecontent.com namespace defined by the Forge service identity RFC.
 //
 // Ingot is a did:web on a domain Forge owns, so central derives the DID rather
 // than being told it. That removes the input an operator could mistype and makes
 // the identity survive a key rotation on the appliance: the node publishes its
 // current key in its own DID document, and nothing here changes.
-//
-// The name is per stage rather than per region, so a stage holds one appliance.
-// A second one would collide on this DID and on hilt's region column, which is
-// UNIQUE. It is an interim name until the S3 endpoint naming under
-// filonecontent.com is settled. See docs/decisions/2026-08-region-onboarding.md.
-func (d *deps) ingotDID() (string, error) {
-	return fmt.Sprintf("did:web:ingot.%s", d.cfg.HostnameSuffix), nil
+func (d *deps) ingotDID(region string) (string, error) {
+	return fmt.Sprintf("did:web:s3.%s.%s", region, d.cfg.IngotHostnameSuffix), nil
 }
 
 // onboardDeps assembles the three clients, the proof issuer and the region's
@@ -316,7 +311,7 @@ func (d *deps) serviceIssuer(ctx context.Context, service string) (ucan.Issuer, 
 		return nil, "", fmt.Errorf("decode %s's identity: %w", service, err)
 	}
 
-	didWeb := fmt.Sprintf("did:web:%s.%s", service, d.cfg.HostnameSuffix)
+	didWeb := "did:web:" + d.serviceHostname(service)
 	parsed, err := did.Parse(didWeb)
 	if err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", didWeb, err)
@@ -329,7 +324,7 @@ func (d *deps) serviceIssuer(ctx context.Context, service string) (ucan.Issuer, 
 // ALB through the NAT gateway, which is the same path hilt already takes to
 // resolve sprue's did:web document.
 func (d *deps) serviceURL(service string) string {
-	return fmt.Sprintf("https://%s.%s", service, d.cfg.HostnameSuffix)
+	return "https://" + d.serviceHostname(service)
 }
 
 func intOrDefault(value, fallback int) int {
