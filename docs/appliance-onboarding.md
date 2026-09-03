@@ -150,7 +150,7 @@ aws ecs update-service --cluster fc-$STAGE --service fc-$STAGE-sprue --force-new
 That matters on every Ingot key rotation. The DID does not move, but the key in the document does,
 and until both services re-resolve they verify against the old one.
 
-Four things happen, and each one has a failure that names nothing useful if it is skipped:
+Five things happen, and each one has a failure that names nothing useful if it is skipped:
 
 - The **delegator's allow list** gets the Piri DID. Without it, `piri init` step 4 asks the
   delegator for approval and is refused with a `403`.
@@ -160,6 +160,13 @@ Four things happen, and each one has a failure that names nothing useful if it i
   that region and every `/s3/*` call the Ingot makes.
 - **hilt signs the S3 delegation** the Ingot presents back to it, which is the one piece only central
   can produce.
+- **Central records the Piri DID under the region.** sprue has no region on its provider row and
+  hilt has no Piri DID, so this is the only record of that association.
+
+The record is a temporary SSM-backed list, with one parameter for each Piri DID.
+Region retirement will use it to find the Piri providers that need
+deregistration. [FIL-1130](https://linear.app/filecoin-foundation/issue/FIL-1130)
+tracks replacing it with a proper registry of Piri nodes by region.
 
 The script reads all three services first and prints what it found before writing anything. A second
 run is safe: it performs only what is missing and returns the delegation issued the first time,

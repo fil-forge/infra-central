@@ -163,6 +163,10 @@ func validateOnboardRequest(req Request) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("the onboard phase needs %v; all of it comes from the appliance", missing)
 	}
+
+	if _, err := piriParameterName(req.PiriDID); err != nil {
+		return fmt.Errorf("piri_did: %w", err)
+	}
 	return nil
 }
 
@@ -182,7 +186,8 @@ func (d *deps) ingotDID() (string, error) {
 	return fmt.Sprintf("did:web:ingot.%s", d.cfg.HostnameSuffix), nil
 }
 
-// onboardDeps assembles the three clients and the proof issuer.
+// onboardDeps assembles the three clients, the proof issuer and the region's
+// Piri record.
 func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.Client) (onboard.Deps, error) {
 	table := d.cfg.AllowListTable
 	if table == "" {
@@ -216,6 +221,7 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 		Sprue:      sprueClient,
 		Hilt:       hiltClient,
 		IssueProof: d.applianceProofIssuer(hiltDIDWeb),
+		PiriRecord: &piriRecords{store: d.store},
 	}, nil
 }
 
