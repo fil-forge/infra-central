@@ -6,14 +6,14 @@
 # hand. Prod pins its digest in its own terraform.tfvars, copied from dev when a
 # change is promoted.
 
-# The zone is delegated once, by the DNS project, and holds every non-prod
-# stage. Adding a stage writes records into it and needs no change there.
-zone_name = "forge-sandbox.fil.one"
+# The dev zone is delegated once by the DNS project. Each ephemeral stage gets
+# a label beneath it; this long-lived environment uses the RFC's `latest` label.
+zone_name = "dev.fil-forge.com"
 
-# Services answer at <service>.dev.forge-sandbox.fil.one. The stage label lives
-# inside the zone, which is what lets one delegation serve dev, staging and any
-# future PR-preview stage.
-hostname_suffix = "dev.forge-sandbox.fil.one"
+# Service labels follow the Forge identity RFC (upload, auth, revoke, signer,
+# delegator and indexer). Ingot uses the parallel filonecontent.com namespace.
+hostname_suffix       = "latest.dev.fil-forge.com"
+ingot_hostname_suffix = "latest.dev.filonecontent.com"
 
 # Calibration testnet proxy addresses, carried over from smelt's
 # environments/staging/smart-contracts.env. Public on-chain addresses, and a

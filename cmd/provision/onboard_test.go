@@ -45,17 +45,33 @@ func TestDecodePiriProof(t *testing.T) {
 	}
 }
 
-// Ingot's identity is derived from the stage rather than supplied, and it is the
-// hostname the node already serves.
-func TestIngotDIDIsNamedAfterTheStage(t *testing.T) {
-	d := &deps{cfg: config{HostnameSuffix: "dev.forge-sandbox.fil.one"}}
+// Ingot's RFC identity is derived from both its region and stage.
+func TestIngotDIDIsNamedAfterTheRegionAndStage(t *testing.T) {
+	d := &deps{cfg: config{IngotHostnameSuffix: "latest.dev.filonecontent.com"}}
 
-	got, err := d.ingotDID()
+	got, err := d.ingotDID("us-east-9")
 	if err != nil {
 		t.Fatalf("ingotDID: %v", err)
 	}
-	if want := "did:web:ingot.dev.forge-sandbox.fil.one"; got != want {
+	if want := "did:web:s3.us-east-9.latest.dev.filonecontent.com"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestServiceHostnamesUseStableIdentityLabels(t *testing.T) {
+	d := &deps{cfg: config{HostnameSuffix: "latest.dev.fil-forge.com"}}
+	want := map[string]string{
+		"sprue":           "upload.latest.dev.fil-forge.com",
+		"hilt":            "auth.latest.dev.fil-forge.com",
+		"swarf":           "revoke.latest.dev.fil-forge.com",
+		"delegator":       "delegator.latest.dev.fil-forge.com",
+		"signing-service": "signer.latest.dev.fil-forge.com",
+		"indexer":         "indexer.latest.dev.fil-forge.com",
+	}
+	for service, hostname := range want {
+		if got := d.serviceHostname(service); got != hostname {
+			t.Errorf("%s: got %q, want %q", service, got, hostname)
+		}
 	}
 }
 

@@ -39,7 +39,12 @@ variable "zone_name" {
 }
 
 variable "hostname_suffix" {
-  description = "Suffix every service hostname shares. Stated explicitly rather than derived from zone_name, because the delegation point and the hostname shape need not match: one forge.fil.one zone can serve dev.forge.fil.one and prod.forge.fil.one alike."
+  description = "Suffix every central service hostname shares. Stated explicitly because the hosted-zone delegation and hostname shape need not match."
+  type        = string
+}
+
+variable "ingot_hostname_suffix" {
+  description = "Suffix for region-qualified Ingot identities."
   type        = string
 }
 
@@ -77,9 +82,10 @@ variable "retired_appliance_regions" {
 module "platform" {
   source = "../../../modules/platform"
 
-  stage           = "prod"
-  zone_name       = var.zone_name
-  hostname_suffix = var.hostname_suffix
+  stage                 = "prod"
+  zone_name             = var.zone_name
+  hostname_suffix       = var.hostname_suffix
+  ingot_hostname_suffix = var.ingot_hostname_suffix
 
   # The repository the bootstrap workspace for this account and region created.
   # Derived rather than copied from its output: a Lambda can pull only from its

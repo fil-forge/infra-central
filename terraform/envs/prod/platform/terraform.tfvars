@@ -1,10 +1,11 @@
 # Non-secret per-stage configuration. Every secret lives in SSM and is minted
 # by the provision Lambda, so this file is safe to commit.
 
-# Production has its own account and its own delegated zone, so it needs no
-# stage label: services answer at <service>.forge.fil.one.
-zone_name       = "forge.fil.one"
-hostname_suffix = "forge.fil.one"
+# Production has its own account and its own delegated zones, so it needs no
+# stage label. Service and Ingot names follow the Forge identity RFC.
+zone_name             = "fil-forge.com"
+hostname_suffix       = "fil-forge.com"
+ingot_hostname_suffix = "filonecontent.com"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish` prints the line to paste here.

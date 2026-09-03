@@ -23,9 +23,17 @@ locals {
 
   ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge-central/${var.stage}"
 
-  host = { for service in [
-    "sprue", "hilt", "swarf", "delegator", "signing-service"
-  ] : service => "${service}.${var.hostname_suffix}" }
+  hostname_label = {
+    sprue           = "upload"
+    hilt            = "auth"
+    swarf           = "revoke"
+    delegator       = "delegator"
+    signing-service = "signer"
+  }
+
+  host = { for service, label in local.hostname_label :
+    service => "${label}.${var.hostname_suffix}"
+  }
 
   # Services address each other by did:web, which resolves over public HTTPS.
   # A task in a private subnet therefore reaches the public ALB back out
