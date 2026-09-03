@@ -216,6 +216,40 @@ func (s *Store) Delete(ctx context.Context, service string, names ...string) ([]
 	return present, nil
 }
 
+// ListPublic returns the values of every plaintext parameter under a service's
+// sub-prefix, keyed by the last segment of the parameter name.
+//
+// It exists for the set of Piri DIDs a region has onboarded. That set has no
+// fixed size, and a DID cannot be a parameter name (SSM allows only letters,
+// digits, dot, underscore, hyphen and slash, and a DID has colons), so each one
+// is a parameter of its own named by a key the caller derives and holding the
+// DID as its value.
+func (s *Store) ListPublic(ctx context.Context, service, subPrefix string) (map[string]string, error) {
+	prefix := s.Path(service, subPrefix)
+
+	values := map[string]string{}
+	var token *string
+	for {
+		out, err := s.client.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
+			Path:      aws.String(prefix),
+			Recursive: aws.Bool(true),
+			NextToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", prefix, err)
+		}
+		for _, param := range out.Parameters {
+			name := aws.ToString(param.Name)
+			values[name[strings.LastIndex(name, "/")+1:]] = aws.ToString(param.Value)
+		}
+		if out.NextToken == nil {
+			break
+		}
+		token = out.NextToken
+	}
+	return values, nil
+}
+
 // DeletePrefix removes every parameter under a service prefix and returns the
 // names it deleted.
 //

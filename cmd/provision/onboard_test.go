@@ -89,6 +89,17 @@ func TestValidateOnboardRequestRefusesASuppliedIngotDID(t *testing.T) {
 	}
 }
 
+func TestValidateOnboardRequestRefusesANonKeyPiriDID(t *testing.T) {
+	err := validateOnboardRequest(Request{
+		Region:  "us-east-9",
+		PiriDID: "did:web:piri.example",
+		PiriURL: "https://piri.example",
+	})
+	if err == nil || !strings.Contains(err.Error(), "piri_did") {
+		t.Fatalf("got %v, want a refusal naming the field", err)
+	}
+}
+
 func TestDecodePiriProofRefusesBothFields(t *testing.T) {
 	_, err := decodePiriProof(Request{PiriProof: "text", PiriProofB64: "AAEC"})
 	if err == nil || !strings.Contains(err.Error(), "not both") {
