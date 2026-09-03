@@ -189,11 +189,6 @@ func PlanFrom(state *State, req Request) *Plan {
 			"set %s's weights to %d and %d", req.PiriDID, req.Weight, req.ReplicationWeight))
 	}
 
-	if !state.PiriRecorded {
-		plan.Actions = append(plan.Actions, fmt.Sprintf(
-			"record %s as a Piri of region %s", req.PiriDID, req.Region))
-	}
-
 	switch {
 	case state.HiltRegion == "":
 		plan.Actions = append(plan.Actions,
@@ -204,6 +199,11 @@ func PlanFrom(state *State, req Request) *Plan {
 		plan.Blockers = append(plan.Blockers, fmt.Sprintf(
 			"hilt has %s registered for region %s, not %s; hilt has no command to move a provider, so the row has to be corrected in its database by hand",
 			req.IngotDID, state.HiltRegion, req.Region))
+	}
+
+	if !state.PiriRecorded {
+		plan.Actions = append(plan.Actions, fmt.Sprintf(
+			"record %s as a Piri of region %s", req.PiriDID, req.Region))
 	}
 
 	return plan

@@ -32,11 +32,18 @@ func TestReadReportsAFreshAppliance(t *testing.T) {
 	}
 }
 
-func TestPlanFromListsEveryWriteForAFreshAppliance(t *testing.T) {
+func TestPlanFromListsEveryWriteInApplyOrderForAFreshAppliance(t *testing.T) {
 	plan := PlanFrom(&State{Region: "us-east-9"}, testRequest())
 
-	if len(plan.Actions) != 5 {
-		t.Errorf("actions = %v, want five", plan.Actions)
+	want := []string{
+		"add did:key:zPiri to the delegator's allow list",
+		"register did:key:zPiri with sprue at https://piri.dev.forge-sandbox.fil.one",
+		"set did:key:zPiri's weights to 100 and 100",
+		"register did:key:zIngot with hilt for region us-east-9",
+		"record did:key:zPiri as a Piri of region us-east-9",
+	}
+	if !reflect.DeepEqual(plan.Actions, want) {
+		t.Errorf("actions = %v, want %v", plan.Actions, want)
 	}
 }
 
