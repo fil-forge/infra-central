@@ -98,10 +98,11 @@ jobs:
   # access, who writes the workflow file their own pull request runs. See
   # modules/github-actions-iam.
   plan:
-    # Set explicitly, so the two instances report as `plan-platform` and
-    # `plan-apps` rather than as GitHub's default `plan (dev/platform)`. A branch
-    # protection rule has to name its required checks literally, and the flat
-    # names are the ones worth typing.
+    # Set explicitly, so the four instances report as `plan-dev-platform`,
+    # `plan-dev-apps`, `plan-staging-platform` and `plan-staging-apps` rather than
+    # GitHub's default `plan (dev/platform)`. A branch protection rule has to
+    # name its required checks literally, and the flat names are the ones worth
+    # typing.
     name: plan-${{ matrix.name }}
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: check
@@ -118,9 +119,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: platform
+          - name: dev-platform
             root: dev/platform
-          - name: apps
+          - name: dev-apps
             root: dev/apps
           - name: staging-platform
             root: staging/platform
