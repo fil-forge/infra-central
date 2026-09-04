@@ -9,6 +9,10 @@
 # There is no CI for this yet: an operator runs the target on their own machine
 # with credentials for the target account, then commits the digest it writes.
 
+# .SHELLFLAGS only takes effect on GNU Make 3.82+. macOS ships 3.81 (Apple
+# stopped updating make over the license change) and silently ignores it, so
+# a recipe that pipes or chains commands sets `set -euo pipefail` itself
+# rather than depending on this line.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
@@ -49,7 +53,8 @@ publish: login builder
 	  --output type=image,name=$(IMAGE),push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=false \
 	  --metadata-file $(METADATA) \
 	  .
-	@digest=$$(jq -r '."containerimage.digest"' $(METADATA)); \
+	@set -euo pipefail; \
+	  digest=$$(jq -r '."containerimage.digest"' $(METADATA)); \
 	  if [[ -z "$$digest" || "$$digest" == "null" ]]; then \
 	    echo "no digest in $(METADATA); did the push succeed?" >&2; exit 1; \
 	  fi; \
@@ -68,7 +73,8 @@ builder:
 
 .PHONY: login
 login:
-	aws ecr get-login-password --region $(AWS_REGION) \
+	set -euo pipefail; \
+	  aws ecr get-login-password --region $(AWS_REGION) \
 	  | docker login --username AWS --password-stdin $(ECR_HOST)
 
 # Move USDFC into the payer's FilecoinPay account. Signing happens inside the
@@ -148,7 +154,7 @@ check:
 	go vet ./...
 	go test ./...
 	tofu -chdir=terraform fmt -check -recursive
-	git ls-files -z '*.sh' | xargs -0 -r shellcheck
+	set -o pipefail; git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
 .PHONY: fmt
 fmt:
