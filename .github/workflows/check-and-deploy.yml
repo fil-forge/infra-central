@@ -20,9 +20,9 @@ permissions:
   contents: read
 
 # The deploy jobs below differ only in root, command and role. The two plans are a
-# matrix; the two applies cannot be, because apply-apps needs apply-platform and a
-# matrix has no way to make one instance wait on another. What would otherwise
-# drift between the two apply copies is hoisted here.
+# matrix; the two applies cannot be, because each apps job needs its platform
+# job and a matrix has no way to make one instance wait on another. What would
+# otherwise drift between the two apply copies is hoisted here.
 env:
   # Pinned rather than latest. What deploys must not change because a new release
   # landed between two merges.
@@ -98,10 +98,11 @@ jobs:
   # access, who writes the workflow file their own pull request runs. See
   # modules/github-actions-iam.
   plan:
-    # Set explicitly, so the two instances report as `plan-platform` and
-    # `plan-apps` rather than as GitHub's default `plan (dev/platform)`. A branch
-    # protection rule has to name its required checks literally, and the flat
-    # names are the ones worth typing.
+    # Set explicitly, so the four instances report as `plan-dev-platform`,
+    # `plan-dev-apps`, `plan-staging-platform` and `plan-staging-apps` rather than
+    # GitHub's default `plan (dev/platform)`. A branch protection rule has to
+    # name its required checks literally, and the flat names are the ones worth
+    # typing.
     name: plan-${{ matrix.name }}
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: check
@@ -118,10 +119,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: platform
+          - name: dev-platform
             root: dev/platform
-          - name: apps
+          - name: dev-apps
             root: dev/apps
+          - name: staging-platform
+            root: staging/platform
+          - name: staging-apps
+            root: staging/apps
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.root }}
@@ -146,15 +151,16 @@ jobs:
       # waiting on briefly before a human gets involved.
       - run: tofu plan -input=false -lock-timeout=5m
 
-  # apply-apps waits for apply-platform because apps reads platform's state and
-  # must not plan against outputs an in-flight platform apply is about to change.
+  # apply-dev-apps waits for apply-dev-platform because apps reads platform's
+  # state and must not plan against outputs an in-flight platform apply is about
+  # to change.
   #
   # Both run on every push, even one that touched only apps. Filtering by path
   # would skip the untouched root, but every such filter has to name the modules
   # the root depends on as well as the root itself, and a module added without a
   # matching filter silently stops being deployed. An extra empty plan costs about
   # a minute and removes that failure mode.
-  apply-platform:
+  apply-dev-platform:
     if: github.event_name == 'push'
     needs: check
     runs-on: ubuntu-latest
@@ -186,9 +192,9 @@ jobs:
       # will want instead.
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
-  apply-apps:
+  apply-dev-apps:
     if: github.event_name == 'push'
-    needs: apply-platform
+    needs: apply-dev-platform
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -243,6 +249,69 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
+  # Staging follows the same ordered deployment as dev, but keeps independent
+  # state so either environment can be planned and repaired on its own.
+  apply-staging-platform:
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/staging/platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-staging-${{ github.run_id }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+  apply-staging-apps:
+    if: github.event_name == 'push'
+    needs: apply-staging-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/staging/apps
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-staging-${{ github.run_id }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+      - name: wait for every service to reach steady state
+        timeout-minutes: 25
+        run: |
+          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
+
   # The check the applies cannot make: that the stage answers from the outside.
   # A service reaching steady state says its task passes its own container health
   # check; it says nothing about the Route53 record, the certificate or the
@@ -251,9 +320,9 @@ jobs:
   # No AWS credentials and no OIDC token: every check goes over public HTTPS, and
   # the hostnames come from the stage's committed terraform.tfvars. curl, jq and
   # make are already on the runner.
-  smoke:
+  smoke-dev:
     if: github.event_name == 'push'
-    needs: apply-apps
+    needs: apply-dev-apps
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -278,16 +347,37 @@ jobs:
           echo "the dev stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
+  smoke-staging:
+    if: github.event_name == 'push'
+    needs: apply-staging-apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: make smoke STAGE=staging
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "=== attempt $attempt of 5, after 60s ==="
+              sleep 60
+            fi
+            if make smoke STAGE=staging; then
+              exit 0
+            fi
+          done
+          echo "the staging stage did not come up: 5 attempts over 4 minutes" >&2
+          exit 1
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
   # added to either root is covered without this job being edited.
   #
-  # apply-apps and smoke are the two jobs whose failure means the stage did not
-  # come up: the wait for steady state is the last step of the first, and the
-  # smoke test is the whole of the second. A failed apply-platform skips both
-  # rather than failing them, and a skipped job is not a failure, so nothing
-  # fires for it.
+  # apply-dev-apps and smoke-dev are the two jobs whose failure means the stage
+  # did not come up: the wait for steady state is the last step of the first,
+  # and the smoke test is the whole of the second. A failed apply-dev-platform
+  # skips both rather than failing them, and a skipped job is not a failure, so
+  # nothing fires for it.
   #
   # It runs on the apply role, because reading log events needs
   # logs:FilterLogEvents and the plan role deliberately has none of it: it may
@@ -296,7 +386,7 @@ jobs:
   # refs/heads/main.
   diagnose:
     if: failure() && github.event_name == 'push'
-    needs: [apply-apps, smoke]
+    needs: [apply-dev-apps, smoke-dev]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -316,6 +406,24 @@ jobs:
       # look anyone gets before opening the console.
       - run: scripts/tail-logs.sh dev --since 45m --lines 50
 
+  diagnose-staging:
+    if: failure() && github.event_name == 'push'
+    needs: [apply-staging-apps, smoke-staging]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-staging-${{ github.run_id }}
+
+      - run: scripts/tail-logs.sh staging --since 45m --lines 50
+
   # One job for the whole workflow rather than a notification step in each: a
   # failed apply and a failed smoke test want the same message, and `failure()`
   # is true here when anything above it failed. A job skipped because the run is
@@ -327,7 +435,14 @@ jobs:
   # check stops being read.
   notify-failure:
     if: failure() && github.event_name == 'push'
-    needs: [check, apply-platform, apply-apps, smoke]
+    needs:
+      - check
+      - apply-dev-platform
+      - apply-dev-apps
+      - smoke-dev
+      - apply-staging-platform
+      - apply-staging-apps
+      - smoke-staging
     runs-on: ubuntu-latest
     steps:
       # Only for the commit subject below. github.event.head_commit.message
@@ -401,13 +516,13 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deploy of `{0}` to `dev` failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deploy of `{0}` failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` to `dev` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
                   }
                 },
                 {
