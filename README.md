@@ -158,8 +158,9 @@ terraform/
   envs/                                            one directory per root module
     bootstrap/<account>/account/                   state bucket, CI roles
     bootstrap/<account>/<region>/                  the image registry
-    dev/platform/    dev/apps/                     applied on every push to main
-    prod/platform/   prod/apps/                    committed, not deployed yet
+    dev/platform/      dev/apps/                   applied on every push to main
+    staging/platform/  staging/apps/               applied on every push to main
+    prod/platform/     prod/apps/                  committed, not deployed yet
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -189,7 +190,7 @@ terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provisi
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps root
-  image.auto.tfvars        committed, written by `make publish`
+  image.auto.tfvars        committed Lambda digest; published in dev, copied on promotion
   versions.tofu            OpenTofu version, S3 backend, providers
   versions.tf              refuses Terraform; OpenTofu never reads it
 
@@ -233,7 +234,8 @@ two copies to keep in step. That mirrors smelt's shared `smart-contracts.env`.
 ## DNS
 
 The public Forge domains delegate the zones used by this deployment to Route53.
-Dev stages share `dev.fil-forge.com`; production uses `fil-forge.com` directly.
+Dev stages share `dev.fil-forge.com`, staging uses `staging.fil-forge.com`, and
+production uses `fil-forge.com` directly.
 
 ```
 fil-forge.com DNS
@@ -241,13 +243,17 @@ fil-forge.com DNS
   │                 ├── upload.latest.dev.fil-forge.com
   │                 ├── ssm.latest.dev.fil-forge.com
   │                 └── upload.<STAGE>.dev.fil-forge.com
+  ├── NS staging ─► Route53 zone staging.fil-forge.com  (non-prod account)
+  │                 ├── upload.staging.fil-forge.com
+  │                 └── ssm.staging.fil-forge.com
   └────────────►  Route53 zone fil-forge.com       (production account)
                     ├── upload.fil-forge.com
                     └── ssm.fil-forge.com
 ```
 
-**Adding a stage requires no change to the DNS project.** That is the property
-the layout is built around, and it is what forces two suffixes rather than one.
+Adding a personal stage beneath `dev.fil-forge.com` requires no change to the
+DNS project. Shared domain roots such as staging are delegated once before a
+stage uses them.
 
 Production carries no stage label: `upload.fil-forge.com`. Ephemeral and
 personal stages use `<STAGE>.dev.fil-forge.com`; this repository's dev stage is
@@ -262,8 +268,8 @@ and Delegator and Indexer use `delegator` and `indexer`.
 
 Two per-stage settings follow, and this is where they diverge:
 
-- **`zone_name`** is the delegated Route53 zone records are written into. Every
-  non-prod stage shares `dev.fil-forge.com`.
+- **`zone_name`** is the delegated Route53 zone records are written into. Dev
+  stages share `dev.fil-forge.com`; staging uses `staging.fil-forge.com`.
 - **`hostname_suffix`** is what that stage's hostnames end with, which for
   non-prod includes the stage label.
 - **`ingot_hostname_suffix`** is the corresponding suffix in the
@@ -352,33 +358,35 @@ check`. CI pins 0.11.0, so that build is the one that decides a merge; an
 
 ### How each part is deployed
 
-| Part                   | How it is deployed                                             |
-| ---------------------- | -------------------------------------------------------------- |
-| `bootstrap` roots      | `tofu apply` run locally, always                               |
-| provision image        | `make publish` run locally, pushed to ECR by hand              |
-| dev `platform`, `apps` | GitHub Actions, on every push to `main`, with no approval step |
+| Part                       | How it is deployed                                             |
+| -------------------------- | -------------------------------------------------------------- |
+| `bootstrap` roots          | `tofu apply` run locally, always                               |
+| provision image            | `make publish` run locally, pushed to ECR by hand              |
+| dev `platform`, `apps`     | GitHub Actions, on every push to `main`, with no approval step |
+| staging `platform`, `apps` | GitHub Actions, on every push to `main`, with no approval step |
 
-The dev stage deploys itself. `.github/workflows/check-and-deploy.yml` runs `make check` on
-every pull request and every push to `main`; a pull request then plans both roots,
-and a push applies them and smoke-tests the stage. A merge reaches dev without
-anyone running OpenTofu, and the version that runs is pinned in the workflow
-rather than being whatever an operator has installed.
+The dev and staging stages deploy themselves after their initial bootstrap.
+`.github/workflows/check-and-deploy.yml` runs `make check` on every pull request
+and every push to `main`; a pull request then plans all four roots, and a push
+applies and smoke-tests both stages. The OpenTofu version is pinned in the
+workflow rather than taken from an operator's machine.
 
 `apps` reads `platform`'s state through `terraform_remote_state`, so ordering
-matters: the `apply-apps` job waits on `apply-platform` through a `needs:` edge, so
-it never plans against outputs an in-flight platform apply is about to change.
-Both roots are applied on every push, even one that touched only one of them. An
-empty plan costs about a minute, and it means there is no path-filter list to
-forget to update when a module moves.
+matters: `apply-dev-apps` waits on `apply-dev-platform`, and the corresponding
+staging jobs have the same edge. An apps job therefore never plans against
+outputs an in-flight platform apply is about to change. Every root is applied
+on every push, even one that touched only one of them. An empty plan costs about
+a minute, and it means there is no path-filter list to forget to update when a
+module moves.
 
-In a pull request the two plans run at once, and the apps plan is computed against
-the _last applied_ platform state rather than against this pull request's platform
-plan. A change to a platform output that apps consumes therefore shows its real
-apps plan only after platform applies.
+In a pull request all four plans run at once, and each apps plan is computed
+against its _last applied_ platform state rather than against this pull
+request's platform plan. A change to a platform output that apps consumes
+therefore shows its real apps plan only after platform applies.
 
 An apply reports success as soon as AWS accepted the change, which for an ECS
 service means a task definition was registered rather than that a task is
-serving traffic on it. `apply-apps` therefore ends by running
+serving traffic on it. Each apps apply therefore ends by running
 `scripts/wait-services-stable.sh`, which waits for every service in the cluster
 to reach steady state, and a task that never becomes healthy fails the job after
 twenty minutes. Without that wait a smoke test can pass against the revision the
@@ -387,10 +395,11 @@ names the services it is still waiting on as it polls, and every two minutes
 prints their task counts, their deployments and their recent ECS events, so a
 long wait says whether a rollout is slow or has stopped moving.
 
-`make smoke STAGE=dev` runs after it and retries for four minutes. Steady state
-covers the task; a newly created Route53 record or listener rule in front of it
-can take a moment longer. It needs no credentials at all, since every check goes
-over public HTTPS. See [Smoke-testing a stage](#smoke-testing-a-stage).
+`smoke-dev` and `smoke-staging` then call `make smoke` for their stage and retry
+for four minutes. Steady state covers the task; a newly created Route53 record
+or listener rule in front of it can take a moment longer. The smoke checks need
+no credentials because every request goes over public HTTPS. See
+[Smoke-testing a stage](#smoke-testing-a-stage).
 
 When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
 tail of every log group the stage owns into the run, so the diagnosis is where
@@ -421,6 +430,9 @@ bootstrap roots has ever been applied. No workflow names it, because its
 `terraform.tfvars` still carries `REPLACE_ME` contract addresses.
 
 See [Planned work](#planned-work) for the manual steps that remain.
+
+Staging's capacity, durability, identity and promotion choices are recorded in
+[the staging environment decision](docs/decisions/2026-09-staging-environment.md).
 
 ### First time in an account and region
 
@@ -609,10 +621,15 @@ Then, in the copy:
    `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
    CI roles are granted the state keys they may touch by prefix, so without this
    the stage's first run fails reading its own state.
-6. Update the branch protection rule on `main`. The new stage adds two required
+6. Apply the new stage's platform root locally once. The apps root reads the
+   platform's remote state, so its first CI plan cannot run until that state
+   exists. Do not apply the apps root yet; the workflow will do that after the
+   change merges.
+7. Update the branch protection rule on `main`. The new stage adds two required
    checks, `plan-bajtos-platform` and `plan-bajtos-apps`, and a rule that does
    not name them will merge a pull request whose stage plan failed.
-7. Merge. The workflow applies both roots on the same push, in order.
+8. Merge. The workflow reconciles the platform root, applies the apps root and
+   smoke-tests the stage.
 
 Prod will differ from dev inside `main.tf` rather than by being a different
 shape: multi-AZ database, deletion protection on, a larger OpenBao connection
@@ -623,18 +640,17 @@ work](#planned-work).
 
 ### Bringing up a stage
 
-Merge the stage's directories to `main`. The `platform` root applies the VPC, RDS,
-OpenBao and the secrets; the `apply-apps` job then runs, applying the six
-services.
+After the initial platform apply described above, merge the stage's directories
+to `main`. The stage's platform job reconciles the VPC, RDS, OpenBao and
+secrets; its apps job then applies the six services.
 
 The first `platform` apply is slow: it waits for the OpenBao task's cold start
 before it can initialise it, inside a synchronous Lambda call that Lambda caps at
 15 minutes. If it times out there, re-run the job — the seed phase regenerates
 nothing that already exists, which is what protects funded wallets.
 
-Nothing needs starting by hand. The push that adds the stage's directories is the
-same push the workflow acts on, so there is no gap between the configuration
-landing and the first apply.
+Nothing in the apps root needs starting by hand. The push that adds the stage's
+directories is the same push that deploys its services.
 
 ### A personal sandbox stage
 
@@ -740,9 +756,12 @@ line to edit by hand. **Commit that file and merge it.** The stage is planned by
 workflow, which sees only what is in version control, so a digest left on your
 machine is applied nowhere.
 
-Promoting the same image to prod will be a copy of that digest into
-`terraform/envs/prod/platform/terraform.tfvars`, done deliberately when the
-change is ready rather than as a side effect of a build.
+Dev and staging share an ECR repository. Promote the Lambda to staging by
+copying dev's digest into
+`terraform/envs/staging/platform/image.auto.tfvars`. The image is already in
+ECR, so the promotion needs no build or push. A production promotion will
+likewise copy the digest into
+`terraform/envs/prod/platform/terraform.tfvars` when the change is ready.
 
 ### Deploying a service
 
@@ -797,13 +816,14 @@ repository the service is published from, so the required `client_payload` is
 `service`, `digest` and `source_repo`; `commit`, `pr_url` and `run_url` are
 provenance links the commit message uses when present.
 
-Prod stays manual: a promotion is a digest copied deliberately, and a reviewable
-diff is the point.
+Staging and prod stay manual: a promotion copies dev's reviewed digest in a
+deliberate pull request.
 
 ### Confirming nothing was regenerated
 
 The most important check after any apply. Read `created_parameters` from the
-`apply-platform` job's log, or from a shell:
+stage's platform apply job, such as `apply-dev-platform` or
+`apply-staging-platform`, or from a shell:
 
 ```bash
 tofu -chdir=terraform/envs/dev/platform output created_parameters
@@ -835,8 +855,8 @@ request omits the `uninitcode=200` its ALB health check passes: ECS has to keep 
 fresh task alive long enough for the provision Lambda to initialise it, but a
 stage that has finished deploying and is still uninitialised is a failure.
 
-The same command runs in CI after every push to `main` applies dev. See [How
-each part is deployed](#how-each-part-is-deployed).
+The same command runs in CI for dev and staging after every push to `main`. See
+[How each part is deployed](#how-each-part-is-deployed).
 
 The script reads `hostname_suffix` from the stage's
 `platform/terraform.tfvars`, so it needs no Terraform state and no TFE token.
@@ -851,7 +871,7 @@ is the only service no other service addresses by DID.
 
 Run by hand it also says nothing about which revision answered. No service
 reports its build, so a stage mid-rollout can pass on the old task. In CI the
-`apply-apps` job closes that by waiting for steady state first.
+stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
@@ -933,9 +953,9 @@ Dependabot opens the pull requests, `.github/dependabot.yml` says which and how
 often, and
 [`auto-merge-dependabot.yml`](.github/workflows/auto-merge-dependabot.yml)
 merges the ones that are minor or patch bumps. The merge is squashed and armed
-through `fil-forge-bot`, so `main` moves only after `make check` and both plans
-have passed, and the push that lands applies dev the same way any other merge
-to `main` does.
+through `fil-forge-bot`, so `main` moves only after `make check` and all required
+plans have passed. The push that lands applies both shared non-prod stages the
+same way any other merge to `main` does.
 
 A major bump stays open for someone to read. So does a group whose highest
 change is a major, and so does any Dependabot branch that carries a commit
@@ -954,8 +974,8 @@ repository; the rest are work that has not been done here yet.
 
 ### Prod will need a gated apply
 
-Dev applies on merge with no confirmation, which is the point of a dev stage. Prod
-should not: an apply there wants a plan someone has read and approved.
+Dev and staging apply on merge with no confirmation. Prod should require a plan
+someone has read and approved.
 
 The shape is a GitHub Environment with required reviewers on the prod apply jobs,
 which turns the same workflow into plan-then-approve-then-apply without changing
@@ -1087,8 +1107,8 @@ balances. Where the notification goes has to be settled first.
 ### A stage's running cost is not written down
 
 A stage keeps a NAT gateway, an ALB, an RDS instance and six always-on Fargate
-tasks. Nobody has added it up, so there is no figure to weigh against multi-AZ
-in prod, a second non-prod stage, or leaving a sandbox stage running over a
+tasks. Nobody has added it up, so there is no figure for the cost of both shared
+non-prod stages, multi-AZ in prod, or leaving a sandbox stage running over a
 weekend.
 
 ### Database passwords are static and per-service
