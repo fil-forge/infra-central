@@ -516,13 +516,13 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deploy of `{0}` to a shared environment failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deploy of `{0}` failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` to a shared environment failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
                   }
                 },
                 {
