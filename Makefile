@@ -11,8 +11,8 @@
 
 # .SHELLFLAGS only takes effect on GNU Make 3.82+. macOS ships 3.81 (Apple
 # stopped updating make over the license change) and silently ignores it, so
-# a recipe that pipes or chains commands sets `set -euo pipefail` itself
-# rather than depending on this line.
+# a recipe whose correctness depends on -e or pipefail sets `set -euo pipefail`
+# itself rather than depending on this line.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
@@ -147,14 +147,15 @@ smoke:
 # invoked with no arguments, where it would read stdin and hang.
 .PHONY: check
 check:
-	@unformatted=$$(gofmt -l cmd internal); \
+	@set -euo pipefail; \
+	  unformatted=$$(gofmt -l cmd internal); \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed for:"; echo "$$unformatted"; exit 1; \
 	fi
 	go vet ./...
 	go test ./...
 	tofu -chdir=terraform fmt -check -recursive
-	set -o pipefail; git ls-files -z '*.sh' | xargs -0 -r shellcheck
+	set -euo pipefail; git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
 .PHONY: fmt
 fmt:
