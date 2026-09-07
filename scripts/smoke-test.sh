@@ -72,11 +72,11 @@ SUFFIX="$(sed -n 's/^hostname_suffix[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]
 # alone. Its public hostname is what an appliance Ingot reaches; the services in
 # the VPC call it over private DNS, which this cannot see.
 SERVICES=(
-  "sprue:sprue:/health:yes"
-  "hilt:hilt:/health:yes"
-  "swarf:swarf:/health:yes"
+  "sprue:upload:/health:yes"
+  "hilt:auth:/health:yes"
+  "swarf:revoke:/health:yes"
   "delegator:delegator:/healthcheck:yes"
-  "signing-service:signing-service:/healthcheck:no"
+  "signing-service:signer:/healthcheck:no"
   "openbao:ssm:/v1/sys/health?standbyok=true:no"
   "plc:plc:/_health:no"
 )

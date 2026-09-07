@@ -82,8 +82,8 @@ type Request struct {
 
 	// The appliance presenting itself. Piri's DID belongs to a key generated on
 	// the node, and the proof is signed by it, so neither is derivable here.
-	// Ingot's is: it is did:web:ingot.<hostname suffix>, the hostname the node
-	// already serves, which makes it a peer of hilt and sprue.
+	// Ingot's is derived from its region and the stage's filonecontent.com
+	// suffix, following the Forge service identity RFC.
 	PiriDID string `json:"piri_did,omitempty"`
 	PiriURL string `json:"piri_url,omitempty"`
 	// IngotDID is accepted only to be refused, so a caller working from the old

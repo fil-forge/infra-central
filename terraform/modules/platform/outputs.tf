@@ -12,6 +12,10 @@ output "hostname_suffix" {
   value = var.hostname_suffix
 }
 
+output "ingot_hostname_suffix" {
+  value = var.ingot_hostname_suffix
+}
+
 output "cluster_arn" {
   value = aws_ecs_cluster.this.arn
 }

@@ -58,7 +58,7 @@ hostname:
 https://plc.<hostname suffix>
 ```
 
-So `https://plc.dev.forge-sandbox.fil.one` in dev. The name follows from the stage, and
+So `https://plc.latest.dev.fil-forge.com` in dev. The name follows from the stage, and
 `tofu -chdir=terraform/envs/dev/apps output service_urls` prints it alongside the rest. The route
 carries no authentication, because a `did:plc` operation is signed by the DID's own rotation key:
 anyone can create a DID there, and nobody but the holder can move one.
@@ -128,16 +128,18 @@ appliance signed with its own Piri key, which central never holds.
 ```bash
 make onboard-appliance STAGE=dev REGION=us-east-9 \
   PIRI_DID=did:key:z6Mk… \
-  PIRI_URL=https://piri.dev.forge-sandbox.fil.one \
+  PIRI_URL=https://piri-0.latest.dev.fil-forge.com \
   PIRI_PROOF=piri-proof.txt \
   ONBOARD_ARGS="--proof-out ingot-proof.txt"
 ```
 
-The Ingot identity is not asked for. It is `did:web:ingot.<hostname suffix>`, so
-`did:web:ingot.dev.forge-sandbox.fil.one` in dev: the hostname the node already serves, derived from
-the stage, so the node operator has nothing to send and nothing to mistype. The name is per stage, so
-a stage admits one appliance. The appliance can rotate that key on its own afterwards, because its
-DID document publishes the current one.
+The Ingot identity is not asked for. Central derives the RFC identity
+`did:web:s3.<REGION>.<ingot_hostname_suffix>` from the region being onboarded
+and the stage configuration. For the example above it is
+`did:web:s3.us-east-9.latest.dev.filonecontent.com`. The node operator therefore
+has nothing to send or mistype, and multiple regions in one stage receive
+distinct identities. The appliance can rotate its key afterwards because its
+DID document publishes the current one without changing the DID.
 
 hilt and sprue each cache a resolved DID document for three hours, in process and with no eviction
 API, so a restart is the only way to clear one:

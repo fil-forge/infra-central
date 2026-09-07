@@ -12,6 +12,11 @@ variable "hostname_suffix" {
   type        = string
 }
 
+variable "ingot_hostname_suffix" {
+  description = "Suffix for region-qualified Ingot identities, e.g. latest.dev.filonecontent.com."
+  type        = string
+}
+
 variable "vpc_cidr" {
   type    = string
   default = "10.20.0.0/16"

@@ -22,15 +22,15 @@
 #   2. after you approve it, with confirmation, which performs the writes
 #
 # Run it after the appliance has provisioned its keys, so its Piri DID exists.
-# Its Ingot identity is not asked for: Ingot is did:web:ingot.<hostname suffix>,
-# the hostname the node already serves on a domain Forge owns, so central derives
-# it. One appliance per stage, until the S3 endpoint naming is settled.
+# Its Ingot identity is not asked for: central derives the RFC identity
+# did:web:s3.<region>.<stage>.dev.filonecontent.com without an operator being
+# able to mistype it.
 #
 # Usage:
 #   scripts/onboard-appliance.sh \
 #     --region us-east-9 \
 #     --piri-did did:key:z6Mk... \
-#     --piri-url https://piri.dev.forge-sandbox.fil.one \
+#     --piri-url https://piri-0.latest.dev.fil-forge.com \
 #     --piri-proof-file piri-proof.txt
 #
 # Options:

@@ -56,7 +56,7 @@ module "github_actions_iam" {
   # Every non-prod stage the workflow deploys. A stage added to
   # .github/workflows/check-and-deploy.yml has to be added here too, or its first run
   # fails reading state.
-  state_key_prefixes = ["dev"]
+  state_key_prefixes = ["dev", "staging"]
 }
 
 output "state_bucket_name" {

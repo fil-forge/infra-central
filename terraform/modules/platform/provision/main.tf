@@ -44,13 +44,14 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      FORGE_STAGE                = var.stage
-      FORGE_HOSTNAME_SUFFIX      = var.hostname_suffix
-      FORGE_DB_HOST              = var.db_host
-      FORGE_DB_PORT              = tostring(var.db_port)
-      FORGE_DB_MASTER_SECRET_ARN = var.db_master_secret_arn
-      FORGE_OPENBAO_ADDR         = var.openbao_address
-      FORGE_PRIVATE_CIDRS        = join(",", var.private_cidrs)
+      FORGE_STAGE                 = var.stage
+      FORGE_HOSTNAME_SUFFIX       = var.hostname_suffix
+      FORGE_INGOT_HOSTNAME_SUFFIX = var.ingot_hostname_suffix
+      FORGE_DB_HOST               = var.db_host
+      FORGE_DB_PORT               = tostring(var.db_port)
+      FORGE_DB_MASTER_SECRET_ARN  = var.db_master_secret_arn
+      FORGE_OPENBAO_ADDR          = var.openbao_address
+      FORGE_PRIVATE_CIDRS         = join(",", var.private_cidrs)
 
       # Used only by the onboard phase, which Terraform never invokes. The phase
       # reaches sprue and hilt at their public hostnames, built from

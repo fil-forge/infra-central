@@ -1,19 +1,17 @@
 # Non-secret per-stage configuration. Every secret in this project lives in SSM
 # and is minted by the provision Lambda, so this file is safe to commit.
 #
-# provision_image_digest is absent here on purpose: `make publish` writes it to
-# image.auto.tfvars, so iterating on the Lambda never means editing this file by
-# hand. Prod pins its digest in its own terraform.tfvars, copied from dev when a
-# change is promoted.
+# provision_image_digest is absent here on purpose. It lives in
+# image.auto.tfvars, where a promotion copies the digest already deployed to
+# dev; both stages use the same ECR repository.
 
-# The dev zone is delegated once by the DNS project. Each ephemeral stage gets
-# a label beneath it; this long-lived environment uses the RFC's `latest` label.
-zone_name = "dev.fil-forge.com"
+# The shared staging zones are delegated to Route53 in the sandbox account.
+zone_name = "staging.fil-forge.com"
 
 # Service labels follow the Forge identity RFC (upload, auth, revoke, signer,
 # delegator and indexer). Ingot uses the parallel filonecontent.com namespace.
-hostname_suffix       = "latest.dev.fil-forge.com"
-ingot_hostname_suffix = "latest.dev.filonecontent.com"
+hostname_suffix       = "staging.fil-forge.com"
+ingot_hostname_suffix = "staging.filonecontent.com"
 
 # Calibration testnet proxy addresses, carried over from smelt's
 # environments/staging/smart-contracts.env. Public on-chain addresses, and a
@@ -40,7 +38,6 @@ chain = {
 # revokes the node's unseal token. A retired label stays in the second list, and
 # docs/appliance-onboarding.md is the procedure for both.
 #
-# us-east-9 is the virtual S3 region label of the dev FilOne Appliance running
-# in us-east-2.
-appliance_regions         = ["us-east-9"]
+# eu-central-3 is the virtual S3 region label of the staging FilOne Appliance.
+appliance_regions         = ["eu-central-3"]
 retired_appliance_regions = []

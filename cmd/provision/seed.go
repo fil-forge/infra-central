@@ -217,7 +217,7 @@ func (d *deps) seedProofs(ctx context.Context, resp *Response, freshIdentities m
 	// the ALB serves, not by the did:key in the identity parameters.
 	webDID := map[string]string{}
 	for _, service := range identityServices {
-		webDID[service] = fmt.Sprintf("did:web:%s.%s", service, d.cfg.HostnameSuffix)
+		webDID[service] = "did:web:" + d.serviceHostname(service)
 	}
 
 	for _, proof := range keygen.Proofs(webDID) {

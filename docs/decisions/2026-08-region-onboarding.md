@@ -230,27 +230,25 @@ something. The steps an operator follows, and the delivery and compromise-handli
 them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,
 and handle secrets differently.
 
-## An appliance's Ingot is a stage-level did:web
+## An appliance's Ingot is a region-qualified did:web
 
-Ingot's identity is `did:web:ingot.<hostname suffix>`, so the dev appliance is
-`did:web:ingot.dev.forge-sandbox.fil.one`. That is the hostname the node already
-serves, which makes Ingot a peer of hilt and sprue rather than a name of its own
-shape, and central derives it from the same suffix `serviceIssuer` builds those
-two from. Piri keeps its `did:key` on the provider's own domain, and that split is
-deliberate: Forge owns the Ingot hostname and the operator owns Piri's.
+The [Forge service identity RFC] settled Ingot's identity as
+`did:web:s3.<REGION>.<STAGE>.dev.filonecontent.com` for dev stages and
+`did:web:s3.<REGION>.filonecontent.com` in production. This repository's dev
+stage uses the `latest` stage label, so its `us-east-9` appliance is
+`did:web:s3.us-east-9.latest.dev.filonecontent.com`. Central derives that value
+from the onboarding region and `ingot_hostname_suffix`. Piri keeps its
+`did:key` and provider URL; Forge owns the Ingot hostname while the operator
+owns Piri's key and endpoint.
 
 Two things follow. An appliance can rotate its Ingot key without telling anyone,
 because its DID document publishes the current key and the DID does not move. And
 the identity can no longer disagree with what the node is configured with, which
 removes the input an operator could mistype.
 
-The name is per stage, so **a stage holds one appliance.** A second one would
-collide on this DID and on hilt's `region TEXT UNIQUE` column. This is an interim
-name while the S3 endpoint naming under `filonecontent.com` is settled, and the
-reason to revisit it is the earlier region-derived scheme's one real advantage:
-deriving the name from the region removed the hilt row that would otherwise have
-to be corrected by hand when an identity and a region disagreed. A per-region
-name under a settled S3 domain gets that back and admits more than one appliance.
+The region is part of the name, so a stage can admit multiple appliances without
+their DIDs colliding. It also keeps the DID aligned with hilt's unique region
+row and removes a region/DID pairing an operator could mistype.
 
 The alternative was `did:key`, which the appliance mints locally and hands over in
 the onboarding exchange. It verifies with no network and no third party, and it is
@@ -363,7 +361,5 @@ Recorded here as they are settled during implementation and review.
   answers the mechanical question, since sprue has a deregister command and the delegator's allow
   list is a delete against a table this already writes, while hilt has neither. A delete command in
   hilt would replace it, and the phase's transaction is the specification for what one has to do.
-- What an appliance's Ingot did:web is named once the S3 endpoint naming under `filonecontent.com`
-  is settled. The current stage-level name admits one appliance per stage.
-
+[Forge service identity RFC]: https://github.com/fil-one/RFC/blob/main/rfcs/2026-07-forge-service-identities.md
 [RFC 21]: https://github.com/fil-one/RFC/pull/21

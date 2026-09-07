@@ -89,10 +89,11 @@ module "provision" {
   region     = local.region
   account_id = local.account_id
 
-  hostname_suffix      = var.hostname_suffix
-  chain                = var.chain
-  image_repository_url = var.provision_image_repository_url
-  image_digest         = var.provision_image_digest
+  hostname_suffix       = var.hostname_suffix
+  ingot_hostname_suffix = var.ingot_hostname_suffix
+  chain                 = var.chain
+  image_repository_url  = var.provision_image_repository_url
+  image_digest          = var.provision_image_digest
 
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.lambda_security_group_id

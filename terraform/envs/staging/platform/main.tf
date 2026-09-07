@@ -1,25 +1,21 @@
-# Prod platform.
+# Staging platform: VPC, RDS, S3, DynamoDB, ALB, OpenBao and the provision Lambda.
 #
-# Differs from dev in three ways that matter: the database is multi-AZ and
-# protected from deletion, OpenBao gets a larger connection budget, and the
-# provision image digest is pinned in terraform.tfvars, copied from dev when a
-# change is promoted rather than written by whatever was built last.
-#
-# Not deployed, and no workflow applies it. dev is applied on every push to main;
-# prod will want a gated job, and its tfvars still carry REPLACE_ME contract
-# addresses, so a plan here fails by design.
+# .github/workflows/check-and-deploy.yml applies this root on every push to main, then
+# applies envs/staging/apps, which reads its state. The two are ordered by a `needs:`
+# edge between the jobs, because apps must not plan against outputs an in-flight
+# platform apply is about to change.
 
 provider "aws" {
   region = var.region
 
   # Credentials for another account would otherwise apply a second, quietly
   # working copy of the stage there. This fails the plan instead.
-  allowed_account_ids = [module.constants.prod_account_id]
+  allowed_account_ids = [module.constants.nonprod_account_id]
 
   default_tags {
     tags = {
       Project = "forge-central"
-      Stage   = "prod"
+      Stage   = "staging"
     }
   }
 }
@@ -39,7 +35,7 @@ variable "zone_name" {
 }
 
 variable "hostname_suffix" {
-  description = "Suffix every central service hostname shares. Stated explicitly because the hosted-zone delegation and hostname shape need not match."
+  description = "Suffix every central service hostname shares. Stated explicitly because the hosted-zone delegation and stage-specific hostname shape differ."
   type        = string
 }
 
@@ -62,11 +58,6 @@ variable "chain" {
   })
 }
 
-variable "provision_image_digest" {
-  description = "Pinned in terraform.tfvars. `make publish` prints the line to paste."
-  type        = string
-}
-
 variable "appliance_regions" {
   description = "Region labels of the appliances this stage serves, in terraform.tfvars. See docs/appliance-onboarding.md."
   type        = list(string)
@@ -79,10 +70,16 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+# Seeded from the digest already deployed to dev. Promote a Lambda build to
+# staging by copying dev's provision_image_digest after it is healthy there.
+variable "provision_image_digest" {
+  type = string
+}
+
 module "platform" {
   source = "../../../modules/platform"
 
-  stage                 = "prod"
+  stage                 = "staging"
   zone_name             = var.zone_name
   hostname_suffix       = var.hostname_suffix
   ingot_hostname_suffix = var.ingot_hostname_suffix
@@ -90,7 +87,7 @@ module "platform" {
   # The repository the bootstrap workspace for this account and region created.
   # Derived rather than copied from its output: a Lambda can pull only from its
   # own account and region, so those two values are the whole address.
-  provision_image_repository_url = "${module.constants.prod_account_id}.dkr.ecr.${var.region}.amazonaws.com/${module.constants.provision_repository_name}"
+  provision_image_repository_url = "${module.constants.nonprod_account_id}.dkr.ecr.${var.region}.amazonaws.com/${module.constants.provision_repository_name}"
   provision_image_digest         = var.provision_image_digest
 
   chain = var.chain
@@ -98,32 +95,24 @@ module "platform" {
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
 
-  # Three availability zones with a NAT gateway in each, where dev accepts two
-  # and a single shared gateway. Appliances depend on this stage being
-  # reachable, so losing a zone must not cost it egress.
-  #
-  # az_count is fixed when the stage is created. Changing it later renumbers
-  # the private subnets and replaces the database along with them; see the
-  # network module's variable description before touching it.
-  az_count           = 3
-  nat_gateway_per_az = true
-
+  # Staging keeps one database instance, while giving the shared Postgres and
+  # OpenBao workload twice dev's memory and connection budget.
   db_instance_class        = "db.t4g.small"
-  db_allocated_storage     = 50
-  db_multi_az              = true
-  db_backup_retention_days = 30
+  db_allocated_storage     = 20
+  db_multi_az              = false
+  db_backup_retention_days = 7
 
-  # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
-  # storage is this database.
+  # Staging holds the root of trust for an appliance. Protect its RDS instance,
+  # ALB and DynamoDB tables from deletion, retain a final database snapshot and
+  # enable point-in-time recovery on both tables.
   protect_stateful_resources = true
 
-  # A db.t4g.small allows roughly 225 connections, so 24 for OpenBao still
-  # leaves ample room for the application services.
-  openbao_max_parallel = 24
+  # A db.t4g.small allows roughly 225 connections. OpenBao takes 16, leaving
+  # ample headroom for the application services' connection pools.
+  openbao_max_parallel = 16
 
-  container_insights = true
-
-  # Two static addresses an appliance operator can allowlist once, and an edge
-  # that takes a flood before the load balancer does. Dev has neither need.
-  enable_global_accelerator = true
+  # Bumped to re-issue proofs with the stable service identities from the Forge
+  # identity RFC. Stored proofs retain their original issuer and audience, so a
+  # hostname migration must explicitly replace them.
+  seed_trigger = "3"
 }
