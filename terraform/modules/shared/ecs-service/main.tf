@@ -30,22 +30,24 @@ locals {
 
   # format() rather than interpolation because these are *shell* variable
   # references: the container expands $IDENTITY_PEM at startup, Terraform must
-  # not try to. %% is a literal percent for printf.
+  # not try to. %% is a literal percent for printf. The destination path is
+  # single-quoted, and variables.tf restricts each filename to a plain
+  # basename, so the caller's value never reaches the shell as syntax.
   file_writes = concat(
     [
       for env_var, filename in var.secret_files :
-      format("printf '%%s' \"$%s\" > %s/%s && chmod 400 %s/%s",
+      format("printf '%%s' \"$%s\" > '%s/%s' && chmod 400 '%s/%s'",
       env_var, local.secret_dir, filename, local.secret_dir, filename)
     ],
     [
       for env_var, filename in var.secret_files_base64 :
-      format("printf '%%s' \"$%s\" | base64 -d > %s/%s && chmod 400 %s/%s",
+      format("printf '%%s' \"$%s\" | base64 -d > '%s/%s' && chmod 400 '%s/%s'",
       env_var, local.secret_dir, filename, local.secret_dir, filename)
     ],
   )
 
   wrapper_prelude = length(local.file_writes) > 0 ? join(" && ", concat(
-    [format("umask 077 && mkdir -p %s", local.secret_dir)],
+    [format("umask 077 && mkdir -p '%s'", local.secret_dir)],
     local.file_writes,
   )) : ""
 

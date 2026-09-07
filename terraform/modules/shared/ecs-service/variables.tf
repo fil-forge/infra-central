@@ -63,6 +63,10 @@ variable "secret_files" {
     must also appear in `secrets`, and setting this requires shell_command.
 
     Use secret_files_base64 for a value whose bytes are not text.
+
+    A filename is a plain basename: letters, digits, dot, underscore and
+    hyphen, not starting with a dot. It ends up inside the wrapper's shell
+    string, so nothing else is accepted.
   EOT
   type        = map(string)
   default     = {}
@@ -70,6 +74,11 @@ variable "secret_files" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for filename in values(var.secret_files) : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", filename))])
+    error_message = "Every secret_files value must be a plain basename matching ^[A-Za-z0-9][A-Za-z0-9._-]*$. The wrapper interpolates it into a /bin/sh -c command line, so a slash, a space or a shell metacharacter would escape the secret directory or break the command."
   }
 }
 
@@ -82,6 +91,8 @@ variable "secret_files_base64" {
     environment variable, and an environment variable cannot hold a NUL byte:
     runc refuses to create the container and reports only the variable's name.
     The delegator's two UCAN proofs are bare DAG-CBOR, so they take this path.
+
+    Filenames follow the same rule as secret_files.
   EOT
   type        = map(string)
   default     = {}
@@ -89,6 +100,11 @@ variable "secret_files_base64" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files_base64) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files_base64 key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for filename in values(var.secret_files_base64) : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", filename))])
+    error_message = "Every secret_files_base64 value must be a plain basename matching ^[A-Za-z0-9][A-Za-z0-9._-]*$. The wrapper interpolates it into a /bin/sh -c command line, so a slash, a space or a shell metacharacter would escape the secret directory or break the command."
   }
 }
 
