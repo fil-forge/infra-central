@@ -137,9 +137,20 @@ variable "health_check_start_period" {
 }
 
 variable "hostname" {
-  description = "Public hostname. Null gives the service no ALB route and no public DNS, leaving it reachable over the private namespace alone."
+  description = "Public hostname. Null gives the service no ALB route and no public DNS, leaving it reachable over the private namespace alone. Setting it requires listener_arn, listener_priority, route53_zone_id, alb_dns_name and alb_zone_id."
   type        = string
   default     = null
+
+  validation {
+    condition = var.hostname == null || alltrue([
+      var.listener_arn != null,
+      var.listener_priority != null,
+      var.route53_zone_id != null,
+      var.alb_dns_name != null,
+      var.alb_zone_id != null,
+    ])
+    error_message = "hostname creates an ALB listener rule and a Route53 alias record, so listener_arn, listener_priority, route53_zone_id, alb_dns_name and alb_zone_id must all be set with it. Left null, the provider rejects them at apply with an error that does not name the missing input."
+  }
 }
 
 variable "listener_arn" {
