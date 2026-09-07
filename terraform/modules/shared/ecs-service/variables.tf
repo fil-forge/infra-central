@@ -64,9 +64,10 @@ variable "secret_files" {
 
     Use secret_files_base64 for a value whose bytes are not text.
 
-    A filename is a plain basename: letters, digits, dot, underscore and
-    hyphen, not starting with a dot. It ends up inside the wrapper's shell
-    string, so nothing else is accepted.
+    A key is a shell identifier: letters, digits and underscore, starting with
+    a letter or underscore. A filename is a plain basename: letters, digits,
+    dot, underscore and hyphen, starting with a letter or digit. Both end up
+    inside the wrapper's shell string, so nothing else is accepted.
   EOT
   type        = map(string)
   default     = {}
@@ -74,6 +75,11 @@ variable "secret_files" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for env_var in keys(var.secret_files) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", env_var))])
+    error_message = "Every secret_files key must be a shell identifier matching ^[A-Za-z_][A-Za-z0-9_]*$. The wrapper reads it as \"$NAME\" inside a /bin/sh -c command line, so a hyphen, a space or a quote would expand to the wrong value or break the command."
   }
 
   validation {
@@ -92,7 +98,7 @@ variable "secret_files_base64" {
     runc refuses to create the container and reports only the variable's name.
     The delegator's two UCAN proofs are bare DAG-CBOR, so they take this path.
 
-    Filenames follow the same rule as secret_files.
+    Keys and filenames follow the same rules as secret_files.
   EOT
   type        = map(string)
   default     = {}
@@ -100,6 +106,11 @@ variable "secret_files_base64" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files_base64) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files_base64 key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for env_var in keys(var.secret_files_base64) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", env_var))])
+    error_message = "Every secret_files_base64 key must be a shell identifier matching ^[A-Za-z_][A-Za-z0-9_]*$. The wrapper reads it as \"$NAME\" inside a /bin/sh -c command line, so a hyphen, a space or a quote would expand to the wrong value or break the command."
   }
 
   validation {
