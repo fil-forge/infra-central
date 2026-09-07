@@ -110,15 +110,10 @@ module "platform" {
   # leaves headroom for sprue, hilt and swarf at 10 each.
   openbao_max_parallel = 8
 
-  # Bumped to re-issue proofs with the stable service identities from the Forge
-  # identity RFC. Stored proofs retain their original issuer and audience, so a
-  # hostname migration must explicitly replace them.
-  seed_trigger = "3"
-
-  # Bumped as part of the dev reset that destroys the RDS instance OpenBao's
-  # database lives on. The vault phase does not run on its own just because
-  # OpenBao's storage came back empty, so without this its KV mount, transit
-  # engine and per-region transit keys stay unconfigured after the instance is
-  # recreated.
-  vault_trigger = "2"
+  # Both invocations re-run only when their input changes, so replacing the
+  # RDS instance does not run them on its own: the fresh instance would get no
+  # databases and OpenBao would never be initialised. Bump both together on
+  # every dev reset. See docs/dev-reset.md.
+  seed_trigger  = "5"
+  vault_trigger = "5"
 }
