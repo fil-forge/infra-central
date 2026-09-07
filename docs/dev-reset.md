@@ -1,119 +1,169 @@
-# Resetting dev's central and appliance state
+# Resetting dev's data stores for a new appliance
 
-infra-central#85 and infra-nodes#31 move every central service's `did:web` and
-every region's Ingot `did:web` onto the hostnames in
-[RFC 16](https://github.com/fil-one/RFC/blob/main/rfcs/2026-07-forge-service-identities.md).
-The DID changes because the hostname changes, not because a service's signing
-key is rotated, so central's `identity` parameters are never touched here.
-What has to go is everything addressed to the old hostnames: the tenant,
-bucket and provider data in Postgres, the delegator's DynamoDB rows, sprue's S3
-objects, and every UCAN proof signed for the old audience.
+Run this when the dev FilOne Appliance is rebuilt from scratch and central has to
+forget the old node. Region retirement does not yet deregister a node from sprue
+and the delegator, so the shortcut in dev is to empty every store that holds
+node data and let the next apply rebuild them.
 
-AWS infra stays up throughout. Only the RDS instance, the two DynamoDB tables
-and the three S3 buckets get destroyed and recreated; the VPC, the ALB, the
-ECS cluster and the Route53 zones are untouched.
+Postgres is private to the VPC and nobody holds a client for it, so the RDS
+instance is deleted and recreated rather than its databases dropped. OpenBao
+stores its data on that instance, so it comes back uninitialised and the vault
+phase has to run again.
+
+AWS infra stays up throughout. The VPC, the ALB, the ECS cluster, the Lambda and
+the Route53 zones are untouched. The services crash-loop from the moment the
+instance goes until the apply brings it back, which is fine in dev.
 
 ## What survives
 
 - **`signing-service/payer-key` and `delegator/transactor-key`.** Real funds
-  live at these addresses, and nothing in this reset deletes or rotates them.
-  Check both balances before starting:
+  live at these addresses, and nothing here deletes or rotates them. Check both
+  balances before starting:
 
   ```bash
   aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
   aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
   ```
-- **Every central service's `identity` key.** `sprue`, `hilt`, `swarf`,
-  `delegator`, `signing-service`, `indexer` and `etracker` keep the private key
-  they were seeded with. Their `did:web` changes on its own once the new
-  hostnames are live, because the DID is derived from the hostname, not stored
-  alongside the key.
+- **Every central service's `identity` key and `postgres-dsn`.** The seed phase
+  recreates each role on the new instance and applies the stored password
+  unconditionally, so the DSNs the services already read keep working.
+- **`openbao/root-token`, `openbao/recovery-keys`, `hilt/vault-secret-id`.**
+  All three become stale when OpenBao's storage is wiped, and the vault phase
+  overwrites each of them itself: it initialises the new OpenBao and stores the
+  new root token, and it validates hilt's secret_id before reusing it, issuing a
+  new one when the check fails.
+- **`appliance/us-east-9/unseal-token.accessor`.** The token behind it dies
+  with OpenBao. The mint script looks the accessor up, finds no token, and
+  reports `action: mint`, so no `--reissue` is needed.
+- **The three central proofs** under `delegator/` and `hilt/`. Their issuer and
+  audience are unchanged.
 
 ## What gets wiped
 
-- The five databases on the shared RDS instance: `sprue`, `hilt`, `swarf`,
-  `plc`, `openbao`. Losing `openbao`'s database means OpenBao loses its KV
-  mount, its transit engine and every region's transit key, so it needs full
-  reinitialization, not just a restart.
-- The delegator's two DynamoDB tables, `allow_list` and `provider_info`.
+- The RDS instance `fc-dev`, and with it the five databases `sprue`, `hilt`,
+  `swarf`, `plc` and `openbao`, plus the master secret RDS manages.
+- The delegator's two DynamoDB tables. The allow list holds the old node's Piri
+  DID, and recreating both empty costs nothing.
 - sprue's three S3 buckets. They hold no version history, so this is not
   reversible.
-- Three central proofs, addressed to hostnames that are about to stop being
-  the DID: `delegator/indexing-service-proof`, `delegator/egress-tracking-proof`,
-  `hilt/upload-proof`.
-- Each already-onboarded region's stored delegation,
-  `appliance/<region>/hilt-ingot-s3-proof`. Its audience is the region's Ingot
-  DID, and that DID is changing under infra-nodes#31, so the stored copy would
-  otherwise be silently reused for an audience that no longer resolves to the
-  node presenting it.
+- Two SSM entries under the region's prefix: the stored delegation
+  `hilt-ingot-s3-proof` with its `.issuer` sidecar, and every Piri DID recorded
+  under `piri/`. The delegation would still verify, since neither hilt's key
+  nor the Ingot DID changed, but the old node is gone and nothing holds the
+  previous copy. Deleting it makes the onboard log "issued hilt's S3
+  delegation to the appliance", which is the signal the last step checks for.
 
-Dev currently onboards one region, `us-east-9`. Repeat the per-region steps
-below for any other region that shows up in `appliance_regions` in
-`terraform/envs/dev/platform/terraform.tfvars` by the time this runs.
+Dev currently onboards one region, `us-east-9`. Repeat the per-region steps for
+any other region in `appliance_regions` in
+`terraform/envs/dev/platform/terraform.tfvars`.
 
 ## Procedure
 
-Run every `tofu` command from a checkout of the `new-service-identities`
-branch (infra-central#85), from `terraform/envs/dev/platform`.
+Have the pull request from step 3 open and approved before step 1. Once the
+instance is gone, any other push to `main` (an image bump, say) applies and
+recreates it without running seed, and dev stays broken until the trigger bump
+merges. Steps 1 to 4 belong in one sitting.
 
-### 1. Destroy the data stores
+### 1. Delete the data stores
+
+The `aws` CLI rather than `tofu destroy -target`. A targeted destroy also
+destroys everything that depends on the target, and the provision Lambda, both
+of its invocations and the OpenBao service all depend on the instance. Deleting
+out of band leaves the state alone; the next plan sees the instance missing and
+schedules a create. Dev has `protect_stateful_resources = false`, so no deletion
+protection or final snapshot stands in the way.
 
 ```bash
-tofu -chdir=terraform/envs/dev/platform destroy \
-  -target=module.platform.module.database.aws_db_instance.this \
-  -target=module.platform.module.storage.aws_dynamodb_table.allow_list \
-  -target=module.platform.module.storage.aws_dynamodb_table.provider_info \
-  -target=module.platform.module.storage.aws_s3_bucket.this
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+aws rds delete-db-instance --db-instance-identifier fc-dev \
+  --skip-final-snapshot --delete-automated-backups \
+  --query 'DBInstance.DBInstanceStatus' --output text
+
+for table in fc-dev-delegator-allow-list fc-dev-delegator-provider-info; do
+  aws dynamodb delete-table --table-name "$table" \
+    --query 'TableDescription.TableStatus' --output text
+done
+
+for bucket in agent-message delegation upload-shards; do
+  aws s3 rm "s3://fc-dev-${bucket}-${ACCOUNT}" --recursive
+done
 ```
 
-Dev has `protect_stateful_resources = false`, so nothing blocks this: no
-deletion protection, no final snapshot, and the S3 buckets' `force_destroy`
-purges their objects before the buckets themselves go.
+The buckets stay; only their objects go. The instance takes several minutes to
+delete, and the apply in step 4 cannot create its replacement while the old
+one still exists under the same identifier:
 
-### 2. Delete the stale proofs
+```bash
+aws rds wait db-instance-deleted --db-instance-identifier fc-dev
+```
 
-Do this right before merging, in the same sitting as the merge. Dev breaks the
-moment a running task restarts and can't find a proof it expects, and that's
-expected — apply-apps is what puts it back together.
+### 2. Delete the region's node records
 
 ```bash
 aws ssm delete-parameters --names \
-  /forge-central/dev/delegator/indexing-service-proof \
-  /forge-central/dev/delegator/egress-tracking-proof \
-  /forge-central/dev/hilt/upload-proof
+  /forge-central/dev/appliance/us-east-9/hilt-ingot-s3-proof \
+  /forge-central/dev/appliance/us-east-9/hilt-ingot-s3-proof.issuer
 
-aws ssm delete-parameter --name /forge-central/dev/appliance/us-east-9/hilt-ingot-s3-proof
+aws ssm get-parameters-by-path --path /forge-central/dev/appliance/us-east-9/piri \
+  --query 'Parameters[].Name' --output text \
+  | tr '\t' '\n' | sed -e '/^None$/d' -e '/^$/d' \
+  | xargs -r -n 10 aws ssm delete-parameters --names
 ```
 
-### 3. Force the vault phase to run again
+Leave `unseal-token.accessor` where it is, for the reason given above.
 
-`terraform/envs/dev/platform/main.tf`'s `module "platform"` block already sets
-`seed_trigger = "3"` for this PR's proof reissue. It has no `vault_trigger`
-line yet, so the vault phase — the one that reconfigures OpenBao's KV mount,
-transit engine and per-region transit keys — has no reason to run again even
-though OpenBao's database was just destroyed. Add one:
+### 3. Bump both Lambda triggers
+
+Both `aws_lambda_invocation` resources in `terraform/modules/platform/main.tf`
+re-invoke only when their input changes. Replacing the instance changes the
+Lambda's environment and nothing in either input, so a plain apply would create
+the instance and skip both phases: no databases, and an OpenBao that never
+initialises. Bump both values in `terraform/envs/dev/platform/main.tf`:
 
 ```hcl
-  seed_trigger  = "3"
-  vault_trigger = "2"
+  seed_trigger  = "4"
+  vault_trigger = "3"
 ```
 
-### 4. Merge infra-central#85
+Seed creates the five databases and roles. Vault initialises OpenBao, mounts
+hilt's KV store and the transit engine, reissues hilt's AppRole credentials and
+recreates the `appliance-unseal-us-east-9` transit key and policy.
 
-The merge's apply recreates the five Postgres databases and the DynamoDB
-tables and S3 buckets destroyed in step 1 (a plain apply reconciles every
-resource in the root, not just the ones a trigger touched), reissues the three
-proofs and the appliance delegation deleted in step 2, reinitializes OpenBao,
-and rewrites every service's hostname and task definition. `apply-platform`
-updates the provision Lambda's hostname suffixes before invoking it, so the
-one push is enough; `apply-apps` runs after and ends with
-`wait-services-stable.sh` and a smoke test.
+State needs no repair after step 1. Every plan starts by refreshing each
+resource from AWS, and one AWS reports as gone is dropped from state and planned
+as a create. Confirm that from the branch once the instance has finished
+deleting:
 
-### 5. Force a new deployment of everything anyway
+```bash
+tofu -chdir=terraform/envs/dev/platform plan -input=false
+```
 
-Confirms every task is running against the fresh state rather than a cached
-connection or a cached DID document, regardless of which services already got
-a new task definition from step 4:
+Expect three creates (the instance and the two tables), the two invocations
+replaced by the trigger bump, and one in-place update of the Lambda for the new
+master secret's ARN. Anything else is worth reading before the merge applies it.
+
+### 4. Merge
+
+`apply-dev-platform` recreates the instance and the tables, runs seed, waits for
+the OpenBao task to serve, runs vault, and the apps apply follows. Read the
+`created_parameters` output in the job log: it should name only the OpenBao root
+token, the recovery keys, hilt's secret_id and the transit key.
+
+**If the platform apply fails on "waiting for openbao to serve"**, the OpenBao
+task spent the outage crash-looping and ECS has backed off its restarts past the
+four minutes the phase waits. Start a fresh task and re-run the failed job. A
+failed invocation is not recorded in state, so the rerun retries it:
+
+```bash
+aws ecs update-service --cluster fc-dev --service fc-dev-openbao --force-new-deployment
+```
+
+### 5. Force a new deployment of everything
+
+No task definition changed, so the apps apply rolled nothing. hilt in particular
+is still running against the secret_id it read at its last start, and the other
+services may hold connections from before the instance was replaced.
 
 ```bash
 CLUSTER=fc-dev
@@ -128,19 +178,28 @@ aws ecs list-services --cluster "$CLUSTER" --query 'serviceArns[]' --output text
     done
 
 scripts/wait-services-stable.sh "$CLUSTER"
+make smoke STAGE=dev
 ```
 
-### 6. Merge infra-nodes#31 and boot a new node
+### 6. Mint the new node's unseal token
 
-Follow infra-nodes' own runbook. The node's central addresses and its
-OpenBao seal address both move under that PR, so a node built from the
-old config can't reach the reset stage.
-
-### 7. Re-onboard the region
+Once the node's own apply has allocated its Elastic IP:
 
 ```bash
 make mint-appliance-token STAGE=dev REGION=us-east-9 NODE_IP=<node's Elastic IP>
+```
 
+The plan prints the old accessor with `live: false` and `Action: mint`. If it
+says `refuse`, OpenBao still holds the old token, which means its storage was
+not wiped; stop and find out why. Hand the wrapping token to the node operator
+and follow infra-nodes' runbook for the node's bring-up.
+
+### 7. Register the node
+
+Run once the node has provisioned its keys. sprue is empty, so the Piri proof is
+required:
+
+```bash
 make onboard-appliance STAGE=dev REGION=us-east-9 \
   PIRI_DID=<from the new node> \
   PIRI_URL=<from the new node> \
@@ -148,11 +207,18 @@ make onboard-appliance STAGE=dev REGION=us-east-9 \
   ONBOARD_ARGS="--proof-out ingot-proof.txt"
 ```
 
-The appliance delegation parameter is gone, so this issues a fresh one rather
-than returning the old one. The log line to look for is **"issued hilt's S3
-delegation to the appliance"**; if it instead says "returning the delegation
-issued earlier", step 2's delete didn't take and the stored copy is still
-addressed to the retired Ingot DID.
+The log line to look for is **"issued hilt's S3 delegation to the appliance"**.
+"returning the delegation issued earlier" means step 2's delete didn't take.
+
+hilt and sprue cache a resolved DID document for three hours, and the Ingot's
+document now publishes a new key:
+
+```bash
+aws ecs update-service --cluster fc-dev --service fc-dev-hilt --force-new-deployment
+aws ecs update-service --cluster fc-dev --service fc-dev-sprue --force-new-deployment
+```
+
+Hand `ingot-proof.txt` to the node operator for `store-hilt-proof.sh`.
 
 ### 8. Confirm
 
