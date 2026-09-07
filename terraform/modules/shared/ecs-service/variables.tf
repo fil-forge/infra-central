@@ -63,6 +63,11 @@ variable "secret_files" {
     must also appear in `secrets`, and setting this requires shell_command.
 
     Use secret_files_base64 for a value whose bytes are not text.
+
+    A key is a shell identifier: letters, digits and underscore, starting with
+    a letter or underscore. A filename is a plain basename: letters, digits,
+    dot, underscore and hyphen, starting with a letter or digit. Both end up
+    inside the wrapper's shell string, so nothing else is accepted.
   EOT
   type        = map(string)
   default     = {}
@@ -70,6 +75,16 @@ variable "secret_files" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for env_var in keys(var.secret_files) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", env_var))])
+    error_message = "Every secret_files key must be a shell identifier matching ^[A-Za-z_][A-Za-z0-9_]*$. The wrapper reads it as \"$NAME\" inside a /bin/sh -c command line, so a hyphen, a space or a quote would expand to the wrong value or break the command."
+  }
+
+  validation {
+    condition     = alltrue([for filename in values(var.secret_files) : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", filename))])
+    error_message = "Every secret_files value must be a plain basename matching ^[A-Za-z0-9][A-Za-z0-9._-]*$. The wrapper interpolates it into a /bin/sh -c command line, so a slash, a space or a shell metacharacter would escape the secret directory or break the command."
   }
 }
 
@@ -82,6 +97,8 @@ variable "secret_files_base64" {
     environment variable, and an environment variable cannot hold a NUL byte:
     runc refuses to create the container and reports only the variable's name.
     The delegator's two UCAN proofs are bare DAG-CBOR, so they take this path.
+
+    Keys and filenames follow the same rules as secret_files.
   EOT
   type        = map(string)
   default     = {}
@@ -89,6 +106,16 @@ variable "secret_files_base64" {
   validation {
     condition     = alltrue([for env_var in keys(var.secret_files_base64) : contains(keys(var.secrets), env_var)])
     error_message = "Every secret_files_base64 key must also be a secrets key: the wrapper writes an environment variable to a file, so ECS has to inject it first. A missing entry writes an empty file and the service fails at startup with an unhelpful parse error."
+  }
+
+  validation {
+    condition     = alltrue([for env_var in keys(var.secret_files_base64) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", env_var))])
+    error_message = "Every secret_files_base64 key must be a shell identifier matching ^[A-Za-z_][A-Za-z0-9_]*$. The wrapper reads it as \"$NAME\" inside a /bin/sh -c command line, so a hyphen, a space or a quote would expand to the wrong value or break the command."
+  }
+
+  validation {
+    condition     = alltrue([for filename in values(var.secret_files_base64) : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", filename))])
+    error_message = "Every secret_files_base64 value must be a plain basename matching ^[A-Za-z0-9][A-Za-z0-9._-]*$. The wrapper interpolates it into a /bin/sh -c command line, so a slash, a space or a shell metacharacter would escape the secret directory or break the command."
   }
 }
 
@@ -121,9 +148,20 @@ variable "health_check_start_period" {
 }
 
 variable "hostname" {
-  description = "Public hostname. Null gives the service no ALB route and no public DNS, leaving it reachable over the private namespace alone."
+  description = "Public hostname. Null gives the service no ALB route and no public DNS, leaving it reachable over the private namespace alone. Setting it requires listener_arn, listener_priority, route53_zone_id, alb_dns_name and alb_zone_id."
   type        = string
   default     = null
+
+  validation {
+    condition = var.hostname == null || alltrue([
+      var.listener_arn != null,
+      var.listener_priority != null,
+      var.route53_zone_id != null,
+      var.alb_dns_name != null,
+      var.alb_zone_id != null,
+    ])
+    error_message = "hostname creates an ALB listener rule and a Route53 alias record, so listener_arn, listener_priority, route53_zone_id, alb_dns_name and alb_zone_id must all be set with it. Left null, the provider rejects them at apply with an error that does not name the missing input."
+  }
 }
 
 variable "listener_arn" {
