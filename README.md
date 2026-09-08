@@ -970,14 +970,14 @@ head's decision.
 ## Planned work
 
 Deliberate compromises and open questions, tracked in Linear. Each ticket carries
-the problem, the work and the acceptance criteria; the two items that need a
-change outside this repository are FIL-1091 and FIL-1154.
+the problem, the work and the acceptance criteria, and says when the change
+belongs in a service repository rather than here.
 
 - [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the Forge Central prod stage with a gated apply, and decide whether RDS gets dedicated subnets
 - [FIL-1156](https://linear.app/filecoin-foundation/issue/FIL-1156) Narrow the apply role's IAM policy
 - [FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) Tooling for removing an appliance node from the network
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
-- [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) hilt authenticates to OpenBao with AWS IAM auth
+- [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) Hilt authenticates to OpenBao with AWS IAM auth
 - [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
 - [FIL-1150](https://linear.app/filecoin-foundation/issue/FIL-1150) Enable the OpenBao audit log on Forge Central
 - [FIL-1157](https://linear.app/filecoin-foundation/issue/FIL-1157) Decide the OpenBao availability target for Forge Central
@@ -1008,92 +1008,6 @@ diff is what re-running the thing that mints wallets should cost, and it stays
 visible afterwards. The alternative — a workflow input anyone with write access
 could set — puts that one text field away. A `workflow_dispatch` input would be the
 middle ground if the merge ever proves too slow.
-
-### OpenBao runs without an audit log
-
-Nothing records who read or wrote which secret. The provision Lambda used to
-enable a `file` device pointed at stdout, so the audit log landed in the task's
-CloudWatch log group, but OpenBao 2.x rejects audit devices created over the
-API: a file device writes to an arbitrary path and a socket device to an
-arbitrary socket, which it treats as an operator's decision rather than an API
-caller's.
-
-The replacement is an `audit` stanza in the server config, which
-`modules/platform/openbao` already renders at task start. Two things need
-checking before it goes in. A device that cannot write makes OpenBao reject
-requests, so stdout under Fargate has to be confirmed as a sink that never
-blocks or fills. And declarative stanzas were not applied at first boot in
-2.5.0-beta
-([openbao#2168](https://github.com/openbao/openbao/issues/2168)), so 2.6.0 needs
-verifying against a fresh instance rather than one that has been through a
-`SIGHUP`.
-
-### OpenBao's availability target is open
-
-Under [fil-one/RFC#21](https://github.com/fil-one/RFC/pull/21) a regional
-appliance cannot boot while central OpenBao is unreachable, though steady-state
-regional reads never call it. This deployment runs a single task against a
-multi-AZ database, so a task replacement is a short outage on the boot path
-only. Raising it needs `ha_enabled` in the storage stanza; whether that is
-warranted is the RFC's own open question.
-
-### There is no restore procedure for RDS
-
-Backups run: seven days of automated snapshots by default, one in dev, and a
-final snapshot on delete unless a stage sets `skip_final_snapshot`. Nothing says
-how to use them. A restore is also more than the services' data, because
-OpenBao's storage lives in the same instance: rolling the database back rolls
-back hilt's AppRole and the root of trust regional appliances unseal against.
-Write the procedure, and decide as part of it whether OpenBao's storage should
-move to an instance of its own.
-
-### Nothing alerts
-
-Logs reach CloudWatch and no alarm reads them. A task that crash-loops, a health
-check that starts failing, a wallet that runs out of gas: each is visible to
-someone looking, and none of them announces itself. The smallest set worth
-having is probably the ECS running count per service and the two wallet
-balances. Where the notification goes has to be settled first.
-
-### A stage's running cost is not written down
-
-A stage keeps a NAT gateway, an ALB, an RDS instance and six always-on Fargate
-tasks. Nobody has added it up, so there is no figure for the cost of both shared
-non-prod stages, multi-AZ in prod, or leaving a sandbox stage running over a
-weekend.
-
-### Database passwords are static and per-service
-
-The seed phase mints one Postgres password per service and leaves it in SSM,
-where it stays until somebody rotates it by hand. RDS IAM authentication would
-replace each one with a token minted from the task role and good for fifteen
-minutes, so there would be no standing database credential to store, distribute
-or leak. It is not a Terraform-only change: the roles need `rds_iam` granted,
-the services need to assemble a DSN at startup rather than read a finished one
-from SSM, and each driver needs checking for whether it can refresh a token
-under a connection pool that outlives it.
-
-### Postgres TLS rides on an engine default
-
-Connections are encrypted because RDS Postgres 16 ships `rds.force_ssl=1` and
-the instance uses the default parameter group, which pins nothing. A parameter
-group owned here, saying so explicitly, would survive that default changing
-under a future engine upgrade. Note what it would not buy: the services connect
-with `sslmode=require`, and plc with `no-verify`, which encrypts without
-checking who is on the other end. Certificate verification means shipping the
-RDS bundle and moving to `verify-full`, which is work in each service rather
-than here.
-
-### The database shares subnets with the services it serves
-
-RDS sits in the same private subnets as every task and the provision Lambda.
-The separation is entirely the security group's: 5432 admits the service group
-and the Lambda group, and nothing else. That is a real control but a single one,
-where dedicated subnets with no route out would make the boundary structural.
-Moving a live instance is not possible — a new subnet group replaces it, and
-this instance is OpenBao's storage — so this is either a decision taken when the
-next stage is built from scratch, or it is the paragraph that says the existing
-arrangement was chosen rather than overlooked.
 
 ## Related
 
