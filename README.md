@@ -969,78 +969,29 @@ head's decision.
 
 ## Planned work
 
-Deliberate compromises and open questions. Some need a change outside this
-repository; the rest are work that has not been done here yet.
+Deliberate compromises and open questions, tracked in Linear. Each ticket carries
+the problem, the work and the acceptance criteria; the two items that need a
+change outside this repository are FIL-1091 and FIL-1154.
 
-### Prod will need a gated apply
+- [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the Forge Central prod stage with a gated apply, and decide whether RDS gets dedicated subnets
+- [FIL-1156](https://linear.app/filecoin-foundation/issue/FIL-1156) Narrow the apply role's IAM policy
+- [FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) Tooling for removing an appliance node from the network
+- [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
+- [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) hilt authenticates to OpenBao with AWS IAM auth
+- [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
+- [FIL-1150](https://linear.app/filecoin-foundation/issue/FIL-1150) Enable the OpenBao audit log on Forge Central
+- [FIL-1157](https://linear.app/filecoin-foundation/issue/FIL-1157) Decide the OpenBao availability target for Forge Central
+- [FIL-1149](https://linear.app/filecoin-foundation/issue/FIL-1149) Write and rehearse the RDS restore procedure
+- [FIL-1151](https://linear.app/filecoin-foundation/issue/FIL-1151) Grafana alarms for Forge Central services
+- [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Expose metrics from swarf, delegator and piri-signing-service
+- [FIL-1153](https://linear.app/filecoin-foundation/issue/FIL-1153) Write down the running cost of a Forge Central stage
+- [FIL-1160](https://linear.app/filecoin-foundation/issue/FIL-1160) Replace static Postgres passwords with RDS IAM authentication
+- [FIL-1155](https://linear.app/filecoin-foundation/issue/FIL-1155) Own the RDS parameter group and pin `rds.force_ssl`
+- [FIL-1161](https://linear.app/filecoin-foundation/issue/FIL-1161) Verify the RDS server certificate in every Forge service
+- [FIL-1162](https://linear.app/filecoin-foundation/issue/FIL-1162) Zero-downtime upgrades of Forge Central services
+- [FIL-1158](https://linear.app/filecoin-foundation/issue/FIL-1158) Automate promotion of Forge Central from dev to staging
 
-Dev and staging apply on merge with no confirmation. Prod should require a plan
-someone has read and approved.
-
-The shape is a GitHub Environment with required reviewers on the prod apply jobs,
-which turns the same workflow into plan-then-approve-then-apply without changing
-how dev behaves. Worth doing in the same change that first stands prod up, because
-a gate nobody has exercised is not a gate.
-
-### The apply role's policy is only as narrow as the last failure
-
-`modules/github-actions-iam/permissions_for_apply.tf` grants write actions per service rather than
-`AdministratorAccess`, and its IAM writes are confined to `fc-*` role names. It is
-still service-wide (`ec2:*`, `ecs:*`) where enumerating every action would churn
-on every provider upgrade.
-
-The plan role is the one that is genuinely tight, because a pull request chooses
-what the plan job runs. Narrowing the apply role further is worth doing, but it
-buys less: a push to `main` has already been reviewed.
-
-### Retiring a region should deregister the node
-
-Moving a label to `retired_appliance_regions` contains the node by revoking its
-unseal token and destroying its transit key. Its rows stay behind in sprue, hilt
-and the delegator's allow list, and they should be removed in the same pass:
-[FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090).
-
-### A region mismatch is fixed by deleting the row
-
-hilt raises one error for a DID registered under this region and for one
-registered under another, and ships no command to move a provider. The onboard
-phase reads hilt's `provider` row to tell the two apart and refuses to continue
-on a mismatch. Correcting it means deleting the row, which `make retire-region`
-does inside the Lambda along with everything under that provider; hilt owning the
-operation is [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091).
-
-### hilt should authenticate to OpenBao with AWS IAM auth
-
-hilt currently uses AppRole with a `secret_id` delivered through SSM. That works
-and the credential is IAM-scoped to hilt's own parameter prefix, but it is still
-a long-lived shared secret that has to be stored, rotated and kept in step with
-OpenBao.
-
-The right mechanism is OpenBao's AWS IAM auth method: the task signs an
-`sts:GetCallerIdentity` request with its task-role credentials, and the role is
-bound to that role ARN. No shared secret is distributed at all, nothing needs
-rotating, and identity derives from the task role itself.
-
-It needs a change in hilt: `HILT_VAULT_OPENBAO_AUTH_METHOD` accepts only
-`approle` or `token` today, so its vault package needs the new auth method plus
-the config value to select it.
-
-Note that CIDR binding does not substitute for this. A Fargate task has no
-stable address, so `token_bound_cidrs` on the VPC's private subnets separates
-the VPC from the internet but not hilt from sprue. It is applied as a coarse
-control, not as the identity boundary.
-
-### Publish the provision image from CI
-
-Infrastructure changes reach dev on merge, but the image the Lambda runs does not.
-`make publish` is still run by hand from a developer machine with credentials for
-the target account, and the digest it writes has to be committed before the deploy
-workflow will pick it up.
-
-A workflow on merge to `main` that publishes the image and commits the digest
-would close the last manual step. Ordering needs care: the commit carrying the
-new digest is what triggers the deploy, so the workflow has to publish before it
-writes, and write only what it published.
+One item stays a documented decision rather than a ticket.
 
 ### Forcing a provision phase to re-run
 
