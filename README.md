@@ -969,9 +969,7 @@ head's decision.
 
 ## Planned work
 
-Deliberate compromises and open questions, tracked in Linear. Each ticket carries
-the problem, the work and the acceptance criteria, and says when the change
-belongs in a service repository rather than here.
+See the following Linear tickets:
 
 - [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the Forge Central prod stage with a gated apply, and decide whether RDS gets dedicated subnets
 - [FIL-1156](https://linear.app/filecoin-foundation/issue/FIL-1156) Narrow the apply role's IAM policy
@@ -990,8 +988,6 @@ belongs in a service repository rather than here.
 - [FIL-1161](https://linear.app/filecoin-foundation/issue/FIL-1161) Verify the RDS server certificate in every Forge service
 - [FIL-1162](https://linear.app/filecoin-foundation/issue/FIL-1162) Zero-downtime upgrades of Forge Central services
 - [FIL-1158](https://linear.app/filecoin-foundation/issue/FIL-1158) Automate promotion of Forge Central from dev to staging
-
-One item stays a documented decision rather than a ticket.
 
 ### Forcing a provision phase to re-run
 
