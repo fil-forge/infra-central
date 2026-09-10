@@ -28,8 +28,8 @@ import (
 // The node's own copy of the delegation is in its OpenBao and is replaced by the
 // operator running store-hilt-proof.sh with the reissued proof.
 //
-// It runs in the Lambda for the same reason the onboard phase does: hilt's DSN is
-// in SSM and the network path to RDS is here. The alternative,
+// It runs in the Lambda because hilt's DSN is in SSM and the network path to RDS
+// is here (the onboard phase runs here for the signing keys). The alternative,
 // enable_execute_command on hilt's service, is a standing shell somebody has to
 // remember to revert, and docs/decisions/2026-08-region-onboarding.md already
 // turned that down.
