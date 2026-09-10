@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.47.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.76.0
 	github.com/ethereum/go-ethereum v1.17.5
-	github.com/fil-forge/hilt v0.0.1-0.20260909142420-483ceeb81dcb
+	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
 	github.com/fil-forge/sprue v0.0.0-20260821191827-52d28a835747
 	github.com/fil-forge/ucantone v0.0.0-20260827134420-25cf8340b9a1
 	github.com/fil-forge/ucantool v0.1.0

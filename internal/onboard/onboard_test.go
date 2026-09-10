@@ -303,8 +303,8 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 }
 
 // hilt answers "already registered" for a DID held under another region as well
-// as for this one, so the row it leaves behind is the only real evidence.
-func TestApplyFailsWhenHiltsRowDisagreesAfterTheWrite(t *testing.T) {
+// as for this one, so what it holds afterwards is the only real evidence.
+func TestApplyFailsWhenHiltDisagreesAfterTheWrite(t *testing.T) {
 	fakes := newFakes()
 	fakes.hilt.regionAfterAdd = "eu-central-3"
 	req := testRequest()
