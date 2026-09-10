@@ -325,7 +325,7 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 				region = hilt.Region
 			}
 			return nil, fmt.Errorf(
-				"hilt reported success but holds %s for region %q, want %q; retire that region with make retire-region before retrying",
+				"hilt reported success but lists %s for region %q, want %q; retire that region with make retire-region before retrying",
 				req.IngotDID, region, req.Region)
 		}
 		result.Performed = append(result.Performed, "registered "+req.IngotDID+" with hilt for "+req.Region)
