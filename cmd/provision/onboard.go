@@ -124,8 +124,8 @@ func decodePiriProof(req Request) ([]byte, error) {
 // unseal token for.
 //
 // A mistyped --region is otherwise accepted, and hilt registers the Ingot under
-// the typo permanently: it has no command to move a provider, so the row has to
-// be corrected in its database by hand. The recorded token accessor is the
+// the typo permanently: it has no command to move a provider, so the region
+// would have to be retired and onboarded again. The recorded token accessor is the
 // evidence that the label is real, because an appliance cannot hold the DIDs
 // this phase is given without having unsealed with a token minted for exactly
 // that label.
@@ -202,11 +202,7 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 	if err != nil {
 		return onboard.Deps{}, err
 	}
-	hiltDSN, err := d.store.GetSecret(ctx, "hilt", "postgres-dsn")
-	if err != nil {
-		return onboard.Deps{}, fmt.Errorf("read hilt's database DSN: %w", err)
-	}
-	hiltClient, err := onboard.NewHiltClient(d.serviceURL("hilt"), hiltDSN, hiltIssuer)
+	hiltClient, err := onboard.NewHiltClient(d.serviceURL("hilt"), hiltIssuer)
 	if err != nil {
 		return onboard.Deps{}, err
 	}
