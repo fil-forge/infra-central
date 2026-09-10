@@ -2,35 +2,31 @@ package onboard
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 
 	hiltclient "github.com/fil-forge/hilt/pkg/client"
+	adminprovider "github.com/fil-forge/hilt/pkg/commands/admin/provider"
 	"github.com/fil-forge/ucantone/did"
 	"github.com/fil-forge/ucantone/ucan"
-	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )
 
-// HiltClient adapts hilt's admin client, and reads its database to verify what
-// that client did.
+// HiltClient adapts hilt's admin client.
 //
-// The database read is not belt and braces. hilt raises one error,
+// Reading a provider back is not belt and braces. hilt raises one error,
 // ErrProviderExists, for a DID already registered under this region and for one
-// registered under a different region, and it ships no command to list or move a
-// provider. So the row is the only thing that says which region a DID actually
-// serves, and reading it is how a region rename is caught instead of silently
-// accepted.
+// registered under a different region, and it ships no command to move a
+// provider. So what hilt lists for the DID is the only thing that says which
+// region it actually serves, and reading it is how a region rename is caught
+// instead of silently accepted.
 type HiltClient struct {
 	admin *hiltclient.AdminClient
-	dsn   string
 }
 
-// NewHiltClient builds the admin client from hilt's did:web and its key, plus
-// the DSN for the database behind it.
-func NewHiltClient(endpoint, dsn string, issuer ucan.Issuer) (*HiltClient, error) {
+// NewHiltClient builds the admin client from hilt's did:web and its key.
+func NewHiltClient(endpoint string, issuer ucan.Issuer) (*HiltClient, error) {
 	address, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("parse hilt's endpoint %q: %w", endpoint, err)
@@ -40,45 +36,92 @@ func NewHiltClient(endpoint, dsn string, issuer ucan.Issuer) (*HiltClient, error
 	if err != nil {
 		return nil, fmt.Errorf("build hilt's admin client: %w", err)
 	}
-	return &HiltClient{admin: admin, dsn: dsn}, nil
+	return &HiltClient{admin: admin}, nil
 }
 
-// ProviderRegion returns the region hilt has a DID registered for, or an empty
-// string when it has no row for it.
-func (c *HiltClient) ProviderRegion(ctx context.Context, providerDID string) (string, error) {
-	conn, err := pgx.Connect(ctx, c.dsn)
+// Provider returns hilt's record for a DID, or nil when it has none.
+func (c *HiltClient) Provider(ctx context.Context, providerDID string) (*HiltProvider, error) {
+	parsed, err := did.Parse(providerDID)
 	if err != nil {
-		return "", fmt.Errorf("connect to hilt's database: %w", err)
+		return nil, fmt.Errorf("parse provider DID %q: %w", providerDID, err)
 	}
-	defer func() { _ = conn.Close(ctx) }()
 
-	var region string
-	err = conn.QueryRow(ctx, "SELECT region FROM provider WHERE id = $1", providerDID).Scan(&region)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
+	// hilt has no read for one provider, so the list is filtered here. It holds
+	// one entry per region, so there is nothing to paginate.
+	list, err := c.admin.ListProviders(ctx)
 	if err != nil {
-		return "", fmt.Errorf("read hilt's provider row for %s: %w", providerDID, err)
+		return nil, fmt.Errorf("list hilt's providers: %w", err)
 	}
-	return strings.TrimSpace(region), nil
+	return findProvider(list.Providers, parsed), nil
 }
 
-// AddProvider registers a DID as the provider for a region.
+// findProvider picks one DID's entry out of hilt's provider list.
+func findProvider(providers []adminprovider.Provider, id did.DID) *HiltProvider {
+	for _, p := range providers {
+		if p.Provider != id {
+			continue
+		}
+		provider := &HiltProvider{Region: p.Region}
+		if p.Policy != nil {
+			provider.Policy = p.Policy.String()
+		}
+		return provider
+	}
+	return nil
+}
+
+// AddProvider registers a DID as the provider for a region, with the storage
+// nodes that serve it.
 //
 // An already-registered DID is tolerated here and checked by the caller, which
 // re-reads the row. The error cannot distinguish this region from another one, so
 // tolerating it is only safe because nothing trusts it.
-func (c *HiltClient) AddProvider(ctx context.Context, providerDID, region string) error {
+func (c *HiltClient) AddProvider(ctx context.Context, providerDID, region string, nodeDIDs []string) error {
 	parsed, err := did.Parse(providerDID)
 	if err != nil {
 		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
 	}
+	nodes, err := parseNodeDIDs(nodeDIDs)
+	if err != nil {
+		return err
+	}
 
-	err = c.admin.AddProvider(ctx, parsed, region)
+	err = c.admin.AddProvider(ctx, parsed, region, nodes)
 	if err == nil || isAlreadyRegistered(err) {
 		return nil
 	}
 	return fmt.Errorf("add %s for region %s: %w", providerDID, region, err)
+}
+
+// SetProviderNodes replaces the storage nodes a registered provider serves
+// with. hilt holds no node list of its own: the set lives in the routing policy
+// it manages on sprue, so the caller has to send the whole set every time.
+func (c *HiltClient) SetProviderNodes(ctx context.Context, providerDID string, nodeDIDs []string) error {
+	parsed, err := did.Parse(providerDID)
+	if err != nil {
+		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
+	}
+	nodes, err := parseNodeDIDs(nodeDIDs)
+	if err != nil {
+		return err
+	}
+
+	if err := c.admin.SetProviderNodes(ctx, parsed, nodes); err != nil {
+		return fmt.Errorf("set %s's storage nodes: %w", providerDID, err)
+	}
+	return nil
+}
+
+func parseNodeDIDs(nodeDIDs []string) ([]did.DID, error) {
+	nodes := make([]did.DID, 0, len(nodeDIDs))
+	for _, n := range nodeDIDs {
+		parsed, err := did.Parse(n)
+		if err != nil {
+			return nil, fmt.Errorf("parse node DID %q: %w", n, err)
+		}
+		nodes = append(nodes, parsed)
+	}
+	return nodes, nil
 }
 
 func isAlreadyRegistered(err error) bool {

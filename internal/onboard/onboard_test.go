@@ -26,7 +26,7 @@ func TestReadReportsAFreshAppliance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &State{Region: "us-east-9", AllowListed: false, Sprue: nil, HiltRegion: "", PiriRecorded: false}
+	want := &State{Region: "us-east-9", AllowListed: false, Sprue: nil, HiltRegion: "", HiltPolicy: "", PiriRecorded: false}
 	if !reflect.DeepEqual(state, want) {
 		t.Errorf("Read() = %+v, want %+v", state, want)
 	}
@@ -54,6 +54,7 @@ func TestPlanFromPlansNothingForARegisteredAppliance(t *testing.T) {
 		AllowListed:  true,
 		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
 		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
 		PiriRecorded: true,
 	}
 
@@ -73,6 +74,7 @@ func TestPlanFromResetsMismatchedWeights(t *testing.T) {
 		AllowListed:  true,
 		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 1, ReplicationWeight: 1},
 		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
 		PiriRecorded: true,
 	}
 
@@ -111,12 +113,145 @@ func TestPlanFromBlocksASprueEndpointMismatch(t *testing.T) {
 		AllowListed: true,
 		Sprue:       &Provider{Endpoint: "https://piri.old.example", Weight: 100, ReplicationWeight: 100},
 		HiltRegion:  req.Region,
+		HiltPolicy:  "did:key:zPolicy",
 	}
 
 	plan := PlanFrom(state, req)
 
 	if len(plan.Blockers) != 1 || !strings.Contains(plan.Blockers[0], "piri.old.example") {
 		t.Errorf("blockers = %v, want one naming the endpoint on record", plan.Blockers)
+	}
+}
+
+// A region's second Piri finds hilt already holding the Ingot, so it joins the
+// provider's node set instead of re-registering the provider. hilt replaces the
+// set rather than adding to it, so the first Piri has to be sent again.
+func TestPlanFromAddsASecondPiriToHiltsNodes(t *testing.T) {
+	req := testRequest()
+	req.PiriDID = "did:key:zPiri2"
+	state := &State{
+		Region:        req.Region,
+		AllowListed:   true,
+		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:    req.Region,
+		HiltPolicy:    "did:key:zPolicy",
+		RecordedPiris: []string{"did:key:zPiri"},
+	}
+
+	plan := PlanFrom(state, req)
+
+	want := []string{
+		"add did:key:zPiri2 to did:key:zIngot's storage nodes in hilt",
+		"record did:key:zPiri2 as a Piri of region us-east-9",
+	}
+	if !reflect.DeepEqual(plan.Actions, want) {
+		t.Errorf("actions = %v, want %v", plan.Actions, want)
+	}
+}
+
+func TestApplySendsHiltTheWholeNodeSetForASecondPiri(t *testing.T) {
+	fakes := newFakes()
+	fakes.hilt.region = "us-east-9"
+	req := testRequest()
+	req.PiriDID = "did:key:zPiri2"
+	state := &State{
+		Region:        req.Region,
+		AllowListed:   true,
+		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:    req.Region,
+		HiltPolicy:    "did:key:zPolicy",
+		RecordedPiris: []string{"did:key:zPiri"},
+	}
+
+	if _, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req)); err != nil {
+		t.Fatal(err)
+	}
+
+	if fakes.hilt.added {
+		t.Error("Apply() re-registered a provider hilt already holds")
+	}
+	if want := []string{"did:key:zPiri", "did:key:zPiri2"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
+		t.Errorf("hilt nodes = %v, want %v", fakes.hilt.nodes, want)
+	}
+	if fakes.piri.added != "us-east-9 did:key:zPiri2" {
+		t.Errorf("piri record = %q, want the second Piri recorded", fakes.piri.added)
+	}
+}
+
+// A provider registered before hilt took storage nodes has a row with no policy,
+// so the region's buckets still use default routing. The recorded Piri set is
+// what repairs it.
+func TestPlanFromSetsNodesForAProviderWithoutAPolicy(t *testing.T) {
+	req := testRequest()
+	state := &State{
+		Region:        req.Region,
+		AllowListed:   true,
+		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:    req.Region,
+		RecordedPiris: []string{req.PiriDID},
+		PiriRecorded:  true,
+	}
+
+	plan := PlanFrom(state, req)
+
+	want := []string{"set did:key:zIngot's storage nodes in hilt to did:key:zPiri"}
+	if !reflect.DeepEqual(plan.Actions, want) {
+		t.Errorf("actions = %v, want %v", plan.Actions, want)
+	}
+}
+
+func TestApplySetsNodesForAProviderWithoutAPolicy(t *testing.T) {
+	fakes := newFakes()
+	fakes.hilt.region = "us-east-9"
+	req := testRequest()
+	state := &State{
+		Region:        req.Region,
+		AllowListed:   true,
+		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:    req.Region,
+		RecordedPiris: []string{req.PiriDID},
+		PiriRecorded:  true,
+	}
+
+	result, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fakes.hilt.added {
+		t.Error("Apply() re-registered a provider hilt already holds")
+	}
+	if want := []string{"did:key:zPiri"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
+		t.Errorf("hilt nodes = %v, want %v", fakes.hilt.nodes, want)
+	}
+	if fakes.piri.added != "" {
+		t.Errorf("recorded %q, want the existing record left alone", fakes.piri.added)
+	}
+	if len(result.Performed) != 2 || !strings.Contains(result.Performed[1], "storage nodes") {
+		t.Errorf("performed = %v, want the weights and the node write", result.Performed)
+	}
+}
+
+// A run that changes nothing about the region's Piri sends hilt nothing either.
+func TestApplyLeavesHiltsNodesAloneForARecordedPiri(t *testing.T) {
+	fakes := newFakes()
+	fakes.hilt.region = "us-east-9"
+	req := testRequest()
+	state := &State{
+		Region:        req.Region,
+		AllowListed:   true,
+		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:    req.Region,
+		HiltPolicy:    "did:key:zPolicy",
+		RecordedPiris: []string{req.PiriDID},
+		PiriRecorded:  true,
+	}
+
+	if _, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req)); err != nil {
+		t.Fatal(err)
+	}
+	if fakes.hilt.nodes != nil {
+		t.Errorf("hilt was sent nodes %v, want no call", fakes.hilt.nodes)
 	}
 }
 
@@ -147,6 +282,7 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 		"sprueDID":     fakes.sprue.registeredDID,
 		"sprueProof":   string(fakes.sprue.registeredProof),
 		"hiltRegion":   fakes.hilt.region,
+		"hiltNodes":    fakes.hilt.nodes,
 		"weight":       fakes.sprue.weight,
 		"piriRecord":   fakes.piri.added,
 		"proofReturns": result.HiltIngotS3Proof,
@@ -156,6 +292,7 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 		"sprueDID":     "did:key:zPiri",
 		"sprueProof":   "proof-bytes",
 		"hiltRegion":   "us-east-9",
+		"hiltNodes":    []string{"did:key:zPiri"},
 		"weight":       100,
 		"piriRecord":   "us-east-9 did:key:zPiri",
 		"proofReturns": "the-proof",
@@ -166,8 +303,8 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 }
 
 // hilt answers "already registered" for a DID held under another region as well
-// as for this one, so the row it leaves behind is the only real evidence.
-func TestApplyFailsWhenHiltsRowDisagreesAfterTheWrite(t *testing.T) {
+// as for this one, so what it holds afterwards is the only real evidence.
+func TestApplyFailsWhenHiltDisagreesAfterTheWrite(t *testing.T) {
 	fakes := newFakes()
 	fakes.hilt.regionAfterAdd = "eu-central-3"
 	req := testRequest()
@@ -218,6 +355,7 @@ func TestApplyNeedsNoProofWhenSprueAlreadyHoldsTheProvider(t *testing.T) {
 		AllowListed:  true,
 		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
 		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
 		PiriRecorded: true,
 	}
 
@@ -234,6 +372,7 @@ func TestApplyReturnsTheProofOnEveryRun(t *testing.T) {
 		AllowListed:  true,
 		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
 		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
 		PiriRecorded: true,
 	}
 
@@ -313,10 +452,13 @@ func (s *fakeSprue) SetWeight(ctx context.Context, did string, weight, replicati
 
 type fakeHilt struct {
 	region string
+	policy string
 	// regionAfterAdd is what the row says once AddProvider has run, which is how
 	// a region mismatch is simulated.
 	regionAfterAdd string
 	added          bool
+	// nodes is the storage node set hilt was last given, by either call.
+	nodes []string
 }
 
 type fakePiriRecord struct {
@@ -333,15 +475,24 @@ func (p *fakePiriRecord) Record(_ context.Context, region, piriDID string) error
 	return nil
 }
 
-func (h *fakeHilt) ProviderRegion(ctx context.Context, did string) (string, error) {
+func (h *fakeHilt) Provider(ctx context.Context, did string) (*HiltProvider, error) {
 	if h.added && h.regionAfterAdd != "" {
-		return h.regionAfterAdd, nil
+		return &HiltProvider{Region: h.regionAfterAdd}, nil
 	}
-	return h.region, nil
+	if h.region == "" {
+		return nil, nil
+	}
+	return &HiltProvider{Region: h.region, Policy: h.policy}, nil
 }
 
-func (h *fakeHilt) AddProvider(ctx context.Context, did, region string) error {
+func (h *fakeHilt) AddProvider(ctx context.Context, did, region string, nodes []string) error {
 	h.added = true
 	h.region = region
+	h.nodes = nodes
+	return nil
+}
+
+func (h *fakeHilt) SetProviderNodes(ctx context.Context, did string, nodes []string) error {
+	h.nodes = nodes
 	return nil
 }

@@ -1,7 +1,7 @@
 // Package onboard performs the writes that admit a regional appliance to a
 // stage, and issues the one proof that travels back to it.
 //
-// Four things have to be true before an appliance works, and none of them is
+// Five things have to be true before an appliance works, and none of them is
 // configuration, so no apply creates them:
 //
 //   - its Piri DID is on the delegator's allow list, or `piri init` is refused
@@ -10,18 +10,23 @@
 //     uploads fail with CandidateUnavailable
 //   - hilt knows its Ingot as the provider for its region, or hilt rejects every
 //     tenant in that region
+//   - its Piri is a storage node of that provider, or the region's routing
+//     policy never sends a bucket's data to it
 //   - its Ingot holds hilt's S3 delegation, which only central can sign
 //
-// Central also records the appliance's Piri DID under its region. Nothing else
-// pairs the two: sprue's provider record carries no region and hilt's carries
-// no Piri.
+// Central also records the appliance's Piri DID under its region. That record
+// is the region's node set: hilt keeps only the routing policy's DID and sprue
+// holds the candidates, and neither offers a read of them, so a Piri joining a
+// registered region is sent to hilt together with every Piri recorded before it.
+// A provider registered before hilt took storage nodes has no policy, and hilt
+// says so, so the same write repairs it from the record.
 //
 // Every step reads before it writes, and reports what it found before anything
 // is changed. That is not only for the operator's benefit: hilt raises the same
 // "already registered" error whether the DID is registered for this region or a
 // different one, so trusting the error alone silently accepts a mismatch that
 // breaks every request afterwards. smelt learned that the hard way and verifies
-// the row; so does this.
+// what hilt holds; so does this.
 package onboard
 
 import (
@@ -44,12 +49,15 @@ type SprueAdmin interface {
 	SetWeight(ctx context.Context, did string, weight, replicationWeight int) error
 }
 
-// HiltAdmin is the slice of hilt's admin API this package uses, plus the
-// database read that verifies it. hilt has no provider list command, so the row
-// is read directly.
+// HiltAdmin is the slice of hilt's admin API this package uses. Provider reads
+// back what hilt holds for a DID, through hilt's own list command, so a write is
+// verified rather than trusted.
 type HiltAdmin interface {
-	ProviderRegion(ctx context.Context, did string) (string, error)
-	AddProvider(ctx context.Context, did, region string) error
+	Provider(ctx context.Context, did string) (*HiltProvider, error)
+	AddProvider(ctx context.Context, did, region string, nodes []string) error
+	// SetProviderNodes replaces the storage nodes a registered provider serves
+	// with, so it takes the whole set rather than an addition.
+	SetProviderNodes(ctx context.Context, did string, nodes []string) error
 }
 
 // Provider is sprue's record of a storage provider.
@@ -57,6 +65,14 @@ type Provider struct {
 	Endpoint          string `json:"endpoint"`
 	Weight            int64  `json:"weight"`
 	ReplicationWeight int64  `json:"replication_weight"`
+}
+
+// HiltProvider is hilt's record of a regional provider.
+type HiltProvider struct {
+	Region string
+	// Policy is the DID of the routing policy whose candidates are the
+	// provider's storage nodes, empty when hilt has never been given any.
+	Policy string
 }
 
 // Request is the appliance presenting itself: its Piri DID, where that Piri
@@ -103,9 +119,15 @@ type State struct {
 	AllowListed bool      `json:"allow_listed"`
 	Sprue       *Provider `json:"sprue,omitempty"`
 	// HiltRegion is the region hilt has this Ingot registered for, empty when it
-	// has no row at all.
-	HiltRegion   string `json:"hilt_region"`
-	PiriRecorded bool   `json:"piri_recorded"`
+	// has no record at all.
+	HiltRegion string `json:"hilt_region"`
+	// HiltPolicy is the routing policy carrying the Ingot's storage nodes, empty
+	// when hilt holds none for it.
+	HiltPolicy string `json:"hilt_policy"`
+	// RecordedPiris are the Piri DIDs central has recorded for the region, which
+	// is also the storage node set hilt was last given for it.
+	RecordedPiris []string `json:"recorded_piris"`
+	PiriRecorded  bool     `json:"piri_recorded"`
 }
 
 // Plan is State plus what would be done about it.
@@ -135,16 +157,20 @@ func Read(ctx context.Context, deps Deps, req Request) (*State, error) {
 	}
 	state.Sprue = provider
 
-	region, err := deps.Hilt.ProviderRegion(ctx, req.IngotDID)
+	hilt, err := deps.Hilt.Provider(ctx, req.IngotDID)
 	if err != nil {
-		return nil, fmt.Errorf("read hilt's provider row: %w", err)
+		return nil, fmt.Errorf("read hilt's provider record: %w", err)
 	}
-	state.HiltRegion = region
+	if hilt != nil {
+		state.HiltRegion = hilt.Region
+		state.HiltPolicy = hilt.Policy
+	}
 
 	recorded, err := deps.PiriRecord.Recorded(ctx, req.Region)
 	if err != nil {
 		return nil, fmt.Errorf("read the region's recorded Piri DIDs: %w", err)
 	}
+	state.RecordedPiris = recorded
 	state.PiriRecorded = slices.Contains(recorded, req.PiriDID)
 
 	return state, nil
@@ -197,8 +223,17 @@ func PlanFrom(state *State, req Request) *Plan {
 		// This is the failure smelt's tolerance of "already registered" once
 		// masked. hilt has no way to move a provider, so it cannot be an action.
 		plan.Blockers = append(plan.Blockers, fmt.Sprintf(
-			"hilt has %s registered for region %s, not %s; hilt has no command to move a provider, so the row has to be corrected in its database by hand",
+			"hilt has %s registered for region %s, not %s; hilt has no command to move a provider, so retire the region it names with make retire-region before onboarding again",
 			req.IngotDID, state.HiltRegion, req.Region))
+	case state.HiltPolicy == "":
+		// Registered before hilt took storage nodes, so the region's buckets
+		// still use sprue's default routing.
+		plan.Actions = append(plan.Actions, fmt.Sprintf(
+			"set %s's storage nodes in hilt to %s", req.IngotDID,
+			strings.Join(nodeSet(state, req), ", ")))
+	case !state.PiriRecorded:
+		plan.Actions = append(plan.Actions, fmt.Sprintf(
+			"add %s to %s's storage nodes in hilt", req.PiriDID, req.IngotDID))
 	}
 
 	if !state.PiriRecorded {
@@ -207,6 +242,15 @@ func PlanFrom(state *State, req Request) *Plan {
 	}
 
 	return plan
+}
+
+// nodeSet is the storage node set hilt is given for the region: every Piri
+// recorded for it plus the one onboarding now.
+func nodeSet(state *State, req Request) []string {
+	if state.PiriRecorded {
+		return state.RecordedPiris
+	}
+	return append(slices.Clone(state.RecordedPiris), req.PiriDID)
 }
 
 // Result reports what Apply did and carries the proof back to the appliance.
@@ -255,24 +299,42 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 	}
 	result.Performed = append(result.Performed, "set sprue weights")
 
-	if plan.HiltRegion == "" {
-		if err := deps.Hilt.AddProvider(ctx, req.IngotDID, req.Region); err != nil {
+	// When writing to hilt, always send the region's whole node set, because hilt
+	// holds no list to add to: the set is the candidates of the routing policy it
+	// keeps on sprue, and setting them replaces them. The set comes from central's
+	// record, which is written after this so that a recorded Piri is always one
+	// hilt has been told about.
+	nodes := nodeSet(&plan.State, req)
+
+	switch {
+	case plan.HiltRegion == "":
+		if err := deps.Hilt.AddProvider(ctx, req.IngotDID, req.Region, nodes); err != nil {
 			return nil, fmt.Errorf("register %s with hilt: %w", req.IngotDID, err)
 		}
 
 		// Verify rather than trust the call. hilt answers "already registered"
 		// for a DID held under a different region as well as for this one, so
-		// the row is the only thing that actually says what happened.
-		region, err := deps.Hilt.ProviderRegion(ctx, req.IngotDID)
+		// what it now holds is the only thing that actually says what happened.
+		hilt, err := deps.Hilt.Provider(ctx, req.IngotDID)
 		if err != nil {
-			return nil, fmt.Errorf("verify hilt's provider row: %w", err)
+			return nil, fmt.Errorf("verify hilt's provider record: %w", err)
 		}
-		if region != req.Region {
+		if hilt == nil || hilt.Region != req.Region {
+			region := ""
+			if hilt != nil {
+				region = hilt.Region
+			}
 			return nil, fmt.Errorf(
-				"hilt reported success but its row for %s says region %q, want %q; correct the row in hilt's database before retrying",
+				"hilt reported success but lists %s for region %q, want %q; retire that region with make retire-region before retrying",
 				req.IngotDID, region, req.Region)
 		}
 		result.Performed = append(result.Performed, "registered "+req.IngotDID+" with hilt for "+req.Region)
+	case plan.HiltPolicy == "" || !plan.PiriRecorded:
+		if err := deps.Hilt.SetProviderNodes(ctx, req.IngotDID, nodes); err != nil {
+			return nil, fmt.Errorf("set %s's storage nodes in hilt: %w", req.IngotDID, err)
+		}
+		result.Performed = append(result.Performed,
+			"set "+req.IngotDID+"'s storage nodes in hilt to "+strings.Join(nodes, ", "))
 	}
 
 	if !plan.PiriRecorded {
