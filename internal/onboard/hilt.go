@@ -43,24 +43,28 @@ func NewHiltClient(endpoint, dsn string, issuer ucan.Issuer) (*HiltClient, error
 	return &HiltClient{admin: admin, dsn: dsn}, nil
 }
 
-// ProviderRegion returns the region hilt has a DID registered for, or an empty
-// string when it has no row for it.
-func (c *HiltClient) ProviderRegion(ctx context.Context, providerDID string) (string, error) {
+// Provider returns hilt's row for a DID, or nil when it has none.
+func (c *HiltClient) Provider(ctx context.Context, providerDID string) (*HiltProvider, error) {
 	conn, err := pgx.Connect(ctx, c.dsn)
 	if err != nil {
-		return "", fmt.Errorf("connect to hilt's database: %w", err)
+		return nil, fmt.Errorf("connect to hilt's database: %w", err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
 	var region string
-	err = conn.QueryRow(ctx, "SELECT region FROM provider WHERE id = $1", providerDID).Scan(&region)
+	var policy *string
+	err = conn.QueryRow(ctx, "SELECT region, policy FROM provider WHERE id = $1", providerDID).Scan(&region, &policy)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read hilt's provider row for %s: %w", providerDID, err)
+		return nil, fmt.Errorf("read hilt's provider row for %s: %w", providerDID, err)
 	}
-	return strings.TrimSpace(region), nil
+	provider := &HiltProvider{Region: strings.TrimSpace(region)}
+	if policy != nil {
+		provider.Policy = strings.TrimSpace(*policy)
+	}
+	return provider, nil
 }
 
 // AddProvider registers a DID as the provider for a region, with the storage

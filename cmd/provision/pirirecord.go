@@ -10,11 +10,13 @@ import (
 // piriRecords is central's record of which Piri DIDs belong to which region,
 // held in SSM under each appliance's own prefix.
 //
-// It exists because nothing else pairs the two. sprue's provider record carries
-// no region and hilt's carries no Piri, so a region's set of Piri DIDs is
-// knowable only at onboard time, when one request names both. A node whose Piri
-// key is replaced would otherwise leave a provider row in sprue that no later run
-// can attribute to a region.
+// It exists because nothing else pairs the two readably. sprue's provider record
+// carries no region, and hilt keeps only the DID of the routing policy whose
+// candidates are the region's Piri, so a region's set of Piri DIDs is knowable
+// only at onboard time, when one request names both. A node whose Piri key is
+// replaced would otherwise leave a provider row in sprue that no later run can
+// attribute to a region. The record is also what hilt is given as the region's
+// node set, since setting nodes replaces them.
 //
 // One parameter per DID rather than a list in one. The set has no fixed size, and
 // a parameter written once obeys this package's never-overwrite rule; a list

@@ -158,12 +158,17 @@ Five things happen, and each one has a failure that names nothing useful if it i
   delegator for approval and is refused with a `403`.
 - **sprue** gets the Piri registered at its public URL, with a weight. Without it, uploads fail with
   `CandidateUnavailable: no storage providers available`.
-- **hilt** gets the Ingot registered for the region. Without it, hilt rejects tenant creation for
-  that region and every `/s3/*` call the Ingot makes.
+- **hilt** gets the Ingot registered for the region, with the Piri as its storage node. Without the
+  registration, hilt rejects tenant creation for that region and every `/s3/*` call the Ingot makes.
+  Without the node, the region's buckets use sprue's default routing and their data can land on any
+  storage node in the stage.
 - **hilt signs the S3 delegation** the Ingot presents back to it, which is the one piece only central
   can produce.
 - **Central records the Piri DID under the region.** sprue has no region on its provider row and
-  hilt has no Piri DID, so this is the only record of that association.
+  hilt keeps only the DID of the routing policy that holds its nodes, so this is the only readable
+  record of that association. It is also the node set hilt is given: hilt replaces the set rather
+  than adding to it, so a region's second Piri is sent together with its first, and a provider
+  registered before hilt took storage nodes is repaired from the same record.
 
 The record is a temporary SSM-backed list, with one parameter for each Piri DID.
 Region retirement will use it to find the Piri providers that need
