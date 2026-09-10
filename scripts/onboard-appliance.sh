@@ -161,7 +161,7 @@ jq -r '
      "  sprue provider:        \($p.sprue.endpoint), weights \($p.sprue.weight)/\($p.sprue.replication_weight)"
    end),
   "  hilt region:           \(if $p.hilt_region == "" then "absent" else $p.hilt_region end)",
-  "  hilt routing policy:   \(if $p.hilt_policy == \"\" then \"none\" else $p.hilt_policy end)",
+  "  hilt routing policy:   \(if $p.hilt_policy == "" then "none" else $p.hilt_policy end)",
   "  recorded Piri DIDs:    \(if ($p.recorded_piris | length) == 0 then "none" else ($p.recorded_piris | join(", ")) end)",
   "",
   (if (($p.blockers // []) | length) > 0 then
