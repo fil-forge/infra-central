@@ -63,22 +63,58 @@ func (c *HiltClient) ProviderRegion(ctx context.Context, providerDID string) (st
 	return strings.TrimSpace(region), nil
 }
 
-// AddProvider registers a DID as the provider for a region.
+// AddProvider registers a DID as the provider for a region, with the storage
+// nodes that serve it.
 //
 // An already-registered DID is tolerated here and checked by the caller, which
 // re-reads the row. The error cannot distinguish this region from another one, so
 // tolerating it is only safe because nothing trusts it.
-func (c *HiltClient) AddProvider(ctx context.Context, providerDID, region string) error {
+func (c *HiltClient) AddProvider(ctx context.Context, providerDID, region string, nodeDIDs []string) error {
 	parsed, err := did.Parse(providerDID)
 	if err != nil {
 		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
 	}
+	nodes, err := parseNodeDIDs(nodeDIDs)
+	if err != nil {
+		return err
+	}
 
-	err = c.admin.AddProvider(ctx, parsed, region)
+	err = c.admin.AddProvider(ctx, parsed, region, nodes)
 	if err == nil || isAlreadyRegistered(err) {
 		return nil
 	}
 	return fmt.Errorf("add %s for region %s: %w", providerDID, region, err)
+}
+
+// SetProviderNodes replaces the storage nodes a registered provider serves
+// with. hilt holds no node list of its own: the set lives in the routing policy
+// it manages on sprue, so the caller has to send the whole set every time.
+func (c *HiltClient) SetProviderNodes(ctx context.Context, providerDID string, nodeDIDs []string) error {
+	parsed, err := did.Parse(providerDID)
+	if err != nil {
+		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
+	}
+	nodes, err := parseNodeDIDs(nodeDIDs)
+	if err != nil {
+		return err
+	}
+
+	if err := c.admin.SetProviderNodes(ctx, parsed, nodes); err != nil {
+		return fmt.Errorf("set %s's storage nodes: %w", providerDID, err)
+	}
+	return nil
+}
+
+func parseNodeDIDs(nodeDIDs []string) ([]did.DID, error) {
+	nodes := make([]did.DID, 0, len(nodeDIDs))
+	for _, n := range nodeDIDs {
+		parsed, err := did.Parse(n)
+		if err != nil {
+			return nil, fmt.Errorf("parse node DID %q: %w", n, err)
+		}
+		nodes = append(nodes, parsed)
+	}
+	return nodes, nil
 }
 
 func isAlreadyRegistered(err error) bool {

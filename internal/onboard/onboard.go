@@ -1,7 +1,7 @@
 // Package onboard performs the writes that admit a regional appliance to a
 // stage, and issues the one proof that travels back to it.
 //
-// Four things have to be true before an appliance works, and none of them is
+// Five things have to be true before an appliance works, and none of them is
 // configuration, so no apply creates them:
 //
 //   - its Piri DID is on the delegator's allow list, or `piri init` is refused
@@ -10,11 +10,14 @@
 //     uploads fail with CandidateUnavailable
 //   - hilt knows its Ingot as the provider for its region, or hilt rejects every
 //     tenant in that region
+//   - its Piri is a storage node of that provider, or the region's routing
+//     policy never sends a bucket's data to it
 //   - its Ingot holds hilt's S3 delegation, which only central can sign
 //
-// Central also records the appliance's Piri DID under its region. Nothing else
-// pairs the two: sprue's provider record carries no region and hilt's carries
-// no Piri.
+// Central also records the appliance's Piri DID under its region. That record
+// is the region's node set: hilt keeps only the routing policy's DID and sprue
+// holds the candidates, and neither offers a read of them, so a Piri joining a
+// registered region is sent to hilt together with every Piri recorded before it.
 //
 // Every step reads before it writes, and reports what it found before anything
 // is changed. That is not only for the operator's benefit: hilt raises the same
@@ -49,7 +52,10 @@ type SprueAdmin interface {
 // is read directly.
 type HiltAdmin interface {
 	ProviderRegion(ctx context.Context, did string) (string, error)
-	AddProvider(ctx context.Context, did, region string) error
+	AddProvider(ctx context.Context, did, region string, nodes []string) error
+	// SetProviderNodes replaces the storage nodes a registered provider serves
+	// with, so it takes the whole set rather than an addition.
+	SetProviderNodes(ctx context.Context, did string, nodes []string) error
 }
 
 // Provider is sprue's record of a storage provider.
@@ -104,8 +110,11 @@ type State struct {
 	Sprue       *Provider `json:"sprue,omitempty"`
 	// HiltRegion is the region hilt has this Ingot registered for, empty when it
 	// has no row at all.
-	HiltRegion   string `json:"hilt_region"`
-	PiriRecorded bool   `json:"piri_recorded"`
+	HiltRegion string `json:"hilt_region"`
+	// RecordedPiris are the Piri DIDs central has recorded for the region, which
+	// is also the storage node set hilt was last given for it.
+	RecordedPiris []string `json:"recorded_piris"`
+	PiriRecorded  bool     `json:"piri_recorded"`
 }
 
 // Plan is State plus what would be done about it.
@@ -145,6 +154,7 @@ func Read(ctx context.Context, deps Deps, req Request) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the region's recorded Piri DIDs: %w", err)
 	}
+	state.RecordedPiris = recorded
 	state.PiriRecorded = slices.Contains(recorded, req.PiriDID)
 
 	return state, nil
@@ -199,6 +209,9 @@ func PlanFrom(state *State, req Request) *Plan {
 		plan.Blockers = append(plan.Blockers, fmt.Sprintf(
 			"hilt has %s registered for region %s, not %s; hilt has no command to move a provider, so the row has to be corrected in its database by hand",
 			req.IngotDID, state.HiltRegion, req.Region))
+	case !state.PiriRecorded:
+		plan.Actions = append(plan.Actions, fmt.Sprintf(
+			"add %s to %s's storage nodes in hilt", req.PiriDID, req.IngotDID))
 	}
 
 	if !state.PiriRecorded {
@@ -255,8 +268,19 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 	}
 	result.Performed = append(result.Performed, "set sprue weights")
 
-	if plan.HiltRegion == "" {
-		if err := deps.Hilt.AddProvider(ctx, req.IngotDID, req.Region); err != nil {
+	// hilt is given the region's whole node set on every write, because it holds
+	// no list to add to: the set is the candidates of the routing policy it keeps
+	// on sprue, and setting them replaces them. The set comes from central's
+	// record, which is written after this so that a recorded Piri is always one
+	// hilt has been told about.
+	nodes := plan.RecordedPiris
+	if !plan.PiriRecorded {
+		nodes = append(slices.Clone(nodes), req.PiriDID)
+	}
+
+	switch {
+	case plan.HiltRegion == "":
+		if err := deps.Hilt.AddProvider(ctx, req.IngotDID, req.Region, nodes); err != nil {
 			return nil, fmt.Errorf("register %s with hilt: %w", req.IngotDID, err)
 		}
 
@@ -273,6 +297,12 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 				req.IngotDID, region, req.Region)
 		}
 		result.Performed = append(result.Performed, "registered "+req.IngotDID+" with hilt for "+req.Region)
+	case !plan.PiriRecorded:
+		if err := deps.Hilt.SetProviderNodes(ctx, req.IngotDID, nodes); err != nil {
+			return nil, fmt.Errorf("add %s to %s's storage nodes in hilt: %w", req.PiriDID, req.IngotDID, err)
+		}
+		result.Performed = append(result.Performed,
+			"added "+req.PiriDID+" to "+req.IngotDID+"'s storage nodes in hilt")
 	}
 
 	if !plan.PiriRecorded {

@@ -1,6 +1,6 @@
 module github.com/fil-forge/infra-central
 
-go 1.26.4
+go 1.27.0
 
 require (
 	github.com/aws/aws-lambda-go v1.55.0
@@ -10,9 +10,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.47.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.76.0
 	github.com/ethereum/go-ethereum v1.17.5
-	github.com/fil-forge/hilt v0.0.1-0.20260821074833-0928688148af
+	github.com/fil-forge/hilt v0.0.1-0.20260909142420-483ceeb81dcb
 	github.com/fil-forge/sprue v0.0.0-20260821191827-52d28a835747
-	github.com/fil-forge/ucantone v0.0.0-20260817170631-3a20cd59fabc
+	github.com/fil-forge/ucantone v0.0.0-20260827134420-25cf8340b9a1
 	github.com/fil-forge/ucantool v0.1.0
 	github.com/hashicorp/go-secure-stdlib/parseutil v0.2.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -26,7 +26,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/alanshaw/dag-json-gen v0.0.8 // indirect
+	github.com/alanshaw/dag-json-gen v0.0.9 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.2 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.19.1 // indirect
@@ -54,7 +54,7 @@ require (
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.8 // indirect
 	github.com/fatih/color v1.19.0 // indirect
-	github.com/fil-forge/libforge v0.0.0-20260807225550-3e6895b41be5 // indirect
+	github.com/fil-forge/libforge v0.0.0-20260908175340-249352b46c8e // indirect
 	github.com/fjl/jsonw v0.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -76,9 +76,9 @@ require (
 	github.com/ipfs/go-cid v0.6.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
-	github.com/mattn/go-isatty v0.0.23 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
