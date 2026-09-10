@@ -299,9 +299,9 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 	}
 	result.Performed = append(result.Performed, "set sprue weights")
 
-	// hilt is given the region's whole node set on every write, because it holds
-	// no list to add to: the set is the candidates of the routing policy it keeps
-	// on sprue, and setting them replaces them. The set comes from central's
+	// When writing to hilt, always send the region's whole node set, because hilt
+	// holds no list to add to: the set is the candidates of the routing policy it
+	// keeps on sprue, and setting them replaces them. The set comes from central's
 	// record, which is written after this so that a recorded Piri is always one
 	// hilt has been told about.
 	nodes := nodeSet(&plan.State, req)
