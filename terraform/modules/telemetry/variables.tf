@@ -6,6 +6,11 @@ variable "stages" {
     condition     = length(var.stages) > 0
     error_message = "stages must name at least one stage; a module with no log Firehose ships metrics and nothing else, which is never what a caller meant."
   }
+
+  validation {
+    condition     = length(distinct(var.stages)) == length(var.stages)
+    error_message = "stages must not repeat a name; each stage gets exactly one log Firehose."
+  }
 }
 
 # The two instance ids and the token are in 1Password: vault "Fil One", item
