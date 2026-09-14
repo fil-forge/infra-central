@@ -144,7 +144,7 @@ means lines or samples are being held back:
 aws_firehose_delivery_to_http_endpoint_success_average{dimension_DeliveryStreamName=~"fc-.*-logs|forge-central-metrics"}
 ```
 
-A batch Grafana refuses is written to the `forge-central-firehose-backup-<account id>` bucket under
+A batch Grafana refuses is written to the `forge-central-firehose-backup-<account id>-<region>` bucket under
 a prefix named for the stream, and the reason is in the `/forge-central/firehose` CloudWatch log
 group, one stream per Firehose. An empty bucket is the healthy state.
 

@@ -59,15 +59,20 @@ locals {
 # dropping it. One bucket for every stream in the module, with a prefix per
 # stream. Objects expire after two weeks: a failed batch is worth keeping long
 # enough for someone to notice the delivery metric and replay it, and no longer.
+#
+# The bucket and the two IAM roles below carry the region in their names.
+# Bucket names and IAM are account-global, and the README tells a second region
+# to copy this root as it is, so a name without the region would already be
+# taken by the first region's state.
 
 resource "aws_s3_bucket" "backup" {
-  bucket = "forge-central-firehose-backup-${local.account_id}"
+  bucket = "forge-central-firehose-backup-${local.account_id}-${local.region}"
 
   # Nothing here is irreplaceable, so a destroy empties the bucket rather than
   # failing on it.
   force_destroy = true
 
-  tags = { Name = "forge-central-firehose-backup" }
+  tags = { Name = "forge-central-firehose-backup-${local.region}" }
 }
 
 resource "aws_s3_bucket_public_access_block" "backup" {
@@ -170,7 +175,7 @@ data "aws_iam_policy_document" "firehose" {
 }
 
 resource "aws_iam_role" "firehose" {
-  name               = "forge-central-firehose"
+  name               = "forge-central-firehose-${local.region}"
   assume_role_policy = data.aws_iam_policy_document.firehose_assume.json
 }
 
@@ -238,6 +243,11 @@ resource "aws_kinesis_firehose_delivery_stream" "logs" {
   }
 
   tags = { Name = each.value }
+
+  # Firehose checks the role can reach the backup bucket and the error log when
+  # the stream is created, and the role reference alone orders this after the
+  # role, not after its policy.
+  depends_on = [aws_iam_role_policy.firehose]
 }
 
 # ── Metrics: one Firehose and one stream per account and region ─────────────
@@ -275,6 +285,9 @@ resource "aws_kinesis_firehose_delivery_stream" "metrics" {
   }
 
   tags = { Name = local.metrics_name }
+
+  # Same reason as the logs Firehoses above.
+  depends_on = [aws_iam_role_policy.firehose]
 }
 
 data "aws_iam_policy_document" "metric_stream_assume" {
@@ -303,7 +316,7 @@ data "aws_iam_policy_document" "metric_stream" {
 }
 
 resource "aws_iam_role" "metric_stream" {
-  name               = "forge-central-metric-stream"
+  name               = "forge-central-metric-stream-${local.region}"
   assume_role_policy = data.aws_iam_policy_document.metric_stream_assume.json
 }
 

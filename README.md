@@ -558,7 +558,9 @@ Leave the backend's `region` at `us-east-2`. It names the region the _state
 bucket_ is in, and the bucket is one per account, created by the account root.
 Pointing it at `us-west-2` makes `tofu init` fail against a bucket that is
 sitting right there. Nothing else needs changing and nothing needs deleting: the
-account-scoped resources are not in this directory to begin with.
+account-scoped resources are not in this directory to begin with, and the
+telemetry module's backup bucket and IAM roles, which share the account's
+namespace, take the region from the provider and so get their own names.
 
 #### Grafana values
 
