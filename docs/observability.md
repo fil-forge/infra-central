@@ -80,6 +80,10 @@ The provision Lambda, which uses the AWS-defined log group format:
 | `detected_level` | `info`                    | Loki, parsed from the line.                                             |
 | `aws_log_stream` | `hilt/hilt/3f9c…`         | Grafana. Structured metadata, so it is shown on a line but not indexed. |
 
+A few lines per stage carry no `aws_log_group` and read `CWL CONTROL MESSAGE: Checking health of
+destination Firehose.` CloudWatch Logs sends one when a subscription filter is created and again on
+occasion afterwards; they are not from any service and can be ignored.
+
 `service_name` is per stage rather than per service because one Firehose carries the whole stage
 and Loki derives that label from the Firehose's fixed attributes. Select a service by
 `aws_log_group`; the group name already carries the stage, so no second matcher is needed.
@@ -157,11 +161,20 @@ list, `aws_ecs_.*` for example.
 
 ## Is the pipeline itself healthy
 
-Each Firehose reports whether Grafana accepted its batches. A value below one for any stream
-means lines or samples are being held back:
+Each Firehose reports how old its oldest undelivered record is. A healthy stream sits at about the
+sixty-second buffering interval; a value that keeps climbing means Grafana is refusing batches:
 
 ```promql
-aws_firehose_delivery_to_http_endpoint_success_average{dimension_DeliveryStreamName=~"fc-.*-logs|forge-central-metrics"}
+aws_firehose_delivery_to_http_endpoint_data_freshness_maximum{dimension_DeliveryStreamName=~"fc-.*-logs|forge-central-metrics"}
+```
+
+The success metric is a count of delivery requests Grafana accepted per minute, and should track
+the requests the stream received. Zero successes against non-zero incoming requests is the same
+fault seen from the other side:
+
+```promql
+aws_firehose_delivery_to_http_endpoint_success_sum{dimension_DeliveryStreamName="fc-dev-logs"}
+aws_firehose_incoming_put_requests_sum{dimension_DeliveryStreamName="fc-dev-logs"}
 ```
 
 A batch Grafana refuses is written to the `forge-central-firehose-backup-<account id>-<region>` bucket under
