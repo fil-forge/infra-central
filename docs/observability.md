@@ -167,10 +167,15 @@ A batch Grafana refuses is written to the `forge-central-firehose-backup-<accoun
 a prefix named for the stream, and the reason is in the `/forge-central/firehose` CloudWatch log
 group, one stream per Firehose. An empty bucket is the healthy state.
 
-From the AWS side, the authoritative list of what a stage forwards:
+From the AWS side, the authoritative list of what a stage forwards. CloudWatch lists subscription
+filters per log group only, so the loop asks each of the stage's groups in turn:
 
 ```bash
-aws logs describe-subscription-filters --region us-east-2 \
-  --query "subscriptionFilters[].[logGroupName,destinationArn]" --output table
+for group in /aws/lambda/fc-<stage>-provision $(aws logs describe-log-groups --region us-east-2 \
+    --log-group-name-prefix /forge-central/<stage>/ \
+    --query "logGroups[].logGroupName" --output text); do
+  aws logs describe-subscription-filters --region us-east-2 --log-group-name "$group" \
+    --query "subscriptionFilters[].[logGroupName,destinationArn]" --output text
+done
 aws cloudwatch list-metric-streams --region us-east-2
 ```
