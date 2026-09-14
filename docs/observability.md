@@ -54,7 +54,8 @@ Only errors, across the stage:
 {service_name="forge-central-dev"} | json | level=~"(?i)error|fatal"
 ```
 
-Everything Forge Central ships from one AWS account, across stages:
+Everything Forge Central ships from the non-prod account, across stages (the constants module
+lists both account ids):
 
 ```logql
 {account_id="654654381893", aws_log_group=~"/forge-central/.*"}
