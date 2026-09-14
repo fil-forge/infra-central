@@ -1,7 +1,9 @@
 # Finding a stage's logs and metrics in Grafana
 
-Every Forge Central stage ships its CloudWatch logs and its AWS service metrics to the Filecoin
-Foundation Grafana Cloud stack. This page says what arrives, under which labels, and the queries
+Every Forge Central stage the deploy workflow applies ships its CloudWatch logs and its AWS
+service metrics to the Filecoin Foundation Grafana Cloud stack. A personal sandbox stage applied
+with `enable_log_forwarding = false` ships no logs, and its metrics arrive only because the
+account's metric stream cannot tell stages apart. This page says what arrives, under which labels, and the queries
 that find it. How the pipeline is built and why it is shaped that way is in [the telemetry
 decision](decisions/2026-09-grafana-telemetry.md).
 

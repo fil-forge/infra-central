@@ -36,6 +36,11 @@ bootstrap root grants the CI roles state access from it and the regional root cr
 Firehose from it. The CI workflow's matrix names the stages a third time in YAML, which cannot read
 a module output.
 
+A personal sandbox stage is applied from a laptop without a commit, so it is in no list and has no
+Firehose. The platform module's `enable_log_forwarding` variable turns the log-forwarding module
+off for such a stage, and every log group in it stays in CloudWatch only. The subscription filters
+are the one part of the pipeline a stage root creates, so that switch is the whole opt-out.
+
 ## The metric stream shares the account with FilOne's
 
 A metric stream ships every metric in the namespaces it names, for every resource in the account

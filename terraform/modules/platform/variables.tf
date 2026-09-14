@@ -90,6 +90,12 @@ variable "enable_global_accelerator" {
   default     = false
 }
 
+variable "enable_log_forwarding" {
+  description = "Ship every log group in the stage to Grafana through the Firehose the regional bootstrap root created for it. That Firehose exists only for stages in the constants module's stage lists, so a personal sandbox stage sets this to false or its first apply fails creating the subscription filters."
+  type        = bool
+  default     = true
+}
+
 variable "openbao_image" {
   description = "OpenBao image, pinned by digest so a replacement task can never pull different bytes. The openbao module requires the digest."
   type        = string

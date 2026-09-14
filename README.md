@@ -696,6 +696,14 @@ commit, no merge, no workflow run to wait for, which is the fastest loop for
 iterating on the provision Lambda. Leave it out of `check-and-deploy.yml`; that is what
 makes it yours.
 
+Set `enable_log_forwarding = false` in the copied `platform/main.tf`. The
+regional bootstrap root creates a log Firehose only for the stages in
+`nonprod_stages`, and a platform apply that forwards to a Firehose that does
+not exist fails creating its first subscription filter. The stage's logs stay
+in CloudWatch, where `scripts/tail-logs.sh` reads them. A sandbox that needs
+its logs in Grafana follows step 5 of [adding a stage](#adding-a-stage)
+instead, at the cost of a commit.
+
 What it costs is everything the dev stage gets from the workflow: a plan on every
 pull request, applies that cannot disagree with `main`, and an OpenTofu and
 provider version that is the same for everyone. Use it to iterate, not to host

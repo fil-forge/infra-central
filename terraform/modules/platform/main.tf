@@ -86,12 +86,19 @@ resource "aws_ecs_cluster" "this" {
 # and the ARN of the Firehose it ships them to. The Firehose is created by the
 # regional bootstrap root; this only names it. Every module below that owns a
 # log group takes the pair, and the apps root reads it from this root's outputs.
+# A stage without a Firehose, which is what a personal sandbox is, turns the
+# module off and every consumer receives null instead of the pair.
 module "log_forwarding" {
   source = "./log-forwarding"
+  count  = var.enable_log_forwarding ? 1 : 0
 
   stage      = var.stage
   region     = local.region
   account_id = local.account_id
+}
+
+locals {
+  log_forwarding = one(module.log_forwarding[*].log_forwarding)
 }
 
 module "provision" {
@@ -101,7 +108,7 @@ module "provision" {
   region     = local.region
   account_id = local.account_id
 
-  log_forwarding = module.log_forwarding.log_forwarding
+  log_forwarding = local.log_forwarding
 
   hostname_suffix       = var.hostname_suffix
   ingot_hostname_suffix = var.ingot_hostname_suffix
@@ -168,7 +175,7 @@ module "openbao" {
   namespace_id   = module.network.namespace_id
   namespace_name = module.network.namespace_name
 
-  log_forwarding = module.log_forwarding.log_forwarding
+  log_forwarding = local.log_forwarding
 
   # OpenBao's database is created by the seed phase.
   depends_on = [aws_lambda_invocation.seed]
