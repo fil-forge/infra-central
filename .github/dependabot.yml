@@ -96,19 +96,19 @@ updates:
   # only thing in a versions.tf in this repository is the constraint that stops
   # Terraform.
   #
-  # Globs rather than a list of the ten roots, so a new root within a stage or a
-  # new bootstrap region is covered the day someone adds it. A new stage still
-  # needs its own line here: the one glob that would cover every stage,
+  # Globs rather than a list of roots, so a new root within a stage or a new
+  # bootstrap region is covered the day someone adds it. A new stage still needs
+  # its own line here: the one glob that would cover every stage,
   # `/terraform/envs/*/*`, also matches envs/bootstrap/nonprod and
   # envs/bootstrap/prod, two directories that hold no configuration of their
   # own. A stage's line belongs in the same pull request as its first root.
   #
   # Grouped by dependency name, which is what collapses a provider bump across
-  # all ten roots into a single pull request. A plain `patterns` group has no
+  # every root into a single pull request. A plain `patterns` group has no
   # effect here: grouping happens within each directory, so it would still open
-  # ten. The constraint is `~> 6.0` everywhere, so a 6.x release changes no
-  # .tofu file and only moves the locked version in each root, which is the same
-  # diff ten times.
+  # one pull request per root. The constraint is `~> 6.0` everywhere, so a 6.x
+  # release changes no .tofu file and only moves the locked version in each
+  # root, which is the same diff in every one of them.
   - package-ecosystem: opentofu
     directories:
       - /terraform/envs/dev/*
