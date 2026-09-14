@@ -16,7 +16,7 @@ NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and t
 metrics arrive too, through the metric stream
 [fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
 
-**Not shipped.** Application metrics, since not all services exposes a `/metrics` endpoint yet;
+**Not shipped.** Application metrics, since not all services expose a `/metrics` endpoint yet;
 traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 respectively. Follow-up work:
 
 - [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Ship metrics from swarf, delegator and piri-signing-service to Grafana
