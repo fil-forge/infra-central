@@ -13,10 +13,11 @@ variable "stages" {
 # `op read` lines that export them as TF_VAR_* for an apply.
 #
 # The URL defaults name the filecoinfoundation stack, the same one fil-one/infra
-# and infra-nodes ship to. The 1Password item carries the stack's ordinary push
-# URLs; Grafana's Firehose endpoints are derived from those by swapping the host
-# prefix, `logs-prod3` to `aws-logs-prod3` and `prometheus-prod-10` to
-# `aws-metric-streams-prod-10`, which is what the defaults below hold.
+# and infra-nodes ship to, and match the GRAFANA_LOGS_URL and GRAFANA_METRICS_URL
+# fields of the 1Password item. These are Grafana's Firehose delivery endpoints,
+# on `aws-logs-*` and `aws-metric-streams-*` hosts. They differ from the plain
+# Loki and Prometheus push URLs Alloy uses on the appliances: Firehose has its
+# own delivery format and access-key header, so Grafana receives it separately.
 
 variable "grafana_logs_url" {
   description = "Grafana Cloud's Firehose endpoint for logs."

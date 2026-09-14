@@ -476,9 +476,11 @@ export TF_VAR_grafana_push_token="$(op read 'op://Fil One/Forge Central/GRAFANA/
 
 `op item get --vault "Fil One" "Forge Central"` lists the section's fields
 without revealing the token. The two `*_USER` values are the Loki and Prometheus
-instance ids of the stack. The item also carries the stack's plain push URLs;
-the module's defaults are the Firehose endpoints derived from them, so nothing
-needs setting for the URLs.
+instance ids of the stack. The item's two `*_URL` fields are the Firehose
+delivery endpoints, which are what the module defaults to, so nothing needs
+setting for them. They are not the plain Loki and Prometheus push URLs Alloy
+uses on the appliances: Firehose has its own delivery format and Grafana
+receives it on `aws-logs-*` and `aws-metric-streams-*` hosts.
 
 The token is a Grafana Cloud access policy token with the `logs:write` and
 `metrics:write` scopes, created under **Security → Access Policies** in the
