@@ -1,9 +1,8 @@
-# Resetting dev's data stores for a new appliance
+# Resetting data stores for a new appliance
 
-Run this when the dev FilOne Appliance is rebuilt from scratch and central has to
-forget the old node. Region retirement does not yet deregister a node from sprue
-and the delegator, so the shortcut in dev is to empty every store that holds
-node data and let the next apply rebuild them.
+Run this when the dev or staging FilOne Appliance is rebuilt from scratch and central has to forget
+the old node. Region retirement does not yet deregister a node from sprue and the delegator, so the
+shortcut is to empty every store that holds node data and let the next apply rebuild them.
 
 Postgres is private to the VPC and nobody holds a client for it, so the RDS
 instance is deleted and recreated rather than its databases dropped. OpenBao
@@ -24,6 +23,7 @@ instance goes until the apply brings it back, which is fine in dev.
   aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
   aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
   ```
+
 - **Every central service's `identity` key and `postgres-dsn`.** The seed phase
   recreates each role on the new instance and applies the stored password
   unconditionally, so the DSNs the services already read keep working.
@@ -53,11 +53,12 @@ instance goes until the apply brings it back, which is fine in dev.
   previous copy. Deleting it makes the onboard log "issued hilt's S3
   delegation to the appliance", which is the signal the last step checks for.
 
-Dev currently onboards one region, `us-east-9`. Repeat the per-region steps for
-any other region in `appliance_regions` in
-`terraform/envs/dev/platform/terraform.tfvars`.
+Dev & staging currently onboards one region, `us-east-9`. Repeat the per-region steps for any other
+region in `appliance_regions` in `terraform/envs/dev/platform/terraform.tfvars`.
 
 ## Procedure
+
+**Expect this to take 60-90 minutes to execute.**
 
 Have the pull request from step 3 open and approved before step 1. Once the
 instance is gone, any other push to `main` (an image bump, say) applies and
@@ -181,37 +182,26 @@ scripts/wait-services-stable.sh "$CLUSTER"
 make smoke STAGE=dev
 ```
 
-### 6. Mint the new node's unseal token
+### 6. Wipe out the node
 
-Once the node's own apply has allocated its Elastic IP:
+_We will update this section with concrete instructions once we run the reset for the first time._
 
-```bash
-make mint-appliance-token STAGE=dev REGION=us-east-9 NODE_IP=<node's Elastic IP>
-```
+If you are resetting the dev env, the easiest way to reset the regional node is to destroy the AWS EC2 instance and create it again.
 
-The plan prints the old accessor with `live: false` and `Action: mint`. If it
-says `refuse`, OpenBao still holds the old token, which means its storage was
-not wiped; stop and find out why. Hand the wrapping token to the node operator
-and follow infra-nodes' runbook for the node's bring-up.
+For nodes where we cannot recreate the entire machine, like the bare-metal box in Amsterdam where
+our staging region runs, we need to wipe out the control & data plan, and the unseal token.
 
-### 7. Register the node
+### 7. Onboard the node
 
-Run once the node has provisioned its keys. sprue is empty, so the Piri proof is
-required:
+Follow the onboarding guides:
 
-```bash
-make onboard-appliance STAGE=dev REGION=us-east-9 \
-  PIRI_DID=<from the new node> \
-  PIRI_URL=<from the new node> \
-  PIRI_PROOF=piri-proof.txt \
-  ONBOARD_ARGS="--proof-out ingot-proof.txt"
-```
+- [Mint the unseal token](./appliance-onboarding.md#minting-the-unseal-token)
+- [Provision the appliance platform](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#4-the-platform)
+- [Create onboarding request](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#5-onboarding-then-the-apps)
+- [Register the node](./appliance-onboarding#registering-the-node)
 
-The log line to look for is **"issued hilt's S3 delegation to the appliance"**.
-"returning the delegation issued earlier" means step 2's delete didn't take.
-
-hilt and sprue cache a resolved DID document for three hours, and the Ingot's
-document now publishes a new key:
+Hilt and Sprue cache a resolved DID document for three hours, and the Ingot's
+document now publishes a new key. Restart the services to empty their caches:
 
 ```bash
 aws ecs update-service --cluster fc-dev --service fc-dev-hilt --force-new-deployment
@@ -220,7 +210,7 @@ aws ecs update-service --cluster fc-dev --service fc-dev-sprue --force-new-deplo
 
 Hand `ingot-proof.txt` to the node operator for `store-hilt-proof.sh`.
 
-### 8. Confirm
+### 9. Confirm
 
 ```bash
 make smoke STAGE=dev
