@@ -63,6 +63,24 @@ resource "aws_cloudwatch_log_group" "this" {
   retention_in_days = var.log_retention_days
 }
 
+# Ships every event in the group to the stage's Firehose, and from there to
+# Grafana Loki, where the group name becomes the `aws_log_group` label. The
+# group itself stays, with its retention, for `aws logs tail` and the deploy
+# workflow's diagnose job.
+#
+# count on the object being null rather than on a field inside it: whether the
+# caller passed the pair is known at plan time even when the role it names is
+# created in the same apply, as it is in the platform root.
+resource "aws_cloudwatch_log_subscription_filter" "grafana" {
+  count = var.log_forwarding == null ? 0 : 1
+
+  name            = "grafana-loki"
+  log_group_name  = aws_cloudwatch_log_group.this.name
+  filter_pattern  = ""
+  destination_arn = var.log_forwarding.firehose_arn
+  role_arn        = var.log_forwarding.role_arn
+}
+
 resource "aws_ecs_task_definition" "this" {
   family                   = local.name
   requires_compatibilities = ["FARGATE"]

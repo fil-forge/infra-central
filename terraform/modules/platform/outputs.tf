@@ -89,6 +89,11 @@ output "openbao_internal_address" {
   value = module.openbao.internal_address
 }
 
+output "log_forwarding" {
+  description = "The Firehose ARN and role the apps root passes to every service, so their log groups ship to Grafana the same way this root's do. Null when the stage does not forward logs."
+  value       = local.log_forwarding
+}
+
 output "openbao_public_url" {
   value = module.openbao.public_url
 }

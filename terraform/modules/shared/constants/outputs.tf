@@ -18,3 +18,19 @@ output "provision_repository_name" {
   description = "ECR repository holding the provision Lambda image. A stage derives its image URL from this name plus its own account and region, so the URL cannot disagree with the repository the bootstrap workspace created."
   value       = "forge-central/provision"
 }
+
+# The stages each account holds. Read by both bootstrap roots in an account:
+# the account root grants the CI roles state access by stage prefix, and the
+# regional root creates one log Firehose per stage. A stage listed in one and
+# not the other either cannot plan or ships nothing to Grafana, so there is one
+# list. The CI workflow's matrix names the stages a third time in YAML, which
+# cannot read a module output; that copy is the one to keep in step by hand.
+output "nonprod_stages" {
+  description = "Stages deployed into the non-prod account."
+  value       = ["dev", "staging"]
+}
+
+output "prod_stages" {
+  description = "Stages deployed into the prod account."
+  value       = ["prod"]
+}

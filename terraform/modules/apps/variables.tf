@@ -142,3 +142,12 @@ variable "sizes" {
     plc             = { cpu = 256, memory = 512 }
   }
 }
+
+variable "log_forwarding" {
+  description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, read from the platform root's outputs and passed to every service. Null leaves the log groups in CloudWatch only."
+  type = object({
+    firehose_arn = string
+    role_arn     = string
+  })
+  default = null
+}

@@ -53,10 +53,11 @@ module "github_actions_iam" {
   account_id                = module.constants.nonprod_account_id
   state_bucket_name         = module.tfstate.bucket_name
 
-  # Every non-prod stage the workflow deploys. A stage added to
-  # .github/workflows/check-and-deploy.yml has to be added here too, or its first run
-  # fails reading state.
-  state_key_prefixes = ["dev", "staging"]
+  # Every non-prod stage the workflow deploys, from the one list the regional
+  # root also reads. A stage added to .github/workflows/check-and-deploy.yml has
+  # to be added to the constants module too, or its first run fails reading
+  # state.
+  state_key_prefixes = module.constants.nonprod_stages
 }
 
 output "state_bucket_name" {

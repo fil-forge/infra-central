@@ -6,6 +6,10 @@
 # service shows up without editing this script. Everything a stage writes lands
 # under /forge-central/<stage>/, except the Lambda, which AWS names for us.
 #
+# The same lines are in Grafana Cloud, where they can be searched across
+# services and stages; see docs/observability.md. This script is for the case
+# where the CloudWatch console is closer to hand than Grafana, and for CI.
+#
 # Usage:
 #   scripts/tail-logs.sh [stage] [--lines 10] [--since 1h]
 #
