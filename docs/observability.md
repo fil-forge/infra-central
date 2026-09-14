@@ -183,10 +183,9 @@ aws cloudwatch get-metric-statistics --region us-east-2 --namespace AWS/Firehose
 
 The success metric counts the delivery requests Grafana accepted per minute. Firehose holds
 records for sixty seconds before delivering, so on a quiet stream the requests received in one
-minute are often delivered in the next, and one delivery carries many of them. A single minute of
-incoming requests with no success means nothing. Compare the two over a window longer than the
-buffer; a stream that keeps receiving requests while accepting none, window after window, is the
-same fault seen from the other side:
+minute are often delivered in the next, and a single minute of incoming requests with no success
+means nothing. Compare the two over a window longer than the buffer; a stream that keeps receiving
+requests while accepting none, window after window, is the same fault seen from the other side:
 
 ```promql
 sum_over_time(aws_firehose_incoming_put_requests_sum{dimension_DeliveryStreamName="fc-dev-logs"}[10m])
