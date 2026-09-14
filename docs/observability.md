@@ -171,8 +171,12 @@ aws_firehose_delivery_to_http_endpoint_data_freshness_maximum{dimension_Delivery
 
 Every `AWS/Firehose` series reaches Grafana through the `forge-central-metrics` stream, that
 stream's own freshness included. When Grafana refuses its batches, the series above stops updating
-for every stream at once instead of climbing. A series that is stale or missing is the same fault,
-and the live reading is in CloudWatch. Times are UTC in the form `2026-09-14T13:00:00Z`:
+for every stream at once instead of climbing. Read staleness off `forge-central-metrics` alone.
+CloudWatch publishes metrics every minute, so that stream always has records and its series goes
+stale only when the stream is stuck. A log stream for a quiet stage reports no freshness while it
+has nothing to deliver, and the direct CloudWatch lookup below returns no datapoints for it either.
+The live reading for the metrics stream is in CloudWatch. Times are UTC in the form
+`2026-09-14T13:00:00Z`:
 
 ```bash
 aws cloudwatch get-metric-statistics --region us-east-2 --namespace AWS/Firehose \
