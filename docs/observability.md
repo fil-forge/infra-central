@@ -105,8 +105,25 @@ aws_rds_database_connections_average{dimension_DBInstanceIdentifier="fc-dev"}
 Server errors returned by the stage's services, per target group:
 
 ```promql
-sum by (dimension_TargetGroup) (aws_applicationelb_httpcode_target_5xx_count_sum{dimension_LoadBalancer=~"app/fc-dev.*"})
+sum by (dimension_TargetGroup) (aws_applicationelb_httpcode_target_5_xx_count_sum{dimension_LoadBalancer=~"app/fc-dev.*", dimension_AvailabilityZone="", dimension_TargetGroup!=""})
 ```
+
+Server errors per minute, per service, over a five-minute window:
+
+```promql
+sum by (service) (
+  label_replace(
+    sum_over_time(aws_applicationelb_httpcode_target_5_xx_count_sum{dimension_LoadBalancer=~"app/fc-dev.*", dimension_AvailabilityZone="", dimension_TargetGroup!=""}[5m]),
+    "service", "$1", "dimension_TargetGroup", "targetgroup/fc-dev-(.*)/.*"
+  )
+) / 5
+```
+
+The load balancer publishes every HTTP code metric three times: once per availability zone, once
+per target group and once for the whole balancer. The two extra matchers keep the per-target-group
+series only. CloudWatch publishes a 5xx count only in minutes when a service returned one, so an
+empty result means the service returned no server errors in the window. Each sample is one minute's
+count, so the query adds samples with `sum_over_time`.
 
 Provision Lambda errors, arriving through fil-one/infra's stream:
 
