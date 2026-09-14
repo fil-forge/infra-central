@@ -374,7 +374,11 @@ The dev and staging stages deploy themselves after their initial bootstrap.
 `.github/workflows/check-and-deploy.yml` runs `make check` on every pull request
 and every push to `main`; a pull request then plans all four roots, and a push
 applies and smoke-tests both stages. The OpenTofu version is pinned in the
-workflow rather than taken from an operator's machine.
+workflow rather than taken from an operator's machine. Each plan and apply job
+restores its OpenTofu plugin cache directory from the Actions cache, keyed on
+its root's `.terraform.lock.hcl`, so the provider download happens only when a
+lock file changes; GitHub throttles those downloads from shared runners and a
+throttled `tofu init` fails the job.
 
 `apps` reads `platform`'s state through `terraform_remote_state`, so ordering
 matters: `apply-dev-apps` waits on `apply-dev-platform`, and the corresponding

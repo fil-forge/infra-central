@@ -36,6 +36,19 @@ env:
   # what the plan jobs run. See modules/github-actions-iam.
   PLAN_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-plan
   APPLY_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-apply
+  # Where `tofu init` keeps downloaded providers, saved between runs by
+  # actions/cache in every job that runs it. The registry serves providers
+  # straight from GitHub Releases, and GitHub throttles unauthenticated downloads
+  # from the shared runner IPs: a bad minute fails `tofu init` three attempts in
+  # a row, and on 2026-09-14 it turned infra-nodes' main red for a commit that
+  # had passed as a pull request nine minutes earlier. With the cache, the
+  # download happens only when a lock file changes.
+  #
+  # An absolute path built from the workspace: tofu does not expand `~` in this
+  # variable. The CLI checks the directory exists on every command, so every job
+  # that runs tofu creates it first: `tofu init` fails without it, and `tofu fmt`
+  # prints a CLI configuration error and carries on.
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
 
 jobs:
   # gofmt, go vet, go test, tofu fmt and shellcheck. No AWS credentials:
@@ -66,6 +79,12 @@ jobs:
           # GITHUB_PATH applies to later steps, so a bare `shellcheck` here
           # would report the runner image's 0.9.0 instead.
           "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" --version
+
+      # tofu fmt reads no providers, but it still validates TF_PLUGIN_CACHE_DIR
+      # and prints "The specified plugin cache dir ... cannot be opened" when the
+      # directory is missing. The exit code is still 0, so this is only about
+      # keeping that error out of the log of the one job everything else waits on.
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - run: make check
 
@@ -144,6 +163,19 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-${{ github.run_id }}
 
+      # Keyed on this root's own lock file rather than on all of them. actions/cache
+      # saves only on a miss, so one key shared by every root would be saved by
+      # whichever job finished first and stay frozen with that root's provider
+      # version if the roots ever resolved different ones, as staging did until
+      # 2026-09-14. Today every lock file is byte-identical and the five jobs
+      # share one entry; the per-root key costs nothing while that holds.
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles(format('terraform/envs/{0}/.terraform.lock.hcl', matrix.root)) }}
+
       - run: tofu init -input=false
 
       # A lock timeout rather than failing the moment the lock is held: the state
@@ -184,6 +216,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-apply-${{ github.run_id }}
 
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/dev/platform/.terraform.lock.hcl') }}
+
       - run: tofu init -input=false
 
       # -auto-approve, and the log is the audit trail: apply prints the whole plan
@@ -215,6 +254,13 @@ jobs:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-apply-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/dev/apps/.terraform.lock.hcl') }}
 
       - run: tofu init -input=false
 
@@ -275,6 +321,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-apply-staging-${{ github.run_id }}
 
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/staging/platform/.terraform.lock.hcl') }}
+
       - run: tofu init -input=false
 
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
@@ -302,6 +355,13 @@ jobs:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-apply-staging-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/staging/apps/.terraform.lock.hcl') }}
 
       - run: tofu init -input=false
 
