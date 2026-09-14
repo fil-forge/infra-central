@@ -110,9 +110,11 @@ These each cost an afternoon to rediscover.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on
-  stdout, collected by CloudWatch into `/forge-central/<stage>/<service>`, and
-  the provision Lambda into `/aws/lambda/fc-<stage>-provision`. Both are kept
-  for 30 days by default.
+  stdout, collected by CloudWatch into `/forge-central/<stage>/<service>` and
+  the provision Lambda into `/aws/lambda/fc-<stage>-provision`, both kept for
+  30 days, and forwarded from there to Grafana Cloud together with the AWS
+  metrics for ECS, the ALB, RDS and the NAT gateway. See
+  [docs/observability.md](docs/observability.md) for the labels and queries.
 - **swarf's `/revocations/:since` is a long-lived SSE stream**, so the ALB idle
   timeout is raised well above its 60-second default.
 - **did:web resolution goes over the public internet.** hilt resolves sprue at
@@ -150,6 +152,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 
 # Documentation beyond this file
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
+docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration
@@ -157,7 +160,7 @@ terraform/
   modules/                                         the wiring; see Stages below
   envs/                                            one directory per root module
     bootstrap/<account>/account/                   state bucket, CI roles
-    bootstrap/<account>/<region>/                  the image registry
+    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  committed, not deployed yet
@@ -211,13 +214,15 @@ it depends on:
 ```
 terraform/modules/
   platform/                everything the platform root builds
-    main.tf                the wiring, calling the seven below
+    main.tf                the wiring, calling the eight below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
+    log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root
     ecs-service/           apps, and openbao inside platform
     constants/             every root, bootstrap included
-  ecr/                     regional bootstrap only
+  ecr/                     regional bootstrap only: the image registry
+  telemetry/               regional bootstrap only: the Firehoses and metric stream to Grafana
   tfstate/                 account bootstrap only: the state bucket
   github-actions-iam/      account bootstrap only: the two CI roles
 ```
@@ -447,11 +452,30 @@ They come in two kinds, and the split is what keeps the second region cheap:
   plan and apply the stages. One per account. A bucket name is global and IAM is
   not regional, so a second region must not create these again.
 - `bootstrap/<account>/<region>/` — `forge-central/provision`, the **ECR
-  repository** for the provision Lambda image. One per account _and_ region:
-  Lambda pulls an image only from ECR in the same region as the function, and a
-  pull from another account needs a repository policy this project does not
-  create. Stages sharing an account and region share the repository and pin
-  different digests.
+  repository** for the provision Lambda image, and the **telemetry egress** to
+  Grafana Cloud: one log Firehose per stage and the account's metric stream.
+  One per account _and_ region: Lambda pulls an image only from ECR in the same
+  region as the function, and a metric stream covers one account in one region.
+  Stages sharing an account and region share the repository and pin different
+  digests, and each gets its own log Firehose from the stage list in
+  `terraform/modules/shared/constants`.
+
+The regional root holds the Grafana push token in its state, which is why it
+and not a stage root creates the Firehoses: the CI plan role reads stage state
+and must never see a secret. Applying it needs three values from the Grafana
+Cloud stack, passed as environment variables and committed nowhere:
+
+```bash
+export TF_VAR_grafana_logs_user=<Loki instance id>          # the Loki tile's user
+export TF_VAR_grafana_metrics_user=<Prometheus instance id> # the Prometheus tile's user
+export TF_VAR_grafana_push_token=<token>                    # see below
+```
+
+The token is a Grafana Cloud access policy token with the `logs:write` and
+`metrics:write` scopes, created under **Security → Access Policies** in the
+Grafana Cloud portal, the same kind infra-nodes' runbook describes for the
+appliances. Keep it in the team password manager. Rotating it is a new token, a
+new `TF_VAR_grafana_push_token`, and a `tofu apply` of this root.
 
 One thing has to exist before the account root can be applied, and nothing here
 creates it: the **GitHub OIDC provider**,
@@ -513,7 +537,7 @@ now exists — including the regional bootstrap beside it:
 ```bash
 cd ../us-east-2
 tofu init
-tofu apply                           # the image registry
+tofu apply                           # the image registry and the telemetry egress
 ```
 
 Every image this project publishes to ECR lives under the `forge-central/`
@@ -617,10 +641,13 @@ Then, in the copy:
    copied from dev's, which names the stage whose logs it tails. Add both apply
    jobs and the smoke job to `notify-failure`'s `needs`; a failure in a job it
    does not name announces nothing.
-5. Add `"bajtos"` to `state_key_prefixes` on the `github_actions_iam` module in
-   `terraform/envs/bootstrap/nonprod/account/main.tf` and apply that root. The
-   CI roles are granted the state keys they may touch by prefix, so without this
-   the stage's first run fails reading its own state.
+5. Add `"bajtos"` to `nonprod_stages` in
+   `terraform/modules/shared/constants/outputs.tf` and apply both bootstrap
+   roots for the account. The account root grants the CI roles the state keys
+   they may touch by stage prefix, so without this the stage's first run fails
+   reading its own state. The regional root creates the stage's log Firehose,
+   so without it the stage's first platform apply fails creating its
+   subscription filters, with an error naming the missing stream.
 6. Apply the new stage's platform root locally once. The apps root reads the
    platform's remote state, so its first CI plan cannot run until that state
    exists. Do not apply the apps root yet; the workflow will do that after the

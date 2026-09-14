@@ -42,7 +42,9 @@ module "github_actions_iam" {
   account_id                = module.constants.prod_account_id
   state_bucket_name         = module.tfstate.bucket_name
 
-  state_key_prefixes = ["prod"]
+  # From the one list the regional root will also read once prod ships
+  # telemetry; see the constants module.
+  state_key_prefixes = module.constants.prod_stages
 }
 
 output "state_bucket_name" {

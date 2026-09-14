@@ -86,6 +86,16 @@ module "apps" {
 
   openbao_internal_address = local.platform.openbao_internal_address
 
+  # The Firehose and role the platform root created for its own log groups.
+  #
+  # try(), because this root plans against the platform state as last applied,
+  # and a pull request that adds a key to that output plans before the key
+  # exists. A missing attribute on the remote state object is an error rather
+  # than a null, so without the fallback every apps plan on such a pull request
+  # fails until the platform root has applied. With it the plan shows no
+  # subscription filters, and the apply after apply-staging-platform creates them.
+  log_forwarding = try(local.platform.log_forwarding, null)
+
   # Neither service is deployed yet. The delegator validates proofs signed by
   # these DIDs at startup, so the names have to be settled even though nothing
   # answers at them.

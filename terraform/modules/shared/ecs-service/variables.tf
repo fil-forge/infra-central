@@ -238,6 +238,15 @@ variable "log_retention_days" {
   default = 30
 }
 
+variable "log_forwarding" {
+  description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, from modules/platform/log-forwarding. Null leaves the log group in CloudWatch only."
+  type = object({
+    firehose_arn = string
+    role_arn     = string
+  })
+  default = null
+}
+
 variable "tmp_size_mib" {
   description = <<-EOT
     Size of the /tmp tmpfs, the container's only writable path. The default

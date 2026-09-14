@@ -107,3 +107,12 @@ variable "allow_list_table_arn" {
   description = "ARN of the same table, which is what the role is granted on."
   type        = string
 }
+
+variable "log_forwarding" {
+  description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, from the log-forwarding module. Null leaves the function's log group in CloudWatch only."
+  type = object({
+    firehose_arn = string
+    role_arn     = string
+  })
+  default = null
+}

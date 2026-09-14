@@ -70,6 +70,8 @@ module "sprue" {
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
 
+  log_forwarding = var.log_forwarding
+
   environment = {
     SPRUE_SERVER_HOST          = "0.0.0.0"
     SPRUE_SERVER_PORT          = "8080"
@@ -154,6 +156,8 @@ module "hilt" {
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
 
+  log_forwarding = var.log_forwarding
+
   environment = {
     # hilt binds 127.0.0.1 by default, which no health check can reach.
     HILT_SERVER_HOST = "0.0.0.0"
@@ -228,6 +232,8 @@ module "swarf" {
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
 
+  log_forwarding = var.log_forwarding
+
   environment = {
     SWARF_SERVER_HOST = "0.0.0.0"
     SWARF_SERVER_PORT = "8080"
@@ -279,6 +285,8 @@ module "delegator" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
+
+  log_forwarding = var.log_forwarding
 
   environment = {
     REGISTRAR_SERVER_HOST = "0.0.0.0"
@@ -381,6 +389,8 @@ module "signing_service" {
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
 
+  log_forwarding = var.log_forwarding
+
   environment = {
     SIGNING_SERVICE_HOST                     = "0.0.0.0"
     SIGNING_SERVICE_PORT                     = "7446"
@@ -426,6 +436,8 @@ module "plc" {
   vpc_id            = var.vpc_id
   subnet_ids        = var.subnet_ids
   security_group_id = var.security_group_id
+
+  log_forwarding = var.log_forwarding
 
   environment = {
     ENABLE_MIGRATIONS = "true"

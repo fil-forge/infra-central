@@ -139,3 +139,12 @@ variable "memory" {
   type    = number
   default = 1024
 }
+
+variable "log_forwarding" {
+  description = "Passed through to the ecs-service module. Null leaves OpenBao's log group in CloudWatch only."
+  type = object({
+    firehose_arn = string
+    role_arn     = string
+  })
+  default = null
+}

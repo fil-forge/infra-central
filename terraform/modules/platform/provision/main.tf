@@ -76,6 +76,18 @@ resource "aws_cloudwatch_log_group" "this" {
   retention_in_days = var.log_retention_days
 }
 
+# The same filter every ECS service gets in modules/shared/ecs-service, so the
+# Lambda's log lands in Grafana beside theirs, labelled with this group's name.
+resource "aws_cloudwatch_log_subscription_filter" "grafana" {
+  count = var.log_forwarding == null ? 0 : 1
+
+  name            = "grafana-loki"
+  log_group_name  = aws_cloudwatch_log_group.this.name
+  filter_pattern  = ""
+  destination_arn = var.log_forwarding.firehose_arn
+  role_arn        = var.log_forwarding.role_arn
+}
+
 # The invocations live in the calling root rather than here, because the two
 # phases sit on opposite sides of OpenBao: seed must finish before OpenBao
 # starts (it creates OpenBao's database), and vault cannot run until OpenBao is
