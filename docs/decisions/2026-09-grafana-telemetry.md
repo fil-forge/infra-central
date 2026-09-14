@@ -19,7 +19,8 @@ So the Firehoses and the metric stream are in `terraform/modules/telemetry`, cal
 `terraform/envs/bootstrap/<account>/<region>/`, which an operator applies from a laptop. The
 operator passes the Loki instance id, the Prometheus instance id and an access policy token with
 `logs:write` and `metrics:write` as `TF_VAR_grafana_logs_user`, `TF_VAR_grafana_metrics_user` and
-`TF_VAR_grafana_push_token`. Nothing secret is committed. The CI roles need no new permission:
+`TF_VAR_grafana_push_token`, read from the Forge Central item in the Fil One 1Password vault.
+Nothing secret is committed. The CI roles need no new permission:
 `logs:*` covers subscription filters and the apply role may already write `fc-*` IAM roles.
 
 The stage roots create only what needs no token. `terraform/modules/platform/log-forwarding` makes

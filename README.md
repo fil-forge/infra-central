@@ -463,19 +463,28 @@ They come in two kinds, and the split is what keeps the second region cheap:
 The regional root holds the Grafana push token in its state, which is why it
 and not a stage root creates the Firehoses: the CI plan role reads stage state
 and must never see a secret. Applying it needs three values from the Grafana
-Cloud stack, passed as environment variables and committed nowhere:
+Cloud stack, passed as environment variables and committed nowhere. All three
+are in the **Forge Central** item of the **Fil One** vault in 1Password, under
+the `GRAFANA` section. With the [1Password CLI](https://developer.1password.com/docs/cli/)
+signed in:
 
 ```bash
-export TF_VAR_grafana_logs_user=<Loki instance id>          # the Loki tile's user
-export TF_VAR_grafana_metrics_user=<Prometheus instance id> # the Prometheus tile's user
-export TF_VAR_grafana_push_token=<token>                    # see below
+export TF_VAR_grafana_logs_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_LOGS_USER')"
+export TF_VAR_grafana_metrics_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_METRICS_USER')"
+export TF_VAR_grafana_push_token="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_CLOUD_PUSH_TOKEN')"
 ```
+
+`op item get --vault "Fil One" "Forge Central"` lists the section's fields
+without revealing the token. The two `*_USER` values are the Loki and Prometheus
+instance ids of the stack. The item also carries the stack's plain push URLs;
+the module's defaults are the Firehose endpoints derived from them, so nothing
+needs setting for the URLs.
 
 The token is a Grafana Cloud access policy token with the `logs:write` and
 `metrics:write` scopes, created under **Security → Access Policies** in the
 Grafana Cloud portal, the same kind infra-nodes' runbook describes for the
-appliances. Keep it in the team password manager. Rotating it is a new token, a
-new `TF_VAR_grafana_push_token`, and a `tofu apply` of this root.
+appliances. Rotating it is a new token in the 1Password item and a `tofu apply`
+of this root.
 
 One thing has to exist before the account root can be applied, and nothing here
 creates it: the **GitHub OIDC provider**,

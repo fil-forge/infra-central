@@ -19,11 +19,15 @@
 # read; see modules/telemetry.
 #
 # Applying it takes three values from the Grafana Cloud stack, none of them
-# committed:
+# committed. All three are in 1Password, vault "Fil One", item "Forge Central",
+# section GRAFANA:
 #
-#   TF_VAR_grafana_logs_user      Loki instance id
-#   TF_VAR_grafana_metrics_user   Prometheus instance id
-#   TF_VAR_grafana_push_token     access policy token, logs:write + metrics:write
+#   TF_VAR_grafana_logs_user      GRAFANA_LOGS_USER          Loki instance id
+#   TF_VAR_grafana_metrics_user   GRAFANA_METRICS_USER       Prometheus instance id
+#   TF_VAR_grafana_push_token     GRAFANA_CLOUD_PUSH_TOKEN   logs:write + metrics:write
+#
+# The README's "First time in an account and region" section has the `op read`
+# lines that export them.
 #
 # Adding a region means copying this directory and changing two things, the
 # provider region below and the backend key in versions.tofu. Nothing else in the
@@ -58,17 +62,17 @@ module "telemetry" {
 }
 
 variable "grafana_logs_user" {
-  description = "Loki instance id of the Grafana Cloud stack. TF_VAR_grafana_logs_user."
+  description = "Loki instance id of the Grafana Cloud stack. GRAFANA_LOGS_USER in 1Password; TF_VAR_grafana_logs_user."
   type        = string
 }
 
 variable "grafana_metrics_user" {
-  description = "Prometheus instance id of the Grafana Cloud stack. TF_VAR_grafana_metrics_user."
+  description = "Prometheus instance id of the Grafana Cloud stack. GRAFANA_METRICS_USER in 1Password; TF_VAR_grafana_metrics_user."
   type        = string
 }
 
 variable "grafana_push_token" {
-  description = "Grafana Cloud access policy token with logs:write and metrics:write. TF_VAR_grafana_push_token."
+  description = "Grafana Cloud access policy token with logs:write and metrics:write. GRAFANA_CLOUD_PUSH_TOKEN in 1Password; TF_VAR_grafana_push_token."
   type        = string
   sensitive   = true
 }

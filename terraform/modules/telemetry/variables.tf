@@ -8,12 +8,15 @@ variable "stages" {
   }
 }
 
-# The two push URLs and two instance ids are on the Grafana Cloud stack's
-# details page, on the Loki and Prometheus tiles. The URL defaults name the
-# filecoinfoundation stack, the same one fil-one/infra and infra-nodes ship to.
-# Grafana's Firehose endpoints are derived from the stack's ordinary push URLs
-# by swapping the host prefix: `logs-prod3` becomes `aws-logs-prod3`,
-# `prometheus-prod-10` becomes `aws-metric-streams-prod-10`.
+# The two instance ids and the token are in 1Password: vault "Fil One", item
+# "Forge Central", section GRAFANA. The README's bootstrap section has the
+# `op read` lines that export them as TF_VAR_* for an apply.
+#
+# The URL defaults name the filecoinfoundation stack, the same one fil-one/infra
+# and infra-nodes ship to. The 1Password item carries the stack's ordinary push
+# URLs; Grafana's Firehose endpoints are derived from those by swapping the host
+# prefix, `logs-prod3` to `aws-logs-prod3` and `prometheus-prod-10` to
+# `aws-metric-streams-prod-10`, which is what the defaults below hold.
 
 variable "grafana_logs_url" {
   description = "Grafana Cloud's Firehose endpoint for logs."
@@ -22,7 +25,7 @@ variable "grafana_logs_url" {
 }
 
 variable "grafana_logs_user" {
-  description = "Loki instance id of the Grafana Cloud stack. The numeric user on the stack's Loki tile."
+  description = "Loki instance id of the Grafana Cloud stack. GRAFANA_LOGS_USER in the 1Password item."
   type        = string
 }
 
@@ -33,7 +36,7 @@ variable "grafana_metrics_url" {
 }
 
 variable "grafana_metrics_user" {
-  description = "Prometheus instance id of the Grafana Cloud stack. The numeric user on the stack's Prometheus tile, and different from the Loki one."
+  description = "Prometheus instance id of the Grafana Cloud stack. GRAFANA_METRICS_USER in the 1Password item, and different from the Loki one."
   type        = string
 }
 
@@ -45,7 +48,7 @@ variable "grafana_metrics_user" {
 # Stored in this root's state. That is the reason the module is in a bootstrap
 # root and not a stage root: see the header of main.tf.
 variable "grafana_push_token" {
-  description = "Grafana Cloud access policy token with the logs:write and metrics:write scopes. Pass it as TF_VAR_grafana_push_token; never commit it."
+  description = "Grafana Cloud access policy token with the logs:write and metrics:write scopes. GRAFANA_CLOUD_PUSH_TOKEN in the 1Password item; pass it as TF_VAR_grafana_push_token and never commit it."
   type        = string
   sensitive   = true
 }
