@@ -80,9 +80,10 @@ The provision Lambda, which uses the AWS-defined log group format:
 | `detected_level` | `info`                    | Loki, parsed from the line.                                             |
 | `aws_log_stream` | `hilt/hilt/3f9c…`         | Grafana. Structured metadata, so it is shown on a line but not indexed. |
 
-A few lines per stage carry no `aws_log_group` and read `CWL CONTROL MESSAGE: Checking health of
-destination Firehose.` CloudWatch Logs sends one when a subscription filter is created and again on
-occasion afterwards; they are not from any service and can be ignored.
+A few lines per stage carry no `aws_log_group` and read
+`CWL CONTROL MESSAGE: Checking health of destination Firehose.` CloudWatch Logs sends one when a
+subscription filter is created and again on occasion afterwards; they are not from any service and
+can be ignored.
 
 `service_name` is per stage rather than per service because one Firehose carries the whole stage
 and Loki derives that label from the Firehose's fixed attributes. Select a service by
@@ -168,13 +169,31 @@ sixty-second buffering interval; a value that keeps climbing means Grafana is re
 aws_firehose_delivery_to_http_endpoint_data_freshness_maximum{dimension_DeliveryStreamName=~"fc-.*-logs|forge-central-metrics"}
 ```
 
-The success metric is a count of delivery requests Grafana accepted per minute, and should track
-the requests the stream received. Zero successes against non-zero incoming requests is the same
-fault seen from the other side:
+Every `AWS/Firehose` series reaches Grafana through the `forge-central-metrics` stream, that
+stream's own freshness included. When Grafana refuses its batches, the series above stops updating
+for every stream at once instead of climbing. A series that is stale or missing is the same fault,
+and the live reading is in CloudWatch. Times are UTC in the form `2026-09-14T13:00:00Z`:
+
+```bash
+aws cloudwatch get-metric-statistics --region us-east-2 --namespace AWS/Firehose \
+    --metric-name DeliveryToHttpEndpoint.DataFreshness \
+    --dimensions Name=DeliveryStreamName,Value=forge-central-metrics \
+    --start-time <fifteen minutes ago> --end-time <now> --period 60 --statistics Maximum
+```
+
+The success metric counts the delivery requests Grafana accepted per minute. Firehose holds
+records for sixty seconds before delivering, so on a quiet stream the requests received in one
+minute are often delivered in the next, and one delivery carries many of them. A single minute of
+incoming requests with no success means nothing. Compare the two over a window longer than the
+buffer; a stream that keeps receiving requests while accepting none, window after window, is the
+same fault seen from the other side:
 
 ```promql
-aws_firehose_delivery_to_http_endpoint_success_sum{dimension_DeliveryStreamName="fc-dev-logs"}
-aws_firehose_incoming_put_requests_sum{dimension_DeliveryStreamName="fc-dev-logs"}
+sum_over_time(aws_firehose_incoming_put_requests_sum{dimension_DeliveryStreamName="fc-dev-logs"}[10m])
+```
+
+```promql
+sum_over_time(aws_firehose_delivery_to_http_endpoint_success_sum{dimension_DeliveryStreamName="fc-dev-logs"}[10m])
 ```
 
 A batch Grafana refuses is written to the `forge-central-firehose-backup-<account id>-<region>` bucket under

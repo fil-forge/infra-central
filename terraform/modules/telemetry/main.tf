@@ -42,8 +42,11 @@ locals {
 
   # Metric names arrive in Grafana as aws_<namespace>_<metric>_<statistic>.
   # AWS/Firehose is here so the pipeline reports on itself: a stream whose
-  # DeliveryToHttpEndpoint.Success drops is the signal that logs or metrics have
-  # stopped arriving, and it covers FilOne's Firehoses in the account as well.
+  # DeliveryToHttpEndpoint.DataFreshness keeps climbing is the signal that logs
+  # or metrics have stopped arriving, and it covers FilOne's Firehoses in the
+  # account as well. The metrics stream carries its own health series, so when
+  # it stalls the signal is that series going stale; docs/observability.md says
+  # where to read it then.
   metric_namespaces = [
     "AWS/ECS",
     "AWS/ApplicationELB",
