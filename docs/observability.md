@@ -1,9 +1,9 @@
 # Finding a stage's logs and metrics in Grafana
 
-Every Forge Central stage ships its CloudWatch logs and its AWS service metrics to the
-filecoinfoundation Grafana Cloud stack. This page says what arrives, under which labels, and the
-queries that find it. How the pipeline is built and why it is shaped that way is in
-[the telemetry decision](decisions/2026-09-grafana-telemetry.md).
+Every Forge Central stage ships its CloudWatch logs and its AWS service metrics to the Filecoin
+Foundation Grafana Cloud stack. This page says what arrives, under which labels, and the queries
+that find it. How the pipeline is built and why it is shaped that way is in [the telemetry
+decision](decisions/2026-09-grafana-telemetry.md).
 
 ## What ships
 
@@ -13,11 +13,15 @@ about a minute of being written. The CloudWatch groups stay as they are, thirty 
 
 **Metrics.** Everything AWS publishes for the stage's ECS services, load balancer, RDS instance,
 NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and the DynamoDB tables'
-metrics arrive too, through the metric stream fil-one/infra runs in the same account.
+metrics arrive too, through the metric stream
+[fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
 
-**Not shipped.** Application metrics, since no service exposes a `/metrics` endpoint yet
-([FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152)); traces; VPC flow logs; ALB
-access logs. The last two stay in CloudWatch and S3 respectively.
+**Not shipped.** Application metrics, since not all services exposes a `/metrics` endpoint yet;
+traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 respectively. Follow-up work:
+
+- [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Ship metrics from swarf, delegator and piri-signing-service to Grafana
+- [FIL-1143](https://linear.app/filecoin-foundation/issue/FIL-1143) Instrument Hilt to provide useful telemetry
+- [FIL-1144](https://linear.app/filecoin-foundation/issue/FIL-1144) Instrument Sprue to provide useful telemetry
 
 ## Where to look
 
@@ -54,7 +58,7 @@ Everything Forge Central ships from one AWS account, across stages:
 {account_id="654654381893", aws_log_group=~"/forge-central/.*"}
 ```
 
-The provision Lambda, which AWS names rather than us:
+The provision Lambda, which uses the AWS-defined log group format:
 
 ```logql
 {aws_log_group="/aws/lambda/fc-dev-provision"}
@@ -62,16 +66,16 @@ The provision Lambda, which AWS names rather than us:
 
 ### Log labels
 
-| Label            | Example                            | Set by                                                                     |
-| ---------------- | ---------------------------------- | -------------------------------------------------------------------------- |
-| `aws_log_group`  | `/forge-central/dev/hilt`          | Grafana, from the CloudWatch envelope. The one that names a service.        |
-| `service_name`   | `forge-central-dev`                | Loki, derived from `service`. One value per stage.                         |
-| `service`        | `forge-central-dev`                | The stage's Firehose.                                                      |
-| `environment`    | `dev`                              | The stage's Firehose.                                                      |
-| `account_id`     | `654654381893`                     | Grafana, from the envelope.                                                |
-| `origin`, `job`  | `cloudwatch`, `cloud/aws`          | Grafana. Every Firehose-delivered line carries both.                       |
-| `detected_level` | `info`                             | Loki, parsed from the line.                                                |
-| `aws_log_stream` | `hilt/hilt/3f9c…`                  | Grafana. Structured metadata, so it is shown on a line but not indexed.    |
+| Label            | Example                   | Set by                                                                  |
+| ---------------- | ------------------------- | ----------------------------------------------------------------------- |
+| `aws_log_group`  | `/forge-central/dev/hilt` | Grafana, from the CloudWatch envelope. The one that names a service.    |
+| `service_name`   | `forge-central-dev`       | Loki, derived from `service`. One value per stage.                      |
+| `service`        | `forge-central-dev`       | The stage's Firehose.                                                   |
+| `environment`    | `dev`                     | The stage's Firehose.                                                   |
+| `account_id`     | `654654381893`            | Grafana, from the envelope.                                             |
+| `origin`, `job`  | `cloudwatch`, `cloud/aws` | Grafana. Every Firehose-delivered line carries both.                    |
+| `detected_level` | `info`                    | Loki, parsed from the line.                                             |
+| `aws_log_stream` | `hilt/hilt/3f9c…`         | Grafana. Structured metadata, so it is shown on a line but not indexed. |
 
 `service_name` is per stage rather than per service because one Firehose carries the whole stage
 and Loki derives that label from the Firehose's fixed attributes. Select a service by
@@ -121,15 +125,15 @@ list, `aws_ecs_.*` for example.
 
 ### Which label names a stage
 
-| Namespace             | Label that carries the stage                                        |
-| --------------------- | ------------------------------------------------------------------- |
-| `AWS/ECS`             | `dimension_ClusterName="fc-<stage>"`, `dimension_ServiceName`       |
-| `AWS/ApplicationELB`  | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
-| `AWS/RDS`             | `dimension_DBInstanceIdentifier="fc-<stage>"`                       |
-| `AWS/NATGateway`      | `dimension_NatGatewayId`; the id is in the platform root's state    |
-| `AWS/Lambda`          | `dimension_FunctionName="fc-<stage>-provision"`                     |
-| `AWS/DynamoDB`        | `dimension_TableName=~"fc-<stage>-.*"`                              |
-| `AWS/Firehose`        | `dimension_DeliveryStreamName="fc-<stage>-logs"`                    |
+| Namespace            | Label that carries the stage                                          |
+| -------------------- | --------------------------------------------------------------------- |
+| `AWS/ECS`            | `dimension_ClusterName="fc-<stage>"`, `dimension_ServiceName`         |
+| `AWS/ApplicationELB` | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
+| `AWS/RDS`            | `dimension_DBInstanceIdentifier="fc-<stage>"`                         |
+| `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
+| `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
+| `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
+| `AWS/Firehose`       | `dimension_DeliveryStreamName="fc-<stage>-logs"`                      |
 
 ## Is the pipeline itself healthy
 

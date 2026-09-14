@@ -1,12 +1,14 @@
 # Logs and AWS metrics ship to Grafana Cloud from the bootstrap layer
 
 Every stage's CloudWatch log groups and the AWS metrics for its ECS services, load balancer, RDS
-instance, NAT gateway and Firehoses reach the filecoinfoundation Grafana Cloud stack. Logs go
-through one Kinesis Data Firehose per stage into Loki. Metrics go through one CloudWatch Metric
-Stream per account and region, and its own Firehose, into Prometheus. Where to find what arrives
-is in [docs/observability.md](../observability.md).
+instance, NAT gateway and Firehoses reach the filecoinfoundation Grafana Cloud stack.
 
-## The token-bearing resources live in the regional bootstrap root
+- Logs go through one Kinesis Data Firehose per stage into Loki.
+- Metrics go through one CloudWatch Metric Stream per account and region, and its own Firehose, into Prometheus.
+
+Where to find what arrives is in [docs/observability.md](../observability.md).
+
+## The resources requiring Grafana secrets live in the regional bootstrap root
 
 A Firehose keeps its HTTP endpoint access key as an ordinary attribute, and the AWS provider offers
 no write-only variant for it, so the Grafana push token lands in whichever state applies the
@@ -44,8 +46,7 @@ this repository shipped anything.
 
 Forge Central's stream names only what FilOne's does not: `AWS/ECS`, `AWS/ApplicationELB`,
 `AWS/RDS`, `AWS/NATGateway` and `AWS/Firehose`. Naming Lambda or DynamoDB here would ship every
-FilOne Lambda's samples twice, and Grafana Cloud rejects or double-counts a duplicate sample and
-bills for it either way.
+FilOne Lambda's samples twice.
 
 The alternative was to add the four namespaces to FilOne's stream and create nothing here. One
 stream per account is the natural unit and overlap becomes impossible, at the cost of putting a

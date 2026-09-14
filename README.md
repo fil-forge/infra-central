@@ -439,62 +439,47 @@ See [Planned work](#planned-work) for the manual steps that remain.
 Staging's capacity, durability, identity and promotion choices are recorded in
 [the staging environment decision](docs/decisions/2026-09-staging-environment.md).
 
-### First time in an account and region
+### Setting up an AWS account
 
 The bootstrap roots are always applied locally. They run rarely, they create the
 things everything else depends on, and so there is nothing for a pipeline to
-trigger on and no earlier apply to have created their state.
+trigger on and no earlier apply to have created their state. They come in two
+kinds, and the split is what keeps a second region cheap:
 
-They come in two kinds, and the split is what keeps the second region cheap:
+- `bootstrap/<account>/account/` holds the **state bucket** every other root in
+  the account keeps its state in, and the two **CI roles** GitHub Actions
+  assumes to plan and apply the stages. One per account: a bucket name is
+  global and IAM is not regional, so a second region must not create these
+  again.
+- `bootstrap/<account>/<region>/` holds the **ECR repository** for the provision
+  Lambda image and the **telemetry egress** to Grafana Cloud. One per account
+  _and_ region, described in [Setting up an AWS region](#setting-up-an-aws-region).
 
-- `bootstrap/<account>/account/` — the **state bucket** every other root in the
-  account keeps its state in, and the two **CI roles** GitHub Actions assumes to
-  plan and apply the stages. One per account. A bucket name is global and IAM is
-  not regional, so a second region must not create these again.
-- `bootstrap/<account>/<region>/` — `forge-central/provision`, the **ECR
-  repository** for the provision Lambda image, and the **telemetry egress** to
-  Grafana Cloud: one log Firehose per stage and the account's metric stream.
-  One per account _and_ region: Lambda pulls an image only from ECR in the same
-  region as the function, and a metric stream covers one account in one region.
-  Stages sharing an account and region share the repository and pin different
-  digests, and each gets its own log Firehose from the stage list in
-  `terraform/modules/shared/constants`.
+Both accounts this project uses already have an account root. Non-prod's has
+been applied; prod's is committed under `bootstrap/prod/` and has never been
+applied, so prod is the account that will walk through this section next.
 
-The regional root holds the Grafana push token in its state, which is why it
-and not a stage root creates the Firehoses: the CI plan role reads stage state
-and must never see a secret. Applying it needs three values from the Grafana
-Cloud stack, passed as environment variables and committed nowhere. All three
-are in the **Forge Central** item of the **Fil One** vault in 1Password, under
-the `GRAFANA` section. With the [1Password CLI](https://developer.1password.com/docs/cli/)
-signed in:
+#### Copying the root for a new account
 
-```bash
-export TF_VAR_grafana_logs_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_LOGS_USER')"
-export TF_VAR_grafana_metrics_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_METRICS_USER')"
-export TF_VAR_grafana_push_token="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_CLOUD_PUSH_TOKEN')"
-```
+Copy a `bootstrap/<account>/` directory, both the `account/` root and the
+regional one beside it. In the copies, point each provider at the account id it
+belongs to, set the bucket name in `account/main.tf` and in both `versions.tofu`
+backend blocks, and add that id to `terraform/modules/shared/constants` if it is
+not there yet.
 
-`op item get --vault "Fil One" "Forge Central"` lists the section's fields
-without revealing the token. The two `*_USER` values are the Loki and Prometheus
-instance ids of the stack. The item's two `*_URL` fields are the Firehose
-delivery endpoints, which are what the module defaults to, so nothing needs
-setting for them. They are not the plain Loki and Prometheus push URLs Alloy
-uses on the appliances: Firehose has its own delivery format and Grafana
-receives it on `aws-logs-*` and `aws-metric-streams-*` hosts.
+Every root reads its account id from that module, so an apply run with
+credentials for the wrong account fails at plan time rather than building a
+second working copy of the stage somewhere unexpected.
 
-The token is a Grafana Cloud access policy token with the `logs:write` and
-`metrics:write` scopes, created under **Security → Access Policies** in the
-Grafana Cloud portal, the same kind infra-nodes' runbook describes for the
-appliances. Rotating it is a new token in the 1Password item and a `tofu apply`
-of this root.
+#### The GitHub OIDC provider
 
 One thing has to exist before the account root can be applied, and nothing here
 creates it: the **GitHub OIDC provider**,
 `https://token.actions.githubusercontent.com`. It is one per account and shared
 with every other repository that deploys into that account, so
-`modules/github-actions-iam` reads it as a data source rather than owning it —
-creating it here would fail for the second repository to try, and a destroy would
-lock the first one out of its own CI.
+`modules/github-actions-iam` reads it as a data source rather than owning it.
+Creating it here would fail for the second repository to try, and a destroy
+would lock the first one out of its own CI.
 
 Both accounts this project uses already have it, so this matters only for an
 account nobody has deployed to from GitHub Actions before. Check:
@@ -519,6 +504,8 @@ policies require in their `aud` condition. Omit it from the client id list and
 every `sts:AssumeRoleWithWebIdentity` call is rejected. No `--thumbprint-list`:
 AWS no longer validates one for this provider.
 
+#### First apply of the account root
+
 The account root is the awkward one: its own backend points at the bucket it
 creates, so the first apply in a fresh account cannot use that backend. Run it
 against a local backend once, then move its state into the bucket it just made.
@@ -526,7 +513,7 @@ against a local backend once, then move its state into the bucket it just made.
 by accident:
 
 ```bash
-cd terraform/envs/bootstrap/nonprod/account
+cd terraform/envs/bootstrap/<account>/account
 
 printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
 tofu init
@@ -539,14 +526,76 @@ rm -f terraform.tfstate terraform.tfstate.backup
 tofu apply                           # the CI roles
 ```
 
-Note the two role ARNs it prints. `.github/workflows/check-and-deploy.yml` names them
-literally, so if they differ from what is there, the workflow needs updating.
+Note the two role ARNs it prints. `.github/workflows/check-and-deploy.yml` names
+them literally, so if they differ from what is there, the workflow needs
+updating.
 
-Every root after this one is ordinary — its backend block points at a bucket that
-now exists — including the regional bootstrap beside it:
+Every root after this one is ordinary, because its backend block points at a
+bucket that now exists. The regional root beside it comes next.
+
+### Setting up an AWS region
+
+The regional root, `bootstrap/<account>/<region>/`, holds two things:
+
+- `forge-central/provision`, the **ECR repository** for the provision Lambda
+  image. Lambda pulls an image only from ECR in the same region as the
+  function. Stages sharing an account and region share the repository and pin
+  different digests.
+- The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
+  the stage list in `terraform/modules/shared/constants`, and one CloudWatch
+  metric stream, which covers one account in one region.
+
+The first region of an account already has this directory next to the account
+root. For a further region, copy it:
 
 ```bash
-cd ../us-east-2
+cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonprod/us-west-2
+```
+
+Change two things in the copy: the `region` in the provider block, and the `key`
+in the `backend "s3"` block in `versions.tofu` (`bootstrap/us-west-2.tfstate`).
+Leave the backend's `region` at `us-east-2`. It names the region the _state
+bucket_ is in, and the bucket is one per account, created by the account root.
+Pointing it at `us-west-2` makes `tofu init` fail against a bucket that is
+sitting right there. Nothing else needs changing and nothing needs deleting: the
+account-scoped resources are not in this directory to begin with.
+
+#### Grafana values
+
+Applying the regional root needs three values from the Grafana Cloud stack,
+passed as environment variables and committed nowhere. All three are in the
+**Forge Central** item of the **Fil One** vault in 1Password, under the `GRAFANA`
+section. With the [1Password CLI](https://developer.1password.com/docs/cli/)
+signed in:
+
+```bash
+export TF_VAR_grafana_logs_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_LOGS_USER')"
+export TF_VAR_grafana_metrics_user="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_METRICS_USER')"
+export TF_VAR_grafana_push_token="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_CLOUD_PUSH_TOKEN')"
+```
+
+`op item get --vault "Fil One" "Forge Central"` lists the section's fields
+without revealing the token. The two `*_USER` values are the Loki and Prometheus
+instance ids of the stack. The item's two `*_URL` fields are the Firehose
+delivery endpoints, which are what the module defaults to, so nothing needs
+setting for them. They are not the plain Loki and Prometheus push URLs Alloy
+uses on the appliances: Firehose has its own delivery format and Grafana
+receives it on `aws-logs-*` and `aws-metric-streams-*` hosts.
+
+The token is a Grafana Cloud access policy token with the `logs:write` and
+`metrics:write` scopes, created under **Security → Access Policies** in the
+Grafana Cloud portal, the same kind infra-nodes' runbook describes for the
+appliances. Rotating it is a new token in the 1Password item and a `tofu apply`
+of this root. The token ends up in this root's state, which is why the
+Firehoses live in this root rather than in a stage root; see
+[the telemetry decision](docs/decisions/2026-09-grafana-telemetry.md).
+
+#### Applying the root and filling the repository
+
+The bucket already exists, so there is no bootstrap dance here:
+
+```bash
+cd terraform/envs/bootstrap/nonprod/us-east-2
 tofu init
 tofu apply                           # the image registry and the telemetry egress
 ```
@@ -562,7 +611,8 @@ Docker with buildx and AWS credentials for the target account, and it creates a
 builder cannot push by digest and cannot cross-build for arm64.
 
 ```bash
-make publish STAGE=dev
+make publish STAGE=dev                            # AWS_REGION defaults to us-east-2
+make publish STAGE=<stage> AWS_REGION=us-west-2   # a further region
 ```
 
 It pushes by digest and writes no tag, so the digest a stage pins is the only
@@ -574,56 +624,9 @@ image count starts to bother you.
 A stage needs nothing copied from the bootstrap output. It builds the image URL
 from its own account and region, which is the only registry its Lambda can pull
 from anyway; the account ids and the repository name live in
-`terraform/modules/shared/constants`.
-
-### Adding a region
-
-```bash
-cp -r terraform/envs/bootstrap/nonprod/us-east-2 terraform/envs/bootstrap/nonprod/us-west-2
-```
-
-Change two things in the copy: the `region` in the provider block, and the `key`
-in the `backend "s3"` block in `versions.tofu` (`bootstrap/us-west-2.tfstate`).
-
-Leave the backend's `region` at `us-east-2`. It names the region the _state
-bucket_ is in, not the region this root deploys into, and the bucket is one per
-account — created by `bootstrap/nonprod/account/`, which a regional copy does not
-touch. Pointing it at `us-west-2` makes `tofu init` fail against a bucket that is
-sitting right there.
-
-Nothing else needs changing, and nothing needs deleting: the account-scoped
-resources are not in this directory to begin with. So there is no bootstrap dance
-here — `tofu init` works immediately, because the bucket already exists:
-
-```bash
-cd terraform/envs/bootstrap/nonprod/us-west-2
-tofu init
-tofu apply
-```
-
-Then fill the repository:
-
-```bash
-make publish STAGE=<stage> AWS_REGION=us-west-2
-```
-
-The digest is derived from the image, not from where it is stored, so a stage in
-the new region can pin the same digest an existing stage already runs.
-
-### Adding an account
-
-Copy a `bootstrap/<account>/` directory, both the `account/` root and the
-regional one beside it. In the copies, point each provider at the account id it
-belongs to, set the bucket name in `account/main.tf` and in both `versions.tofu`
-backend blocks, and add that id to `terraform/modules/shared/constants` if it is
-not there yet. Confirm the account has the GitHub OIDC provider, which nothing
-here creates — see [First time in an account and
-region](#first-time-in-an-account-and-region) — then apply `account/` with the
-greenfield procedure there, and the regional root after it.
-
-Every root reads its account id from that module, so an apply run with
-credentials for the wrong account fails at plan time rather than building a second
-working copy of the stage somewhere unexpected.
+`terraform/modules/shared/constants`. The digest is derived from the image
+rather than from where it is stored, so a stage in a new region can pin the same
+digest an existing stage already runs.
 
 ### Adding a stage
 
@@ -654,11 +657,11 @@ Then, in the copy:
    does not name announces nothing.
 5. Add `"bajtos"` to `nonprod_stages` in
    `terraform/modules/shared/constants/outputs.tf` and apply both bootstrap
-   roots for the account. The account root grants the CI roles the state keys
-   they may touch by stage prefix, so without this the stage's first run fails
-   reading its own state. The regional root creates the stage's log Firehose,
-   so without it the stage's first platform apply fails creating its
-   subscription filters, with an error naming the missing stream.
+   roots for the account. The account root grants the CI roles state access by
+   stage prefix and the regional root creates the stage's log Firehose, so a
+   stage missing from the list either cannot read its own state or fails its
+   first platform apply creating its subscription filters. Why there is one
+   list is in [the telemetry decision](docs/decisions/2026-09-grafana-telemetry.md).
 6. Apply the new stage's platform root locally once. The apps root reads the
    platform's remote state, so its first CI plan cannot run until that state
    exists. Do not apply the apps root yet; the workflow will do that after the
@@ -666,34 +669,27 @@ Then, in the copy:
 7. Update the branch protection rule on `main`. The new stage adds two required
    checks, `plan-bajtos-platform` and `plan-bajtos-apps`, and a rule that does
    not name them will merge a pull request whose stage plan failed.
-8. Merge. The workflow reconciles the platform root, applies the apps root and
-   smoke-tests the stage.
+8. Merge. The stage's platform job reconciles the VPC, RDS, OpenBao and
+   secrets, its apps job applies the six services, and its smoke job tests the
+   public endpoints. Nothing in the apps root needs starting by hand.
+
+The first `platform` apply is slow: it waits for the OpenBao task's cold start
+before it can initialise it, inside a synchronous Lambda call that Lambda caps at
+15 minutes. If it times out there, re-run the job. The seed phase regenerates
+nothing that already exists, which is what protects funded wallets.
 
 Prod will differ from dev inside `main.tf` rather than by being a different
 shape: multi-AZ database, deletion protection on, a larger OpenBao connection
 budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
 is promoted rather than written by whatever was built last. It will also want a
-gated apply rather than dev's automatic one — see [Planned
-work](#planned-work).
-
-### Bringing up a stage
-
-After the initial platform apply described above, merge the stage's directories
-to `main`. The stage's platform job reconciles the VPC, RDS, OpenBao and
-secrets; its apps job then applies the six services.
-
-The first `platform` apply is slow: it waits for the OpenBao task's cold start
-before it can initialise it, inside a synchronous Lambda call that Lambda caps at
-15 minutes. If it times out there, re-run the job — the seed phase regenerates
-nothing that already exists, which is what protects funded wallets.
-
-Nothing in the apps root needs starting by hand. The push that adds the stage's
-directories is the same push that deploys its services.
+gated apply rather than dev's automatic one; see [Planned
+work](#planned-work). Staging's choices on the same points are recorded in
+[the staging environment decision](docs/decisions/2026-09-staging-environment.md).
 
 ### A personal sandbox stage
 
 Stage names are not limited to dev and prod. Copy `envs/dev` to `envs/<you>`, give
-it its own state key in the same bucket, and apply it from your machine — no
+it its own state key in the same bucket, and apply it from your machine: no
 commit, no merge, no workflow run to wait for, which is the fastest loop for
 iterating on the provision Lambda. Leave it out of `check-and-deploy.yml`; that is what
 makes it yours.

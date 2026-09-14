@@ -26,7 +26,7 @@
 #   TF_VAR_grafana_metrics_user   GRAFANA_METRICS_USER       Prometheus instance id
 #   TF_VAR_grafana_push_token     GRAFANA_CLOUD_PUSH_TOKEN   logs:write + metrics:write
 #
-# The README's "First time in an account and region" section has the `op read`
+# The README's "Setting up an AWS region" section has the `op read`
 # lines that export them.
 #
 # Adding a region means copying this directory and changing two things, the
