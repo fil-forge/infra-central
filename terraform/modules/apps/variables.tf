@@ -116,7 +116,7 @@ variable "chain" {
 }
 
 variable "allow_provision_without_payment_plan" {
-  description = "Lets sprue provision storage with no payment plan attached. True in smelt's staging."
+  description = "Lets sprue provision storage with no payment plan attached. Off in every stage: hilt registers each tenant as a sprue customer through /customer/add, which is the plan sprue looks for."
   type        = bool
   default     = false
 }

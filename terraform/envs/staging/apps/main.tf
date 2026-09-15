@@ -107,8 +107,9 @@ module "apps" {
   # One home per stage: the platform workspace owns it, this one reads it.
   chain = local.platform.chain
 
-  # Shared staging exercises uploads without requiring a funded payment plan.
-  allow_provision_without_payment_plan = true
+  # hilt registers every tenant with sprue as a customer carrying a product, so
+  # a space is provisioned against a plan here as it is in prod.
+  allow_provision_without_payment_plan = false
 
   log_level = "info"
 }
