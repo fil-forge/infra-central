@@ -37,7 +37,5 @@ chain = {
 # OpenBao seals against; moving it to the retired list destroys that key and
 # revokes the node's unseal token. A retired label stays in the second list, and
 # docs/appliance-onboarding.md is the procedure for both.
-#
-# eu-central-3 is the virtual S3 region label of the staging FilOne Appliance.
-appliance_regions         = ["eu-central-3"]
+appliance_regions         = ["eu-central-3", "pilot-mad"]
 retired_appliance_regions = []
