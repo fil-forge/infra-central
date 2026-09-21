@@ -34,6 +34,23 @@ traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 r
 
 Both are in Explore. Pick the data source, paste a query below, set the time range.
 
+## Dashboards
+
+Two dashboards read these two data sources, in the `Forge (managed in git)`
+folder. Both are parameterised by stage, and the second by region as well:
+
+| Dashboard                                                          | Covers           |
+| ------------------------------------------------------------------ | ---------------- |
+| [Forge Engineering](https://filecoinfoundation.grafana.net/d/pe7f4wn)   | Central services |
+| [Forge Regions](https://filecoinfoundation.grafana.net/d/fc-regions)    | Appliances       |
+
+They are committed, not edited in place: the JSON is in
+`terraform/envs/grafana/dashboards/` and applied from that root. A panel changes
+by pull request, and an export taken from the UI goes through
+`scripts/normalise-dashboard.sh` first. Why it is arranged that way, and what
+else in the stack the root is deliberately not allowed to touch, is in
+[decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
+
 ## Logs
 
 One service:
