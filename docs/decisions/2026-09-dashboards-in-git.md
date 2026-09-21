@@ -3,8 +3,8 @@
 The two Grafana dashboards on-call reads during a SpiderOak perf run or an SP
 deployment are committed here and applied with the Grafana Terraform provider:
 
-- `Forge Engineering`, uid `pe7f4wn`, the central services.
-- `Forge Regions`, uid `fc-regions`, the appliances.
+- `Forge Central`, uid `forge-central`, the central services.
+- `Forge Regions`, uid `forge-regions`, the appliances.
 
 They live in `terraform/envs/grafana/`, with the JSON beside the root in
 `dashboards/`. Where the metrics behind them come from is in
@@ -33,12 +33,13 @@ for Grafana v13 and later, and only the `spec` field for v12. Reducing these
 files to their `spec` would be the v12 shape and is wrong here.
 
 `metadata.name` is the uid, and it is load-bearing in content as well as in
-identity: the drill-down data link on each overview table hardcodes `/d/pe7f4wn`
-and `/d/fc-regions`. Renaming either breaks the links inside the other panels.
+identity: the drill-down data link on each overview table hardcodes
+`/d/forge-central` and `/d/forge-regions`. Renaming either breaks the links
+inside the other panels.
 
-`Forge Engineering` already exists in the stack, so the first apply has to import
-it. Creating it instead leaves two dashboards and every link anyone has saved
-still points at the first.
+Both dashboards already exist in the stack, so the first apply has to import
+them. Creating instead leaves a duplicate under a fresh uid while every link
+anyone has saved still points at the original.
 
 ## The credential cannot reach past one folder
 

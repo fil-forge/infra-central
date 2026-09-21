@@ -41,8 +41,8 @@ folder. Both are parameterised by stage, and the second by region as well:
 
 | Dashboard                                                          | Covers           |
 | ------------------------------------------------------------------ | ---------------- |
-| [Forge Engineering](https://filecoinfoundation.grafana.net/d/pe7f4wn)   | Central services |
-| [Forge Regions](https://filecoinfoundation.grafana.net/d/fc-regions)    | Appliances       |
+| [Forge Central](https://filecoinfoundation.grafana.net/d/forge-central)     | Central services |
+| [Forge Regions](https://filecoinfoundation.grafana.net/d/forge-regions)     | Appliances       |
 
 They are committed, not edited in place: the JSON is in
 `terraform/envs/grafana/dashboards/` and applied from that root. A panel changes

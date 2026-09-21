@@ -2,27 +2,27 @@
   "apiVersion": "dashboard.grafana.app/v2",
   "kind": "Dashboard",
   "metadata": {
-    "name": "fc-regions"
+    "name": "forge-regions"
   },
   "spec": {
     "annotations": [
       {
         "kind": "AnnotationQuery",
         "spec": {
-          "builtIn": true,
+          "query": {
+            "kind": "DataQuery",
+            "group": "grafana",
+            "version": "v0",
+            "datasource": {
+              "name": "-- Grafana --"
+            },
+            "spec": {}
+          },
           "enable": true,
           "hide": true,
           "iconColor": "rgba(0, 211, 255, 1)",
           "name": "Annotations & Alerts",
-          "query": {
-            "datasource": {
-              "name": "-- Grafana --"
-            },
-            "group": "grafana",
-            "kind": "DataQuery",
-            "spec": {},
-            "version": "v0"
-          }
+          "builtIn": true
         }
       }
     ],
@@ -32,6 +32,10 @@
       "panel-1": {
         "kind": "Panel",
         "spec": {
+          "id": 1,
+          "title": "Appliance health",
+          "description": "One row per appliance region. Each cell is a sparkline over the dashboard time range; the number beside it is the reduction: Status and Reconcile age = last value, CPU / Memory / Requests = mean, Disk and 5xx = max (worst filesystem, worst minute). Reconcile age turns red past 15 minutes, which is when the node has stopped reconciling. Status counts how many of the region's two scrapes answered, the host exporter and Caddy: the word is the state now (up = both, partial = one, down = neither) and the grey bars are the same count across the window, full height for both, half for one, a stub for neither. A notch in the bars is an incident, and its position is when. The bar colour is constant and means nothing. Requests and 5xx read no data rather than zero when the Caddy scrape is dark. Click a region to open its tab.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -39,179 +43,176 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "sum by (region) (\n  up{service_name=~\"appliance-.*-(host|caddy)\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "min by (region) (\n  time()\n  - deploy_last_success_timestamp{project=\"reconcile\", service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "B"
+                    "refId": "B",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "1 - avg by (region) (\n  rate(node_cpu_seconds_total{mode=\"idle\", service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "C"
+                    "refId": "C",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "max by (region) (\n  1 - node_memory_MemAvailable_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n    / node_memory_MemTotal_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "D"
+                    "refId": "D",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "max by (region) (\n  1 - node_filesystem_avail_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}\n    / node_filesystem_size_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "E"
+                    "refId": "E",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "sum by (region) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 60",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "F"
+                    "refId": "F",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "sum by (region) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\", code=~\"5..\"}[5m])\n) * 60\nor\nsum by (region) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 0",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{region}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{region}}",
+                        "range": true
+                      }
                     },
-                    "refId": "G"
+                    "refId": "G",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {
-                "maxDataPoints": 200
-              },
               "transformations": [
                 {
-                  "group": "timeSeriesTable",
                   "kind": "Transformation",
+                  "group": "timeSeriesTable",
                   "spec": {
                     "options": {
                       "A": {
@@ -239,8 +240,8 @@
                   }
                 },
                 {
-                  "group": "joinByField",
                   "kind": "Transformation",
+                  "group": "joinByField",
                   "spec": {
                     "options": {
                       "byField": "region",
@@ -249,48 +250,69 @@
                   }
                 },
                 {
-                  "group": "organize",
                   "kind": "Transformation",
+                  "group": "organize",
                   "spec": {
                     "options": {
                       "excludeByName": {},
                       "includeByName": {},
                       "indexByName": {
-                        "region": 0,
                         "Trend #A": 1,
                         "Trend #B": 2,
                         "Trend #C": 3,
                         "Trend #D": 4,
                         "Trend #E": 5,
                         "Trend #F": 6,
-                        "Trend #G": 7
+                        "Trend #G": 7,
+                        "region": 0
                       },
                       "renameByName": {
-                        "region": "Region",
                         "Trend #A": "Status",
                         "Trend #B": "Reconcile age",
                         "Trend #C": "CPU",
                         "Trend #D": "Memory",
                         "Trend #E": "Disk",
                         "Trend #F": "Requests/min",
-                        "Trend #G": "5xx/min"
+                        "Trend #G": "5xx/min",
+                        "region": "Region"
                       }
                     }
                   }
                 }
-              ]
+              ],
+              "queryOptions": {
+                "maxDataPoints": 200
+              }
             }
           },
-          "description": "One row per appliance region. Each cell is a sparkline over the dashboard time range; the number beside it is the reduction: Status and Reconcile age = last value, CPU / Memory / Requests = mean, Disk and 5xx = max (worst filesystem, worst minute). Status is the host node-exporter scrape (up), so it says the box is reachable and Alloy is pushing. Reconcile age turns red past 15 minutes, which is when the node has stopped reconciling. Status counts how many of the region's two scrapes answered, the host exporter and Caddy: the word is the state now (up = both, partial = one, down = neither) and the grey bars are the same count across the window, full height for both, half for one, a stub for neither. A notch in the bars is an incident, and its position is when. The bar colour is constant and means nothing. Requests and 5xx read no data rather than zero when the Caddy scrape is dark. Click a region to open its tab.",
-          "id": 1,
-          "links": [],
-          "title": "Appliance health",
           "vizConfig": {
-            "group": "table",
             "kind": "VizConfig",
+            "group": "table",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "cellHeight": "md",
+                "frameIndex": 0,
+                "showHeader": true,
+                "showTypeIcons": false,
+                "sortBy": [
+                  {
+                    "desc": false,
+                    "displayName": "Region"
+                  }
+                ]
+              },
               "fieldConfig": {
                 "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "text"
+                      }
+                    ]
+                  },
                   "custom": {
                     "align": "auto",
                     "cellOptions": {
@@ -301,15 +323,6 @@
                     },
                     "inspect": false,
                     "minWidth": 100
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "text",
-                        "value": 0
-                      }
-                    ]
                   }
                 },
                 "overrides": [
@@ -332,7 +345,7 @@
                         "value": [
                           {
                             "title": "Open this region's tab",
-                            "url": "/d/fc-regions?var-stage=$stage&dtab=${__data.fields.region}&${__url_time_range}"
+                            "url": "/d/forge-regions?var-stage=$stage&dtab=${__data.fields.region}&${__url_time_range}"
                           }
                         ]
                       }
@@ -347,14 +360,14 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
-                          "drawStyle": "bars",
-                          "hideValue": false,
-                          "showPoints": "never",
                           "barAlignment": 0,
-                          "lineWidth": 0,
+                          "drawStyle": "bars",
                           "fillOpacity": 100,
-                          "gradientMode": "none"
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineWidth": 0,
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -412,14 +425,14 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
                           "drawStyle": "line",
-                          "hideValue": false,
-                          "showPoints": "never",
-                          "lineWidth": 1,
-                          "lineInterpolation": "smooth",
                           "fillOpacity": 20,
-                          "gradientMode": "none"
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineInterpolation": "smooth",
+                          "lineWidth": 1,
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -463,14 +476,14 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
                           "drawStyle": "line",
-                          "hideValue": false,
-                          "showPoints": "never",
-                          "lineWidth": 1,
-                          "lineInterpolation": "smooth",
                           "fillOpacity": 20,
-                          "gradientMode": "none"
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineInterpolation": "smooth",
+                          "lineWidth": 1,
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -518,14 +531,14 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
                           "drawStyle": "line",
-                          "hideValue": false,
-                          "showPoints": "never",
-                          "lineWidth": 1,
-                          "lineInterpolation": "smooth",
                           "fillOpacity": 20,
-                          "gradientMode": "none"
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineInterpolation": "smooth",
+                          "lineWidth": 1,
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -573,14 +586,14 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
                           "drawStyle": "line",
-                          "hideValue": false,
-                          "showPoints": "never",
-                          "lineWidth": 1,
-                          "lineInterpolation": "smooth",
                           "fillOpacity": 20,
-                          "gradientMode": "none"
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineInterpolation": "smooth",
+                          "lineWidth": 1,
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -628,13 +641,13 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
-                          "drawStyle": "bars",
-                          "hideValue": false,
-                          "showPoints": "never",
                           "barAlignment": 0,
+                          "drawStyle": "bars",
+                          "fillOpacity": 70,
+                          "hideValue": false,
                           "lineWidth": 0,
-                          "fillOpacity": 70
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -659,13 +672,13 @@
                       {
                         "id": "custom.cellOptions",
                         "value": {
-                          "type": "sparkline",
-                          "drawStyle": "bars",
-                          "hideValue": false,
-                          "showPoints": "never",
                           "barAlignment": 0,
+                          "drawStyle": "bars",
+                          "fillOpacity": 80,
+                          "hideValue": false,
                           "lineWidth": 0,
-                          "fillOpacity": 80
+                          "showPoints": "never",
+                          "type": "sparkline"
                         }
                       },
                       {
@@ -701,27 +714,18 @@
                     ]
                   }
                 ]
-              },
-              "options": {
-                "cellHeight": "md",
-                "frameIndex": 0,
-                "showHeader": true,
-                "showTypeIcons": false,
-                "sortBy": [
-                  {
-                    "desc": false,
-                    "displayName": "Region"
-                  }
-                ]
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
-      "panel-3": {
+      "panel-10": {
         "kind": "Panel",
         "spec": {
+          "id": 10,
+          "title": "Request rate",
+          "description": "Every public request the appliance served, split by site and HTTP method, stacked so the top of the stack is total traffic. Method is the only operation kind Caddy sees: an S3 PutObject is a PUT to a bucket path, so PUT against the s3. host is the upload path. Read from the duration histogram's count, because caddy_http_requests_total carries neither a code nor a method label.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -729,114 +733,939 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "up{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
+                        "expr": "sum by (host, method) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 60",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "host @ {{node}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{host}} {{method}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "up{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "caddy @ {{node}}"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "B"
+                    "refId": "A",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Both scrapes for this region, split by node. Two boxes in one stage and region share service_name and are told apart by node.",
-          "id": 3,
-          "links": [],
-          "title": "Status",
           "vizConfig": {
-            "group": "state-timeline",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
-                    "mode": "continuous-GrYlRd"
+                    "mode": "palette-classic-by-name"
                   },
                   "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
                     "axisPlacement": "auto",
-                    "fillOpacity": 70,
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 25,
+                    "gradientMode": "none",
                     "hideFrom": {
                       "legend": false,
                       "tooltip": false,
                       "viz": false
                     },
                     "insertNulls": false,
-                    "lineWidth": 0,
-                    "spanNulls": false
-                  },
-                  "mappings": [
-                    {
-                      "options": {
-                        "0": {
-                          "color": "dark-red",
-                          "index": 0,
-                          "text": "down"
-                        },
-                        "1": {
-                          "color": "green",
-                          "index": 1,
-                          "text": "up"
-                        }
-                      },
-                      "type": "value"
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "normal"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
                     }
-                  ],
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-11": {
+        "kind": "Panel",
+        "spec": {
+          "id": 11,
+          "title": "Server errors",
+          "description": "5xx split by site, handler and code. A 502 is Caddy failing to reach the upstream; a 500 came from Piri or Ingot itself.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (host, handler, code) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\", code=~\"5..\"}[5m])\n) * 60",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{host}} {{handler}} {{code}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "cpm",
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
-                        "color": "green",
-                        "value": 0
+                        "value": 0,
+                        "color": "green"
                       },
                       {
-                        "color": "red",
-                        "value": 80
+                        "value": 80,
+                        "color": "red"
                       }
                     ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
                   }
                 },
                 "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-12": {
+        "kind": "Panel",
+        "spec": {
+          "id": 12,
+          "title": "Response time",
+          "description": "Round-trip time to last byte, per site: caddy_http_request_duration_seconds, the whole request. TTFB is the panel beside it. The average is sum/count; p95 reads the histogram buckets.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (host) (\n  rate(caddy_http_request_duration_seconds_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)\n/\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{host}} avg",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "histogram_quantile(0.95,\n  sum by (host, le) (\n    rate(caddy_http_request_duration_seconds_bucket{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n  )\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{host}} p95",
+                        "range": true
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
               },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "s",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-13": {
+        "kind": "Panel",
+        "spec": {
+          "id": 13,
+          "title": "Time since last deploy",
+          "description": "Age of each project's last successful pass, from the deploy stamp the reconcile timer writes through the textfile collector. The timer runs every five minutes, so a reconcile age past the 15-minute threshold line means the node has stopped reconciling. apps and platform move only when that project actually deployed, so they climb between releases and that is normal.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "time() - deploy_last_success_timestamp{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", project=~\"apps|platform|reconcile\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{project}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "s",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 900,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "dashed"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-14": {
+        "kind": "Panel",
+        "spec": {
+          "id": 14,
+          "title": "Error rate",
+          "description": "5xx responses as a share of everything the site served. The trailing `or ... * 0` holds the line at zero for a site with traffic and no errors; a site with no data at all drops out rather than reading zero. Threshold lines at 1% and 5%.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\", code=~\"5..\"}[5m])\n)\n/\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)\nor\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 0",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{host}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 0.01,
+                        "color": "orange"
+                      },
+                      {
+                        "value": 0.05,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "dashed"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-15": {
+        "kind": "Panel",
+        "spec": {
+          "id": 15,
+          "title": "Ingress / egress",
+          "description": "Bytes in and out through Caddy, which is every public request the region serves. Taken from the histograms' _sum, so the figure is exact and does not depend on the size buckets. The node exporter's network collector is not shipped, so this is the appliance's traffic rather than the host interface's.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum(\n  rate(caddy_http_request_size_bytes_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "ingress",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum(\n  rate(caddy_http_response_size_bytes_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "egress",
+                        "range": true
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "Bps",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-16": {
+        "kind": "Panel",
+        "spec": {
+          "id": 16,
+          "title": "TTFB",
+          "description": "Time to first byte, p95, per site and method. caddy_http_response_duration_seconds is Caddy's own \"times to first byte in response bodies\" histogram, distinct from request_duration_seconds, which is the whole round trip. Split by method so uploads can be read apart from reads.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "histogram_quantile(0.95,\n  sum by (host, method, le) (\n    rate(caddy_http_response_duration_seconds_bucket{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n  )\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{host}} {{method}} p95",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "s",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "Status",
+          "description": "Both scrapes for this region, split by node. Two boxes in one stage and region share service_name and are told apart by node.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "up{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "host @ {{node}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "up{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "caddy @ {{node}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "state-timeline",
+            "version": "13.3.0-35049663052",
+            "spec": {
               "options": {
                 "alignValue": "center",
                 "legend": {
@@ -852,15 +1681,68 @@
                   "mode": "single",
                   "sort": "none"
                 }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "mappings": [
+                    {
+                      "type": "value",
+                      "options": {
+                        "0": {
+                          "text": "down",
+                          "color": "dark-red",
+                          "index": 0
+                        },
+                        "1": {
+                          "text": "up",
+                          "color": "green",
+                          "index": 1
+                        }
+                      }
+                    }
+                  ],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "continuous-GrYlRd"
+                  },
+                  "custom": {
+                    "axisPlacement": "auto",
+                    "fillOpacity": 70,
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineWidth": 0,
+                    "spanNulls": false
+                  }
+                },
+                "overrides": []
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-4": {
         "kind": "Panel",
         "spec": {
+          "id": 4,
+          "title": "CPU",
+          "description": "Share of a core spent in each non-idle mode, averaged across cores. Stacked, so the top of the stack is total CPU busy.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -868,42 +1750,67 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "avg by (mode) (\n  rate(node_cpu_seconds_total{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", mode!=\"idle\"}[5m])\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{mode}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{mode}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Share of a core spent in each non-idle mode, averaged across cores. Stacked, so the top of the stack is total CPU busy.",
-          "id": 4,
-          "links": [],
-          "title": "CPU",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic"
                   },
@@ -940,46 +1847,21 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "percentunit"
+                  }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-5": {
         "kind": "Panel",
         "spec": {
+          "id": 5,
+          "title": "Memory used",
+          "description": "Fraction of RAM not available to a new allocation. MemAvailable already discounts reclaimable cache, so this is closer to real pressure than used/total.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -987,42 +1869,72 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "1 - node_memory_MemAvailable_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n  / node_memory_MemTotal_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{node}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{node}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Fraction of RAM not available to a new allocation. MemAvailable already discounts reclaimable cache, so this is closer to real pressure than used/total.",
-          "id": 5,
-          "links": [],
-          "title": "Memory used",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "max": 1,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 0.8,
+                        "color": "orange"
+                      },
+                      {
+                        "value": 0.92,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic-by-name"
                   },
@@ -1059,51 +1971,21 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "max": 1,
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "orange",
-                        "value": 0.8
-                      },
-                      {
-                        "color": "red",
-                        "value": 0.92
-                      }
-                    ]
-                  },
-                  "unit": "percentunit"
+                  }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-6": {
         "kind": "Panel",
         "spec": {
+          "id": 6,
+          "title": "Load average",
+          "description": "Run-queue length. Compare against the box's core count: sustained load5 above that is saturation.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -1111,90 +1993,113 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "node_load1{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "1m"
-                      },
-                      "version": "v0"
+                        "legendFormat": "1m",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "node_load5{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "5m"
-                      },
-                      "version": "v0"
+                        "legendFormat": "5m",
+                        "range": true
+                      }
                     },
-                    "refId": "B"
+                    "refId": "B",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "node_load15{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "15m"
-                      },
-                      "version": "v0"
+                        "legendFormat": "15m",
+                        "range": true
+                      }
                     },
-                    "refId": "C"
+                    "refId": "C",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Run-queue length. Compare against the box's core count: sustained load5 above that is saturation.",
-          "id": 6,
-          "links": [],
-          "title": "Load average",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic-by-name"
                   },
@@ -1231,44 +2136,21 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
                   }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-7": {
         "kind": "Panel",
         "spec": {
+          "id": 7,
+          "title": "Disk I/O",
+          "description": "Throughput per block device from the diskstats collector.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -1276,66 +2158,90 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "sum by (device) (\n  rate(node_disk_read_bytes_total{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{device}} read"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{device}} read",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "sum by (device) (\n  rate(node_disk_written_bytes_total{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{device}} write"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{device}} write",
+                        "range": true
+                      }
                     },
-                    "refId": "B"
+                    "refId": "B",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Throughput per block device from the diskstats collector.",
-          "id": 7,
-          "links": [],
-          "title": "Disk I/O",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "unit": "Bps",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic-by-name"
                   },
@@ -1372,45 +2278,21 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "Bps"
+                  }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-8": {
         "kind": "Panel",
         "spec": {
+          "id": 8,
+          "title": "Disk Space Usage",
+          "description": "Used fraction per real filesystem. Not stacked: these are independent ratios and a stacked total of them means nothing.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -1418,42 +2300,72 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "1 - node_filesystem_avail_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}\n  / node_filesystem_size_bytes{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{mountpoint}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{mountpoint}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Used fraction per real filesystem. Not stacked: these are independent ratios and a stacked total of them means nothing.",
-          "id": 8,
-          "links": [],
-          "title": "Disk Space Usage",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "max": 1,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 0.8,
+                        "color": "orange"
+                      },
+                      {
+                        "value": 0.9,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic"
                   },
@@ -1490,51 +2402,21 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "max": 1,
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "orange",
-                        "value": 0.8
-                      },
-                      {
-                        "color": "red",
-                        "value": 0.9
-                      }
-                    ]
-                  },
-                  "unit": "percentunit"
+                  }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
+            }
           }
         }
       },
       "panel-9": {
         "kind": "Panel",
         "spec": {
+          "id": 9,
+          "title": "Inode Usage",
+          "description": "Used inodes per filesystem. A volume with free bytes and no free inodes fails writes the same way a full one does.",
+          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -1542,42 +2424,72 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "hidden": false,
                     "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
                       "datasource": {
                         "name": "grafanacloud-prom"
                       },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
                         "expr": "1 - node_filesystem_files_free{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}\n  / node_filesystem_files{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\"}",
                         "format": "time_series",
                         "instant": false,
-                        "range": true,
-                        "legendFormat": "{{mountpoint}}"
-                      },
-                      "version": "v0"
+                        "legendFormat": "{{mountpoint}}",
+                        "range": true
+                      }
                     },
-                    "refId": "A"
+                    "refId": "A",
+                    "hidden": false
                   }
                 }
               ],
-              "queryOptions": {},
-              "transformations": []
+              "transformations": [],
+              "queryOptions": {}
             }
           },
-          "description": "Used inodes per filesystem. A volume with free bytes and no free inodes fails writes the same way a full one does.",
-          "id": 9,
-          "links": [],
-          "title": "Inode Usage",
           "vizConfig": {
-            "group": "timeseries",
             "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
             "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
               "fieldConfig": {
                 "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "max": 1,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 0.8,
+                        "color": "orange"
+                      },
+                      {
+                        "value": 0.9,
+                        "color": "red"
+                      }
+                    ]
+                  },
                   "color": {
                     "mode": "palette-classic"
                   },
@@ -1614,923 +2526,11 @@
                     "thresholdsStyle": {
                       "mode": "off"
                     }
-                  },
-                  "max": 1,
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "orange",
-                        "value": 0.8
-                      },
-                      {
-                        "color": "red",
-                        "value": 0.9
-                      }
-                    ]
-                  },
-                  "unit": "percentunit"
+                  }
                 },
                 "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-10": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum by (host, method) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 60",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}} {{method}}"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
             }
-          },
-          "description": "Every public request the appliance served, split by site and HTTP method, stacked so the top of the stack is total traffic. Method is the only operation kind Caddy sees: an S3 PutObject is a PUT to a bucket path, so PUT against the s3. host is the upload path. Read from the duration histogram's count, because caddy_http_requests_total carries neither a code nor a method label.",
-          "id": 10,
-          "links": [],
-          "title": "Request rate",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 25,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "normal"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  }
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-11": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum by (host, handler, code) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\", code=~\"5..\"}[5m])\n) * 60",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}} {{handler}} {{code}}"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "5xx split by site, handler and code. A 502 is Caddy failing to reach the upstream; a 500 came from Piri or Ingot itself.",
-          "id": 11,
-          "links": [],
-          "title": "Server errors",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "cpm"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-12": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum by (host) (\n  rate(caddy_http_request_duration_seconds_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)\n/\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}} avg"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "histogram_quantile(0.95,\n  sum by (host, le) (\n    rate(caddy_http_request_duration_seconds_bucket{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n  )\n)",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}} p95"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Round-trip time to last byte, per site: caddy_http_request_duration_seconds, the whole request. TTFB is the panel beside it. The average is sum/count; p95 reads the histogram buckets.",
-          "id": 12,
-          "links": [],
-          "title": "Response time",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 0,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "s"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-13": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "time() - deploy_last_success_timestamp{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", project=~\"apps|platform|reconcile\"}",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{project}}"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Age of each project's last successful pass, from the deploy stamp the reconcile timer writes through the textfile collector. The timer runs every five minutes, so a reconcile age past the 15-minute threshold line means the node has stopped reconciling. apps and platform move only when that project actually deployed, so they climb between releases and that is normal.",
-          "id": 13,
-          "links": [],
-          "title": "Time since last deploy",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 0,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "dashed"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 900
-                      }
-                    ]
-                  },
-                  "unit": "s"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-14": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\", code=~\"5..\"}[5m])\n)\n/\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)\nor\nsum by (host) (\n  rate(caddy_http_request_duration_seconds_count{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n) * 0",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}}"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "5xx responses as a share of everything the site served. The trailing `or ... * 0` holds the line at zero for a site with traffic and no errors; a site with no data at all drops out rather than reading zero. Threshold lines at 1% and 5%.",
-          "id": 14,
-          "links": [],
-          "title": "Error rate",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "dashed"
-                    }
-                  },
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "orange",
-                        "value": 0.01
-                      },
-                      {
-                        "color": "red",
-                        "value": 0.05
-                      }
-                    ]
-                  },
-                  "unit": "percentunit"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-15": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum(\n  rate(caddy_http_request_size_bytes_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "ingress"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum(\n  rate(caddy_http_response_size_bytes_sum{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n)",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "egress"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Bytes in and out through Caddy, which is every public request the region serves. Taken from the histograms' _sum, so the figure is exact and does not depend on the size buckets. The node exporter's network collector is not shipped, so this is the appliance's traffic rather than the host interface's.",
-          "id": 15,
-          "links": [],
-          "title": "Ingress / egress",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "Bps"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
-          }
-        }
-      },
-      "panel-16": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "histogram_quantile(0.95,\n  sum by (host, method, le) (\n    rate(caddy_http_response_duration_seconds_bucket{service_name=~\"appliance-.*-caddy\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m])\n  )\n)",
-                        "format": "time_series",
-                        "instant": false,
-                        "range": true,
-                        "legendFormat": "{{host}} {{method}} p95"
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Time to first byte, p95, per site and method. caddy_http_response_duration_seconds is Caddy's own \"times to first byte in response bodies\" histogram, distinct from request_duration_seconds, which is the whole round trip. Split by method so uploads can be read apart from reads.",
-          "id": 16,
-          "links": [],
-          "title": "TTFB",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic-by-name"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 0,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineWidth": 1,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "s"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.3.0-35049663052"
           }
         }
       }
@@ -2542,6 +2542,7 @@
           {
             "kind": "TabsLayoutTab",
             "spec": {
+              "title": "🌐 Overview",
               "layout": {
                 "kind": "GridLayout",
                 "spec": {
@@ -2549,25 +2550,25 @@
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 0,
+                        "width": 24,
+                        "height": 16,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-1"
-                        },
-                        "height": 16,
-                        "width": 24,
-                        "x": 0,
-                        "y": 0
+                        }
                       }
                     }
                   ]
                 }
-              },
-              "title": "🌐 Overview"
+              }
             }
           },
           {
             "kind": "TabsLayoutTab",
             "spec": {
+              "title": "📍 $region",
               "layout": {
                 "kind": "GridLayout",
                 "spec": {
@@ -2575,183 +2576,183 @@
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 0,
+                        "width": 24,
+                        "height": 3,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-3"
-                        },
-                        "height": 3,
-                        "width": 24,
-                        "x": 0,
-                        "y": 0
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 3,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-14"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 3
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 3,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-11"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 3
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 11,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-10"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 11
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 11,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-15"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 11
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 19,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-16"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 19
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 19,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-12"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 19
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 27,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-4"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 27
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 27,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-5"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 27
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 35,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-6"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 35
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 35,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-7"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 35
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 43,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-8"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 0,
-                        "y": 43
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 12,
+                        "y": 43,
+                        "width": 12,
+                        "height": 8,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-9"
-                        },
-                        "height": 8,
-                        "width": 12,
-                        "x": 12,
-                        "y": 43
+                        }
                       }
                     },
                     {
                       "kind": "GridLayoutItem",
                       "spec": {
+                        "x": 0,
+                        "y": 51,
+                        "width": 24,
+                        "height": 6,
                         "element": {
                           "kind": "ElementReference",
                           "name": "panel-13"
-                        },
-                        "height": 6,
-                        "width": 24,
-                        "x": 0,
-                        "y": 51
+                        }
                       }
                     }
                   ]
@@ -2760,8 +2761,7 @@
               "repeat": {
                 "mode": "variable",
                 "value": "region"
-              },
-              "title": "📍 $region"
+              }
             }
           }
         ]
@@ -2769,20 +2769,12 @@
     },
     "links": [],
     "liveNow": false,
-    "preferences": {
-      "layout": {
-        "kind": "AutoGridLayout",
-        "spec": {
-          "columnWidthMode": "standard",
-          "items": [],
-          "maxColumnCount": 3,
-          "rowHeightMode": "standard"
-        }
-      }
-    },
     "preload": false,
     "tags": [],
     "timeSettings": {
+      "timezone": "browser",
+      "from": "now-6h",
+      "to": "now",
       "autoRefresh": "",
       "autoRefreshIntervals": [
         "5s",
@@ -2796,86 +2788,94 @@
         "2h",
         "1d"
       ],
-      "fiscalYearStartMonth": 0,
-      "from": "now-6h",
       "hideTimepicker": false,
-      "timezone": "browser",
-      "to": "now"
+      "fiscalYearStartMonth": 0
     },
     "title": "Forge Regions",
     "variables": [
       {
         "kind": "QueryVariable",
         "spec": {
-          "allowCustomValue": true,
+          "name": "stage",
           "current": {
             "text": "dev",
             "value": "dev"
           },
-          "definition": "label_values(dimension_ClusterName)",
-          "hide": "dontHide",
-          "includeAll": false,
           "label": "Stage",
-          "multi": false,
-          "name": "stage",
-          "options": [],
+          "hide": "dontHide",
+          "refresh": "onDashboardLoad",
+          "skipUrlSync": false,
           "query": {
+            "kind": "DataQuery",
+            "group": "prometheus",
+            "version": "v0",
             "datasource": {
               "name": "grafanacloud-prom"
             },
-            "group": "prometheus",
-            "kind": "DataQuery",
             "spec": {
               "qryType": 1,
               "query": "label_values(dimension_ClusterName)",
               "refId": "PrometheusVariableQueryEditor-VariableQuery"
-            },
-            "version": "v0"
+            }
           },
-          "refresh": "onDashboardLoad",
           "regex": "/^fc-(.+)$/",
           "regexApplyTo": "value",
-          "skipUrlSync": false,
-          "sort": "disabled"
+          "sort": "disabled",
+          "definition": "label_values(dimension_ClusterName)",
+          "options": [],
+          "multi": false,
+          "includeAll": false,
+          "allowCustomValue": true
         }
       },
       {
         "kind": "QueryVariable",
         "spec": {
-          "allowCustomValue": true,
+          "name": "region",
           "current": {
             "text": "All",
             "value": [
               "$__all"
             ]
           },
-          "definition": "label_values(up{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\"}, region)",
-          "hide": "dontHide",
-          "includeAll": true,
           "label": "Regions",
-          "multi": true,
-          "name": "region",
-          "options": [],
+          "hide": "dontHide",
+          "refresh": "onTimeRangeChanged",
+          "skipUrlSync": false,
           "query": {
+            "kind": "DataQuery",
+            "group": "prometheus",
+            "version": "v0",
             "datasource": {
               "name": "grafanacloud-prom"
             },
-            "group": "prometheus",
-            "kind": "DataQuery",
             "spec": {
               "qryType": 5,
               "query": "label_values(up{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\"}, region)",
               "refId": "PrometheusVariableQueryEditor-VariableQuery"
-            },
-            "version": "v0"
+            }
           },
-          "refresh": "onTimeRangeChanged",
           "regex": "",
           "regexApplyTo": "value",
-          "skipUrlSync": false,
-          "sort": "alphabeticalAsc"
+          "sort": "alphabeticalAsc",
+          "definition": "label_values(up{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\"}, region)",
+          "options": [],
+          "multi": true,
+          "includeAll": true,
+          "allowCustomValue": true
         }
       }
-    ]
+    ],
+    "preferences": {
+      "layout": {
+        "kind": "AutoGridLayout",
+        "spec": {
+          "maxColumnCount": 3,
+          "columnWidthMode": "standard",
+          "rowHeightMode": "standard",
+          "items": []
+        }
+      }
+    }
   }
 }

@@ -87,22 +87,23 @@ resource "grafana_folder_permission" "forge" {
 # spec: that is the v12 shape.
 #
 # metadata.name is the uid and is load-bearing in content as well as identity —
-# the drill-down data links inside both files hardcode /d/pe7f4wn and
-# /d/fc-regions. Changing either breaks the links.
+# the drill-down data links inside both files hardcode /d/forge-central and
+# /d/forge-regions. Changing either breaks the links.
 #
-# forge-engineering already exists in the stack, so it is imported rather than
-# created, or the apply makes a second dashboard and every existing link keeps
-# pointing at the first:
+# Both dashboards already exist in the stack, so the first apply imports them.
+# Creating instead leaves a duplicate under a fresh uid while every saved link
+# keeps pointing at the original:
 #
-#   tofu -chdir=terraform/envs/grafana import grafana_dashboard.engineering pe7f4wn
+#   tofu -chdir=terraform/envs/grafana import grafana_dashboard.central forge-central
+#   tofu -chdir=terraform/envs/grafana import grafana_dashboard.regions forge-regions
 #
 # overwrite is left unset on purpose. An apply against a dashboard someone has
 # saved in the UI should fail on the version conflict rather than silently
 # discard their work, which makes it a crude drift signal on top of the check in
 # `make check`.
-resource "grafana_dashboard" "engineering" {
+resource "grafana_dashboard" "central" {
   folder      = grafana_folder.forge.uid
-  config_json = file("${path.module}/dashboards/forge-engineering.json")
+  config_json = file("${path.module}/dashboards/forge-central.json")
 }
 
 resource "grafana_dashboard" "regions" {
