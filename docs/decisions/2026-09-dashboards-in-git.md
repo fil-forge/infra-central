@@ -20,9 +20,13 @@ apply matrix and the state key carries no stage prefix. An operator applies the
 root the way they apply the regional bootstrap roots.
 
 The state lives in the nonprod bucket because that is where an operator already
-applies from, and because nothing in this root is account-specific. If the
-bucket policy enumerates state keys rather than granting a prefix, `grafana.tfstate`
-has to be added to it.
+applies from, and because nothing in this root is account-specific. Its key is
+`grafana/forge.tfstate`, under a prefix like every other key in that bucket, and
+outside every prefix in `github-actions-iam`'s `state_key_prefixes` — which is
+one per stage the workflow deploys, and which already holds `bootstrap` out on
+the same grounds: "applied by an operator from a laptop, so no CI role needs to
+write it". Neither CI role can touch this state. If CI ever applies this root,
+adding `grafana` to that list is the whole IAM change.
 
 ## The whole Kubernetes-style document goes in config_json
 
