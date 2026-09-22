@@ -157,7 +157,7 @@
         "spec": {
           "id": 10,
           "title": "Service health",
-          "description": "One row per service. Each cell is a sparkline over the dashboard time range; the number beside it is the reduction shown in the column header tooltip: Status = last value (healthy host count), CPU / Response time / Requests = mean, 5xx = max. Click a service name to filter the whole dashboard to it.",
+          "description": "One row per service. Each cell is a sparkline over the dashboard time range; the number beside it is the reduction shown in the column header tooltip: Status = last value (healthy host count), CPU / Response time / Requests = mean, 5xx = max. Click a service name to open its tab.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -409,7 +409,7 @@
                         "id": "links",
                         "value": [
                           {
-                            "title": "Filter dashboard to this service",
+                            "title": "Open this service's tab",
                             "url": "/d/forge-central?var-stage=$stage&dtab=${__data.fields.service}&${__url_time_range}"
                           }
                         ]
@@ -1692,9 +1692,9 @@
             ]
           },
           "label": "Services",
-          "hide": "dontHide",
+          "hide": "hideVariable",
           "refresh": "onTimeRangeChanged",
-          "skipUrlSync": false,
+          "skipUrlSync": true,
           "query": {
             "kind": "DataQuery",
             "group": "prometheus",

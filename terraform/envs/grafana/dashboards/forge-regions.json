@@ -2840,9 +2840,9 @@
             ]
           },
           "label": "Regions",
-          "hide": "dontHide",
+          "hide": "hideVariable",
           "refresh": "onTimeRangeChanged",
-          "skipUrlSync": false,
+          "skipUrlSync": true,
           "query": {
             "kind": "DataQuery",
             "group": "prometheus",
