@@ -22,9 +22,17 @@
 # state key carries no stage: there is no stage whose deploy this belongs to. An
 # operator applies it:
 #
-#   export TF_VAR_grafana_auth=<forge-dashboards-terraform token, 1Password>
+#   export TF_VAR_grafana_auth="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_DASHBOARDS_TOKEN')"
 #   tofu -chdir=terraform/envs/grafana init
 #   tofu -chdir=terraform/envs/grafana apply
+#
+# Same shape as the regional bootstrap root's three Grafana values, and the same
+# section of the same 1Password item. 1Password is where an operator's
+# credentials live because no workflow can reach it: the only secrets CI consumes
+# are FORGE_BOT_PRIVATE_KEY and SLACK_BOT_TOKEN, both repository secrets. This
+# root is applied from a laptop, so a laptop credential is what it wants. The
+# tokens the preview and sync workflows use are the other way round, and are
+# repository secrets that no human types.
 #
 # The token is not minted here. grafana_service_account_token writes its value
 # into state, which is the reason the telemetry Firehoses sit in a bootstrap root
