@@ -92,6 +92,15 @@ resource "grafana_folder" "previews" {
 resource "grafana_folder_permission" "previews" {
   folder_uid = grafana_folder.previews.uid
 
+  # The account Terraform runs as needs Admin here too, even though it never
+  # writes a preview. This resource manages the folder's entire permission set,
+  # so it would otherwise remove the implicit grant the account got by creating
+  # the folder, and lock Terraform out of a resource it declares.
+  permissions {
+    user_id    = var.dashboards_service_account_id
+    permission = "Admin"
+  }
+
   permissions {
     user_id    = var.previews_service_account_id
     permission = "Admin"
