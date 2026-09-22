@@ -1219,7 +1219,7 @@
         "spec": {
           "id": 14,
           "title": "Error rate",
-          "description": "5xx responses as a share of everything the site served. The trailing `or ... * 0` holds the line at zero for a site with traffic and no errors; a site with no data at all drops out rather than reading zero. Threshold lines at 1% and 5%.",
+          "description": "5xx responses as a share of everything the site served. The trailing `or ... * 0` holds the line at zero for a site with traffic and no errors; a site with no data at all drops out rather than reading zero. Threshold lines at 1% and 5%. The axis carries a soft max of 5%, so an idle panel sits at 0-5% with the threshold lines visible instead of Grafana inventing a 0-10000% range for an all-zero series; a real error rate above 5% expands it.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -1328,7 +1328,8 @@
                     },
                     "thresholdsStyle": {
                       "mode": "dashed"
-                    }
+                    },
+                    "axisSoftMax": 0.05
                   }
                 },
                 "overrides": []

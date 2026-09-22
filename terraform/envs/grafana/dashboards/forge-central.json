@@ -888,7 +888,7 @@
         "spec": {
           "id": 13,
           "title": "Error rate",
-          "description": "5xx responses as a share of everything the service served. CloudWatch publishes a 5xx count only in minutes when a service returned one, so the numerator is absent for a healthy service; the trailing `or ... * 0` holds the line at zero where there is traffic, and leaves it absent where there is none. Threshold lines at 1% and 5%.",
+          "description": "5xx responses as a share of everything the service served. CloudWatch publishes a 5xx count only in minutes when a service returned one, so the numerator is absent for a healthy service; the trailing `or ... * 0` holds the line at zero where there is traffic, and leaves it absent where there is none. Threshold lines at 1% and 5%. The axis carries a soft max of 5%, so an idle panel sits at 0-5% with the threshold lines visible instead of Grafana inventing a 0-10000% range for an all-zero series; a real error rate above 5% expands it.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -994,7 +994,8 @@
                     },
                     "thresholdsStyle": {
                       "mode": "dashed"
-                    }
+                    },
+                    "axisSoftMax": 0.05
                   }
                 },
                 "overrides": []
