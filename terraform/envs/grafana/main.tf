@@ -7,7 +7,8 @@
 # folder. What may be declared here:
 #
 #   grafana_folder, grafana_dashboard, grafana_folder_permission, and later
-#   grafana_rule_group and grafana_contact_point.
+#   grafana_rule_group. The folders and their permissions are in folders.tf,
+#   which is where the three ownership models are set out.
 #
 # What may not, because each one reaches outside the slice:
 #
@@ -47,40 +48,6 @@ provider "grafana" {
   auth = var.grafana_auth
 }
 
-# The title says where the truth is because nothing else will. Grafana marks
-# file-provisioned and Git Sync resources as provisioned and refuses to save over
-# them in the UI; a dashboard written through the HTTP API, which is what this
-# provider uses, is an ordinary dashboard that anyone with Edit can overwrite.
-resource "grafana_folder" "forge" {
-  uid   = "forge"
-  title = "Forge (managed in git)"
-}
-
-# Manages the entire permission set for the folder: anything granted by hand is
-# removed on the next apply. That is the point of using this resource rather than
-# grafana_folder_permission_item, which manages one grant and leaves the rest.
-#
-# It is a guardrail, not a lock. Grafana org admins bypass folder permissions.
-resource "grafana_folder_permission" "forge" {
-  folder_uid = grafana_folder.forge.uid
-
-  # user_id takes a service account id as well as a user id.
-  permissions {
-    user_id    = var.dashboards_service_account_id
-    permission = "Admin"
-  }
-
-  permissions {
-    role       = "Editor"
-    permission = "View"
-  }
-
-  permissions {
-    role       = "Viewer"
-    permission = "View"
-  }
-}
-
 # config_json is the whole Kubernetes-style document, apiVersion and kind and
 # metadata and spec together, which is what the provider documents for Grafana
 # v13 and later. The stack reports 13.3.x. Do not reduce these files to their
@@ -102,11 +69,11 @@ resource "grafana_folder_permission" "forge" {
 # discard their work, which makes it a crude drift signal on top of the check in
 # `make check`.
 resource "grafana_dashboard" "central" {
-  folder      = grafana_folder.forge.uid
+  folder      = grafana_folder.dashboards.uid
   config_json = file("${path.module}/dashboards/forge-central.json")
 }
 
 resource "grafana_dashboard" "regions" {
-  folder      = grafana_folder.forge.uid
+  folder      = grafana_folder.dashboards.uid
   config_json = file("${path.module}/dashboards/forge-regions.json")
 }

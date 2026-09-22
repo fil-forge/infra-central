@@ -45,15 +45,26 @@ Both dashboards already exist in the stack, so the first apply has to import
 them. Creating instead leaves a duplicate under a fresh uid while every link
 anyone has saved still points at the original.
 
-## The credential cannot reach past one folder
+## Three folders, three answers to who may change this
 
 The filecoinfoundation stack is shared. FilOne ships metrics into it from its own
 infrastructure, and the staging appliance's host ships Lotus, Curio and Guppy
-telemetry through the same writer. The cordon between what git owns and what the
-UI owns is four things, in order of how much they actually protect:
+telemetry through the same writer.
 
-1. **What the root may declare.** A folder, the dashboards in it, and the
-   folder's permissions. The header of `main.tf` carries the list, and the list
+The first cordon is between Forge and everyone else in the stack. The second is
+inside Forge, and it is not one line: a dashboard is a view, so a wrong one costs
+attention and the review is worth having after the change lands, while a wrong
+alert rule pages someone at three in the morning or quietly stops paging, so that
+review belongs in front of it. `folders.tf` holds the three folders that
+follow — `Forge` where the team edits dashboards in the UI and a sync workflow
+raises the pull request that brings the change back, `Forge alerts` which is git
+only, and `Forge previews`, where a pull request's dashboards are deployed under
+their own uids so a reviewer can look at the thing rather than at a JSON diff.
+
+The outer cordon is four things, in order of how much they actually protect:
+
+1. **What the root may declare.** Folders, the dashboards and rules in them, and
+   the folders' permissions. The header of `main.tf` carries the list, and the list
    of what is excluded and why: `grafana_notification_policy` is the entire
    routing tree as one resource, `grafana_data_source` would claim
    `grafanacloud-prom` and `-logs`, which belong to the stack, and teams, users
@@ -69,11 +80,12 @@ UI owns is four things, in order of how much they actually protect:
    is why it is the right resource here rather than
    `grafana_folder_permission_item`. It is a guardrail and not a lock: Grafana
    org admins bypass folder permissions.
-4. **Saying so.** The folder is titled `Forge (managed in git)`, because nothing
-   enforces it. Grafana marks file-provisioned and Git Sync resources as
-   provisioned and refuses to save over them; a dashboard written through the
-   HTTP API, which is what this provider uses, is an ordinary dashboard and
-   anyone with Edit can overwrite it.
+4. **Saying so.** `Forge alerts` and `Forge previews` carry what they are in
+   their titles, because nothing enforces it. Grafana marks file-provisioned and
+   Git Sync resources as provisioned and refuses to save over them; anything
+   written through the HTTP API, which is what this provider uses, is ordinary
+   and anyone with Edit can overwrite it. The dashboards folder says nothing of
+   the sort, because there editing is the supported path.
 
 If the cordon needs to be enforced rather than agreed, that is the argument for
 Grafana's Git Sync over this provider: it scopes a sync to a folder and marks
