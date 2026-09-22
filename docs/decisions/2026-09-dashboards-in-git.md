@@ -11,13 +11,28 @@ They live in `terraform/envs/grafana/`, with the JSON beside the root in
 [../observability.md](../observability.md) here and in
 [infra-nodes' observability.md](https://github.com/fil-forge/infra-nodes/blob/main/docs/observability.md).
 
-## One root, no stage, applied by an operator
+## One root, no stage, applied by an operator until CI is turned on
 
 Both dashboards describe every stage at once, through a `$stage` template
 variable that reads `label_values(dimension_ClusterName)`. There is no stage
 whose deploy they belong to, so they are not in `check-and-deploy.yml`'s plan or
 apply matrix and the state key carries no stage prefix. An operator applies the
 root the way they apply the regional bootstrap roots.
+
+`check-and-deploy.yml` carries an `apply-grafana` job for the day that stops
+being enough. It is gated on a `GRAFANA_APPLY_ENABLED` repository variable and
+does nothing until someone sets it, because it has two prerequisites outside
+this repository's normal flow: a `GRAFANA_DASHBOARDS_TOKEN` secret, and
+`grafana` added to the account bootstrap root's `state_key_prefixes` so the
+apply role can reach this root's state. Without the second, every push to main
+would fail at `tofu init`.
+
+It runs on push only, which is what keeps the token out of pull requests: a job
+gated that way is never instantiated by one, so a bumped action in a Dependabot
+branch never sees the secret. There is no plan job for the grafana root for the
+same reason — a plan runs on `pull_request`, which is exactly where the token
+must not be — and a dashboard change is reviewed from its preview rather than
+from a plan.
 
 The state lives in the nonprod bucket because that is where an operator already
 applies from, and because nothing in this root is account-specific. Its key is

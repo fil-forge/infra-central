@@ -372,6 +372,76 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
+  # The Grafana root: the dashboards, the alert rules and the three folders they
+  # live in. Not a stage, and not in the plan matrix above — it describes every
+  # stage at once through a $stage template variable, so there is no stage deploy
+  # it belongs to. It hangs off `check` and runs beside the others.
+  #
+  # Off until someone sets the GRAFANA_APPLY_ENABLED repository variable, because
+  # it has two prerequisites outside this file: the GRAFANA_DASHBOARDS_TOKEN
+  # secret, and "grafana" in the account bootstrap root's state_key_prefixes so
+  # the apply role can reach grafana/forge.tfstate. Without the second, every
+  # push to main would fail at `tofu init` with an access denial. Turn it on once
+  # an operator has applied the root by hand at least once and watched what it
+  # does.
+  #
+  # Push only, like every apply above, and that is what keeps the Grafana token
+  # away from pull requests: a job gated this way is never instantiated by a
+  # pull request, so a bumped action in a Dependabot branch never sees the
+  # secret. There is deliberately no plan job for the same reason — a plan runs
+  # on pull_request, which is exactly where the token must not be. The apply
+  # prints its plan to stdout before it changes anything, and a dashboard change
+  # is reviewed from its preview rather than from HCL.
+  #
+  # No path filter, for the reason the applies above carry none: a filter has to
+  # name every file the root depends on, and one added without a matching filter
+  # silently stops deploying. An apply with nothing to do costs seconds.
+  apply-grafana:
+    if: github.event_name == 'push' && vars.GRAFANA_APPLY_ENABLED == 'true'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/grafana
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      # For the S3 backend only. Nothing in this root is an AWS resource; the
+      # role is here to read and write grafana/forge.tfstate.
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-grafana-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/grafana/.terraform.lock.hcl') }}
+
+      # init needs no Grafana credential: it resolves the provider and the
+      # backend, and evaluates no provider configuration.
+      - run: tofu init -input=false
+
+      # The token is on this step alone rather than the job, so the checkout and
+      # the credentials step above never carry it. The service account it belongs
+      # to holds Admin on the three Forge folders and nothing else in a stack
+      # shared with FilOne, so this cannot reach anyone else's dashboards.
+      - name: tofu apply
+        env:
+          TF_VAR_grafana_auth: ${{ secrets.GRAFANA_DASHBOARDS_TOKEN }}
+        run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
   # The check the applies cannot make: that the stage answers from the outside.
   # A service reaching steady state says its task passes its own container health
   # check; it says nothing about the Route53 record, the certificate or the
@@ -503,6 +573,7 @@ jobs:
       - apply-staging-platform
       - apply-staging-apps
       - smoke-staging
+      - apply-grafana
     runs-on: ubuntu-latest
     steps:
       # Only for the commit subject below. github.event.head_commit.message
