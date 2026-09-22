@@ -18,6 +18,12 @@
 #                    inside it. That is the only mixed-ownership boundary here,
 #                    and it holds because nothing durable lives on the far side.
 #
+#                    A preview lives exactly as long as its pull request. Every
+#                    push redeploys it at the new head, a force-push included,
+#                    and closing or merging deletes it. Nothing else expires one,
+#                    so there is no sweeper to write and no preview outliving
+#                    what it previews.
+#
 # Grafana org admins bypass folder permissions, so all of this is a guardrail
 # rather than a lock.
 
