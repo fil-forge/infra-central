@@ -378,7 +378,7 @@ jobs:
   # it belongs to. It hangs off `check` and runs beside the others.
   #
   # Off until someone sets the GRAFANA_APPLY_ENABLED repository variable, because
-  # it has two prerequisites outside this file: the GRAFANA_DASHBOARDS_TOKEN
+  # it has two prerequisites outside this file: the GRAFANA_TERRAFORM_TOKEN
   # secret, and "grafana" in the account bootstrap root's state_key_prefixes so
   # the apply role can reach grafana/forge.tfstate. Without the second, every
   # push to main would fail at `tofu init` with an access denial. Turn it on once
@@ -439,7 +439,7 @@ jobs:
       # shared with FilOne, so this cannot reach anyone else's dashboards.
       - name: tofu apply
         env:
-          TF_VAR_grafana_auth: ${{ secrets.GRAFANA_DASHBOARDS_TOKEN }}
+          TF_VAR_grafana_auth: ${{ secrets.GRAFANA_TERRAFORM_TOKEN }}
         run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
   # The check the applies cannot make: that the stage answers from the outside.

@@ -22,7 +22,7 @@
 # state key carries no stage: there is no stage whose deploy this belongs to. An
 # operator applies it:
 #
-#   export TF_VAR_grafana_auth="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_DASHBOARDS_TOKEN')"
+#   export TF_VAR_grafana_auth="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_TERRAFORM_TOKEN')"
 #   tofu -chdir=terraform/envs/grafana init
 #   tofu -chdir=terraform/envs/grafana apply
 #
@@ -41,13 +41,13 @@
 # Forge Central item in the Fil One 1Password vault.
 
 variable "grafana_auth" {
-  description = "Service account token for the filecoinfoundation stack, holding Admin on the Forge folder and nothing else. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
+  description = "Service account token for the filecoinfoundation stack. Its basic role is None, so it has no org-level permission at all; its access is Admin on the three Forge folders and nothing anywhere else. Folder Admin rather than Edit because this root declares grafana_folder_permission, and writing a folder's permissions needs that level on the folder. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
   type        = string
   sensitive   = true
 }
 
-variable "dashboards_service_account_id" {
-  description = "Numeric id of the forge-dashboards-terraform service account, read off Administration -> Users and access -> Service accounts. Not a secret. The account is made by hand rather than declared here: managing it would need serviceaccounts:read on every refresh, which the folder-scoped token this root runs as deliberately does not have."
+variable "terraform_service_account_id" {
+  description = "Numeric id of the forge-terraform service account, read off Administration -> Users and access -> Service accounts. Not a secret. The account is made by hand rather than declared here: managing it would need serviceaccounts:read on every refresh, which the folder-scoped token this root runs as deliberately does not have."
   type        = string
 }
 

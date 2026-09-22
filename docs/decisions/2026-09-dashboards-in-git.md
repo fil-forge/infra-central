@@ -22,7 +22,7 @@ root the way they apply the regional bootstrap roots.
 `check-and-deploy.yml` carries an `apply-grafana` job for the day that stops
 being enough. It is gated on a `GRAFANA_APPLY_ENABLED` repository variable and
 does nothing until someone sets it, because it has two prerequisites outside
-this repository's normal flow: a `GRAFANA_DASHBOARDS_TOKEN` secret, and
+this repository's normal flow: a `GRAFANA_TERRAFORM_TOKEN` secret, and
 `grafana` added to the account bootstrap root's `state_key_prefixes` so the
 apply role can reach this root's state. Without the second, every push to main
 would fail at `tofu init`.
@@ -85,10 +85,14 @@ The outer cordon is four things, in order of how much they actually protect:
    `grafanacloud-prom` and `-logs`, which belong to the stack, and teams, users
    and `grafana_cloud_*` are shared with FilOne or describe the Cloud org rather
    than this stack.
-2. **What the token can reach.** A dedicated `forge-dashboards-terraform` service
-   account with Admin on the Forge folder and no org role beyond that. A wrong
-   plan, or a `tofu destroy` in the wrong directory, cannot touch anyone else's
-   dashboards, because the credential cannot see them.
+2. **What the token can reach.** A dedicated `forge-terraform` service account,
+   basic role `None`, holding the folder permission `Admin` on the three Forge
+   folders and nothing anywhere else. `Admin` there is the folder level, not the
+   org role: the account has no org-level permission at all. It needs the folder
+   level rather than `Edit` because this root declares
+   `grafana_folder_permission`, and writing a folder's permissions needs `Admin`
+   on that folder. A wrong plan, or a `tofu destroy` in the wrong directory,
+   cannot touch anyone else's dashboards, because the credential cannot see them.
 3. **What people can do.** `grafana_folder_permission` gives the Editor and
    Viewer basic roles `View` on the folder. It manages the folder's entire
    permission set, so a grant added by hand is removed on the next apply, which

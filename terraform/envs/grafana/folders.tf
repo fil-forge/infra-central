@@ -26,6 +26,13 @@
 #
 # Grafana org admins bypass folder permissions, so all of this is a guardrail
 # rather than a lock.
+#
+# "Admin" below is the folder permission level, not the org basic role. The
+# accounts that hold it are role None: no org-level permission of any kind, and
+# nothing outside the folder named. Folder Admin rather than Edit because
+# grafana_folder_permission writes a folder's permission set, and doing that
+# needs Admin on the folder — an account with Edit could write the dashboards it
+# manages but not the permissions it declares.
 
 variable "previews_service_account_id" {
   description = "Numeric id of the forge-previews service account, which holds Admin on the previews folder and nothing else. The preview workflow runs on pull_request, so its credential is reachable by any action a pull request brings with it; scoped this way the worst case is a trashed preview. Not a secret."
@@ -41,7 +48,7 @@ resource "grafana_folder_permission" "dashboards" {
   folder_uid = grafana_folder.dashboards.uid
 
   permissions {
-    user_id    = var.dashboards_service_account_id
+    user_id    = var.terraform_service_account_id
     permission = "Admin"
   }
 
@@ -71,7 +78,7 @@ resource "grafana_folder_permission" "alerts" {
   folder_uid = grafana_folder.alerts.uid
 
   permissions {
-    user_id    = var.dashboards_service_account_id
+    user_id    = var.terraform_service_account_id
     permission = "Admin"
   }
 
@@ -103,7 +110,7 @@ resource "grafana_folder_permission" "previews" {
   # so it would otherwise remove the implicit grant the account got by creating
   # the folder, and lock Terraform out of a resource it declares.
   permissions {
-    user_id    = var.dashboards_service_account_id
+    user_id    = var.terraform_service_account_id
     permission = "Admin"
   }
 
