@@ -114,6 +114,71 @@ jobs:
   # infrastructure and reads nothing, no Secrets Manager, no object outside the
   # state keys, and the state carries no password because RDS keeps the master
   # one in Secrets Manager. The same exposure is already open to anyone with push
+  # Whether the plan jobs below have anything to plan.
+  #
+  # The note above apply-dev-platform rules out filtering the deploy jobs by
+  # path, and it is right: an allow-list has to name every module a root depends
+  # on, and a module added without a matching entry silently stops being
+  # deployed. Silence is the worst failure a deploy pipeline can have.
+  #
+  # This is the inverse, and only for the pull-request plans. It names paths that
+  # provably cannot affect any stage root, and skips the plans only when a pull
+  # request touches nothing else. A new module is not on the list, so it is never
+  # skipped; the way to be wrong here is to plan when you need not, which costs a
+  # minute. Adding a path is a deliberate act with this comment next to it.
+  #
+  # Worth doing because the four plans are not merely slow on an unrelated pull
+  # request: they contend for the same S3 state locks, and two pushes close
+  # together have twice failed a plan outright with a 412 on the lock object.
+  #
+  # The applies are untouched. A push to main plans and applies everything, as
+  # before.
+  scope:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      plan-needed: ${{ steps.decide.outputs.plan-needed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both sides of the comparison have to be present, and a shallow clone
+          # has neither merge base nor base branch.
+          fetch-depth: 0
+
+      # Paths that cannot change what a stage root plans. Anything not matched
+      # here counts as relevant, including a path nobody thought about.
+      #
+      #   terraform/envs/grafana/  its own root, applied by hand, not in the
+      #                            plan matrix at all
+      #   docs/ and *.md           prose
+      #
+      # .github/ is deliberately absent: a change to this workflow changes how
+      # the plans run, so it re-runs them.
+      - id: decide
+        run: |
+          # base.sha over a named branch: actions/checkout leaves no local ref
+          # for the base branch, but the merge ref it does check out has the
+          # base commit as an ancestor, so the sha is always resolvable.
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)
+          echo "changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          relevant=$(printf '%s\n' "$changed" \
+            | grep -v '^terraform/envs/grafana/' \
+            | grep -v '^docs/' \
+            | grep -v '\.md$' \
+            | grep -v '^[[:space:]]*$' || true)
+
+          if [ -z "$relevant" ]; then
+            echo "plan-needed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing outside the ignored paths changed; the stage plans have nothing to do."
+          else
+            echo "plan-needed=true" >> "$GITHUB_OUTPUT"
+            echo "Relevant changes:"
+            echo "$relevant" | sed 's/^/  /'
+          fi
+
   # access, who writes the workflow file their own pull request runs. See
   # modules/github-actions-iam.
   plan:
@@ -124,7 +189,7 @@ jobs:
     # typing.
     name: plan-${{ matrix.name }}
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: check
+    needs: [check, scope]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -149,15 +214,30 @@ jobs:
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.root }}
+    # The job runs either way and the steps are what `scope` gates, rather than
+    # the job being skipped outright. These four names are required checks on
+    # main; a job that never runs leaves its check pending forever and the pull
+    # request cannot merge. Running to a no-op takes about ten seconds, reports
+    # success under the name branch protection is looking for, and -- the point
+    # of the exercise -- never touches the state lock.
     steps:
+      # working-directory overridden: the job's default points into the checkout,
+      # and the checkout is one of the steps being skipped.
+      - if: needs.scope.outputs.plan-needed != 'true'
+        working-directory: ${{ github.workspace }}
+        run: echo "No change outside the ignored paths; see the scope job. Nothing to plan."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.plan-needed == 'true'
 
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: needs.scope.outputs.plan-needed == 'true'
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: needs.scope.outputs.plan-needed == 'true'
         with:
           role-to-assume: ${{ env.PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -169,19 +249,23 @@ jobs:
       # version if the roots ever resolved different ones, as staging did until
       # 2026-09-14. Today every lock file is byte-identical and the five jobs
       # share one entry; the per-root key costs nothing while that holds.
-      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - if: needs.scope.outputs.plan-needed == 'true'
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.plan-needed == 'true'
         with:
           path: ${{ env.TF_PLUGIN_CACHE_DIR }}
           key: tofu-providers-${{ hashFiles(format('terraform/envs/{0}/.terraform.lock.hcl', matrix.root)) }}
 
-      - run: tofu init -input=false
+      - if: needs.scope.outputs.plan-needed == 'true'
+        run: tofu init -input=false
 
       # A lock timeout rather than failing the moment the lock is held: the state
       # lock is an S3 object, and one left behind by a killed run is worth
       # waiting on briefly before a human gets involved.
-      - run: tofu plan -input=false -lock-timeout=5m
+      - if: needs.scope.outputs.plan-needed == 'true'
+        run: tofu plan -input=false -lock-timeout=5m
 
   # apply-dev-apps waits for apply-dev-platform because apps reads platform's
   # state and must not plan against outputs an in-flight platform apply is about
