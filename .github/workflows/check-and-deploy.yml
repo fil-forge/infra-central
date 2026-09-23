@@ -157,7 +157,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -210,7 +210,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -249,7 +249,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -315,7 +315,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -350,7 +350,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -454,7 +454,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -476,7 +476,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
