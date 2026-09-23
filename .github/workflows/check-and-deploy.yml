@@ -8,6 +8,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Runs plan-grafana and nothing else. Every other job below is gated on
+  # pull_request or push, so a dispatch wakes only `check` and that one.
+  workflow_dispatch:
 
 # Serializes whole runs per ref. Two merges to main must not apply at once — they
 # would contend for the state lock and one would fail halfway — and a force-push
@@ -266,6 +269,114 @@ jobs:
       # waiting on briefly before a human gets involved.
       - if: needs.scope.outputs.plan-needed == 'true'
         run: tofu plan -input=false -lock-timeout=5m
+
+  # A plan of terraform/envs/grafana, on demand, printed where a person can read
+  # it. That root is not in the matrix above: it belongs to no stage, so there is
+  # no stage whose pull request should plan it.
+  #
+  # workflow_dispatch rather than pull_request, and the distinction is the whole
+  # design. The note above `plan` sets out what this repository accepts for
+  # pull-request credentials: "Those credentials reach no data -- the plan role
+  # describes infrastructure and reads nothing". A Grafana token cannot make that
+  # promise. Planning this root refreshes grafana_folder_permission, which calls
+  # folders.permissions:read, and that action is Admin-only -- FolderAdminActions
+  # is FolderEditActions plus folders.permissions:read and :write, so no
+  # View- or Edit-level token can plan here. The token that plans can also write.
+  #
+  # On pull_request that token would be held by every Dependabot action bump
+  # before anyone reviewed it, which is exactly the scenario that note calls
+  # acceptable only because the credential is inert. On workflow_dispatch it is
+  # held by a job someone with write access deliberately started. Do not "fix"
+  # this into a pull_request trigger.
+  #
+  # Two prerequisites, the same ones apply-grafana has: the GRAFANA_TERRAFORM_TOKEN
+  # secret, and "grafana" in the account bootstrap root's state_key_prefixes so
+  # the plan role can read grafana/forge.tfstate. Without the second this fails at
+  # `tofu init` with an access denial, which is the right way for a job someone
+  # asked for by hand to tell them something is missing.
+  plan-grafana:
+    if: github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/grafana
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-plan-grafana-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/grafana/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      # -out, so the summary below reads the same plan the log shows rather than
+      # running a second one against a moving target.
+      - name: tofu plan
+        env:
+          TF_VAR_grafana_auth: ${{ secrets.GRAFANA_TERRAFORM_TOKEN }}
+        run: tofu plan -input=false -lock-timeout=5m -no-color -out=tfplan
+
+      # The full plan is in the log above, but the two dashboards are megabytes of
+      # embedded JSON and scrolling past them to find the verbs is miserable. This
+      # puts the verbs, and only the verbs, on the run's summary page.
+      #
+      # always(), so a plan that fails still leaves the step summary saying so
+      # rather than an empty page.
+      - name: Summarise the plan
+        if: always()
+        env:
+          TF_VAR_grafana_auth: ${{ secrets.GRAFANA_TERRAFORM_TOKEN }}
+        run: |
+          if [ ! -f tfplan ]; then
+            echo "### Grafana plan failed before producing a plan file" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "See the \`tofu plan\` step above." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          tofu show -json tfplan > tfplan.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, collections, os
+          d = json.load(open("tfplan.json"))
+          rows, counts = [], collections.Counter()
+          for c in d.get("resource_changes", []):
+              acts = c["change"]["actions"]
+              if acts == ["no-op"]:
+                  continue
+              verb = {("create",): "create", ("delete",): "DESTROY",
+                      ("update",): "update", ("delete", "create"): "REPLACE",
+                      ("create", "delete"): "REPLACE"}.get(tuple(acts), "/".join(acts))
+              counts[verb] += 1
+              rows.append((verb, c["address"]))
+          print(f"### Grafana plan — `{os.environ.get('GITHUB_REF_NAME','?')}`")
+          print()
+          print(", ".join(f"**{n} to {v}**" for v, n in sorted(counts.items())) or "**no changes**")
+          print()
+          if counts.get("DESTROY") or counts.get("REPLACE"):
+              print("> This plan destroys or replaces something. On a first plan that is wrong.")
+              print()
+          print("| | Resource |")
+          print("| --- | --- |")
+          for verb, addr in sorted(rows, key=lambda r: r[1]):
+              print(f"| `{verb}` | `{addr}` |")
+          PY
 
   # apply-dev-apps waits for apply-dev-platform because apps reads platform's
   # state and must not plan against outputs an in-flight platform apply is about
