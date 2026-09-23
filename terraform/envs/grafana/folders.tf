@@ -28,11 +28,23 @@
 # rather than a lock.
 #
 # "Admin" below is the folder permission level, not the org basic role. The
-# accounts that hold it are role None: no org-level permission of any kind, and
-# nothing outside the folder named. Folder Admin rather than Edit because
-# grafana_folder_permission writes a folder's permission set, and doing that
-# needs Admin on the folder — an account with Edit could write the dashboards it
-# manages but not the permissions it declares.
+# accounts that hold it are created with "No basic role": no org-level permission
+# of any kind, and nothing outside the folder named. Folder Admin rather than Edit
+# because grafana_folder_permission writes a folder's permission set, and doing
+# that needs Admin on the folder — an account with Edit could write the dashboards
+# it manages but not the permissions it declares.
+#
+# Every grant a Forge folder carries is declared here, including the ones for
+# accounts this root does not otherwise mention. The provider is explicit that
+# the resource "manages the entire set of permissions for a folder. Permissions
+# that aren't specified when applying this resource will be removed", so a grant
+# added in the UI survives only until the next apply. `user_id` takes a service
+# account id as readily as a person's.
+
+variable "sync_service_account_id" {
+  description = "Numeric id of the forge-sync service account, which holds View on the dashboards folder and nothing else. The sync workflow reads dashboards back out of Grafana to raise the pull request that returns a UI edit to git, so read is all it needs. It is declared here because grafana_folder_permission writes the folder's whole permission set: a grant added by hand would be removed on the next apply. Not a secret."
+  type        = string
+}
 
 variable "previews_service_account_id" {
   description = "Numeric id of the forge-previews service account, which holds Admin on the previews folder and nothing else. The preview workflow runs on pull_request, so its credential is reachable by any action a pull request brings with it; scoped this way the worst case is a trashed preview. Not a secret."
@@ -50,6 +62,14 @@ resource "grafana_folder_permission" "dashboards" {
   permissions {
     user_id    = var.terraform_service_account_id
     permission = "Admin"
+  }
+
+  # The sync workflow only reads: it exports what the UI holds and opens a pull
+  # request against the committed JSON. Writing back is this root's job, under
+  # the account above, after a human has merged that pull request.
+  permissions {
+    user_id    = var.sync_service_account_id
+    permission = "View"
   }
 
   # Edit, not View: editing these in the UI is the supported path, and the sync
