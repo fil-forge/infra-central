@@ -26,6 +26,26 @@
 #   tofu -chdir=terraform/envs/grafana init
 #   tofu -chdir=terraform/envs/grafana apply
 #
+# That token is forge-terraform's, and it is the only one this root ever runs
+# as. It holds folder Admin on the three Forge folders and no org role, which is
+# enough to manage everything declared here and not enough to create a folder.
+# So the folders and their permissions are made once, by hand, by a person with
+# org Admin, and this root adopts them through the import blocks at the end of
+# this file. Nothing hands an org-admin credential to OpenTofu, at bootstrap or
+# after: a wrong plan cannot reach past the three folders even on its first run.
+#
+# Creating a folder with a chosen uid needs the API; the UI generates one.
+#
+#   curl -sS -X POST https://filecoinfoundation.grafana.net/api/folders \
+#     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+#     -d '{"uid":"forge","title":"Forge"}'
+#
+# The uids must match folders.tf exactly: forge, forge-alerts, forge-previews.
+# Then grant, on each folder's Permissions tab: forge-terraform Admin on all
+# three, forge-sync View on forge, forge-previews Admin on forge-previews. The
+# first apply reconciles those grants with what folders.tf declares, so they only
+# have to be close enough to let it in.
+#
 # Same shape as the regional bootstrap root's three Grafana values, and the same
 # section of the same 1Password item. 1Password is where an operator's
 # credentials live because no workflow can reach it: the only secrets CI consumes
@@ -65,13 +85,6 @@ provider "grafana" {
 # the drill-down data links inside both files hardcode /d/forge-central and
 # /d/forge-regions. Changing either breaks the links.
 #
-# Both dashboards already exist in the stack, so the first apply imports them.
-# Creating instead leaves a duplicate under a fresh uid while every saved link
-# keeps pointing at the original:
-#
-#   tofu -chdir=terraform/envs/grafana import grafana_dashboard.central forge-central
-#   tofu -chdir=terraform/envs/grafana import grafana_dashboard.regions forge-regions
-#
 # overwrite is left unset on purpose. An apply against a dashboard someone has
 # saved in the UI should fail on the version conflict rather than silently
 # discard their work, which makes it a crude drift signal on top of the check in
@@ -98,12 +111,44 @@ resource "grafana_dashboard" "regions" {
 #
 # Delete both once the adopting apply has run. They are no-ops after that.
 #
-# If a plan says a *folder* will be created that you can see already exists in
-# the UI, it needs the same treatment; the id is its uid:
+# The same applies to anything else the stack already holds. The six blocks
+# below are for the bootstrap where a person creates the folders and their
+# permissions by hand, so that no run of this root ever needs a credential wider
+# than folder Admin -- see the header. Uncomment them once those folders exist;
+# until then a plan would fail on a resource it cannot find, which is the right
+# order to be forced into.
+#
+# A folder's import id is its uid, and a folder permission's is the uid of the
+# folder it belongs to.
 #
 #   import {
 #     to = grafana_folder.dashboards
 #     id = "forge"
+#   }
+#
+#   import {
+#     to = grafana_folder.alerts
+#     id = "forge-alerts"
+#   }
+#
+#   import {
+#     to = grafana_folder.previews
+#     id = "forge-previews"
+#   }
+#
+#   import {
+#     to = grafana_folder_permission.dashboards
+#     id = "forge"
+#   }
+#
+#   import {
+#     to = grafana_folder_permission.alerts
+#     id = "forge-alerts"
+#   }
+#
+#   import {
+#     to = grafana_folder_permission.previews
+#     id = "forge-previews"
 #   }
 import {
   to = grafana_dashboard.central
