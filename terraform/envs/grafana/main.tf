@@ -90,10 +90,6 @@ provider "grafana" {
 # the drill-down data links inside both files hardcode /d/forge-central and
 # /d/forge-regions. Changing either breaks the links.
 #
-# overwrite is left unset on purpose. An apply against a dashboard someone has
-# saved in the UI should fail on the version conflict rather than silently
-# discard their work, which makes it a crude drift signal on top of the check in
-# `make check`.
 resource "grafana_dashboard" "central" {
   folder      = grafana_folder.dashboards.uid
   config_json = file("${path.module}/dashboards/forge-central.json")
@@ -104,39 +100,17 @@ resource "grafana_dashboard" "regions" {
   config_json = file("${path.module}/dashboards/forge-regions.json")
 }
 
-# Both dashboards already exist in the stack, so the first apply must adopt them
-# rather than create them. Creating instead leaves a duplicate under a fresh uid
-# while every saved link keeps pointing at the original.
+# The two dashboards that exist in the stack today are not adopted. They live in
+# a different folder, nothing links to them, and their history is not worth
+# carrying, so they are deleted by hand and this root creates them fresh.
 #
-# Declared as import blocks rather than run as `tofu import` commands, because a
-# command writes shared state the moment someone types it, and these have to be
-# runnable before this branch merges. An import block is part of the config: a
-# plan shows what it would adopt and writes nothing, it is reviewable in the
-# diff, and nobody has to remember two invocations in the right order.
+# That makes the order matter. `overwrite` is unset, and the provider documents
+# it as what you set "to overwrite existing dashboard with newer version, same
+# dashboard title in folder or same dashboard uid" -- so creating forge-central
+# while a forge-central already exists fails rather than duplicating. Delete the
+# originals first, then apply. docs/first-grafana-apply.md says so in order.
 #
-# Delete both once the adopting apply has run. They are no-ops after that.
-#
-# Nothing else here needs one. The three child folders do not exist yet and this
-# root creates them, so an import block for any of them would fail the plan on a
-# resource it cannot find.
-#
-# grafana_folder_permission.parent is the one arguable case, since the parent
-# does exist and carries whatever permissions the UI gave it at creation. It is
-# left out: the API writes a folder's permission set whole, so create and update
-# are the same call, and an import would only make the first plan read "update"
-# instead of "create" -- no difference to what lands. Add one if you want that
-# first plan to show the diff from what is there now:
-#
-#   import {
-#     to = grafana_folder_permission.parent
-#     id = "fhmttd"
-#   }
-import {
-  to = grafana_dashboard.central
-  id = "forge-central"
-}
-
-import {
-  to = grafana_dashboard.regions
-  id = "forge-regions"
-}
+# Leaving overwrite unset is deliberate beyond this: afterwards it means an apply
+# against a dashboard someone has saved in the UI fails on the version conflict
+# rather than silently discarding their work, which is a crude drift signal on
+# top of the check in `make check`.
