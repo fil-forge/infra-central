@@ -62,7 +62,7 @@
 # rather than a lock.
 
 variable "parent_folder_uid" {
-  description = "Uid of the Forge folder every folder here nests under. Made by hand, like the three below, so that no run of this root ever needs a credential wider than folder Admin -- see main.tf's header. Unlike the children it is made in the UI rather than through the API, so its uid is whatever Grafana generated; read it off the folder's URL. Not a secret."
+  description = "Uid of the Forge folder every folder here nests under. The one folder made by hand: creating a folder at the root needs folders:create scoped to folders:uid:general, which no folder-scoped grant confers, so a person with org Admin makes it once. The three children below are created by this root, because creating a folder under a parent is authorised against the parent and folder Admin carries folders:write. See main.tf's header. Its uid is whatever the UI generated rather than a chosen one; read it off the folder's URL. Not a secret."
   type        = string
 }
 

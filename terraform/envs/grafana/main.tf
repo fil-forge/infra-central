@@ -34,18 +34,22 @@
 # this file. Nothing hands an org-admin credential to OpenTofu, at bootstrap or
 # after: a wrong plan cannot reach past the Forge tree even on its first run.
 #
-# Make the parent, "Forge", in the UI and put its uid in terraform.tfvars as
-# parent_folder_uid. The children need chosen uids, which the UI will not set, so
-# they go through the API -- parentUid nests them under it:
+# One folder is made by hand, and only one. Make "Forge" in the UI, grant
+# forge-terraform Admin on it, and put its uid in terraform.tfvars as
+# parent_folder_uid. That is the entire manual bootstrap.
 #
-#   curl -sS -X POST https://filecoinfoundation.grafana.net/api/folders \
-#     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-#     -d '{"uid":"forge","title":"Dashboards","parentUid":"<parent uid>"}'
+# The three children are ordinary resources in folders.tf and this root creates
+# them, because creating a folder *under a parent* is authorised against the
+# parent (grafana, folderimpl/folder.go, CreateFolder):
 #
-# The child uids must match folders.tf exactly: forge, forge-alerts,
-# forge-previews. Then grant forge-terraform Admin on the parent, which every
-# child inherits. The first apply reconciles the rest with what folders.tf
-# declares, so the hand-set grants only have to be enough to let it in.
+#   legacyEvaluator := EvalPermission(ActionFoldersWrite,  parentUIDScope)
+#   newEvaluator    := EvalPermission(ActionFoldersCreate, parentUIDScope)
+#   evaluator       := EvalAny(legacyEvaluator, newEvaluator)
+#
+# folders:write is in FolderEditActions, which FolderAdminActions extends, so
+# Admin on the parent carries it. Creating at the *root* is the case that needs
+# more -- folders:create scoped to folders:uid:general, which no folder-scoped
+# grant ever confers -- and that is the one thing a person still has to do.
 #
 # Same shape as the regional bootstrap root's three Grafana values, and the same
 # section of the same 1Password item. 1Password is where an operator's
@@ -112,49 +116,20 @@ resource "grafana_dashboard" "regions" {
 #
 # Delete both once the adopting apply has run. They are no-ops after that.
 #
-# The same applies to anything else the stack already holds. The six blocks
-# below are for the bootstrap where a person creates the folders and their
-# permissions by hand, so that no run of this root ever needs a credential wider
-# than folder Admin -- see the header. Uncomment them once those folders exist;
-# until then a plan would fail on a resource it cannot find, which is the right
-# order to be forced into.
+# Nothing else here needs one. The three child folders do not exist yet and this
+# root creates them, so an import block for any of them would fail the plan on a
+# resource it cannot find.
 #
-# A folder's import id is its uid, and a folder permission's is the uid of the
-# folder it belongs to.
+# grafana_folder_permission.parent is the one arguable case, since the parent
+# does exist and carries whatever permissions the UI gave it at creation. It is
+# left out: the API writes a folder's permission set whole, so create and update
+# are the same call, and an import would only make the first plan read "update"
+# instead of "create" -- no difference to what lands. Add one if you want that
+# first plan to show the diff from what is there now:
 #
 #   import {
 #     to = grafana_folder_permission.parent
-#     id = "<parent uid>"
-#   }
-#
-#   import {
-#     to = grafana_folder.dashboards
-#     id = "forge"
-#   }
-#
-#   import {
-#     to = grafana_folder.alerts
-#     id = "forge-alerts"
-#   }
-#
-#   import {
-#     to = grafana_folder.previews
-#     id = "forge-previews"
-#   }
-#
-#   import {
-#     to = grafana_folder_permission.dashboards
-#     id = "forge"
-#   }
-#
-#   import {
-#     to = grafana_folder_permission.alerts
-#     id = "forge-alerts"
-#   }
-#
-#   import {
-#     to = grafana_folder_permission.previews
-#     id = "forge-previews"
+#     id = "fhmttd"
 #   }
 import {
   to = grafana_dashboard.central
