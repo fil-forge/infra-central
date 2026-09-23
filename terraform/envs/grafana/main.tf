@@ -32,19 +32,20 @@
 # So the folders and their permissions are made once, by hand, by a person with
 # org Admin, and this root adopts them through the import blocks at the end of
 # this file. Nothing hands an org-admin credential to OpenTofu, at bootstrap or
-# after: a wrong plan cannot reach past the three folders even on its first run.
+# after: a wrong plan cannot reach past the Forge tree even on its first run.
 #
-# Creating a folder with a chosen uid needs the API; the UI generates one.
+# Make the parent, "Forge", in the UI and put its uid in terraform.tfvars as
+# parent_folder_uid. The children need chosen uids, which the UI will not set, so
+# they go through the API -- parentUid nests them under it:
 #
 #   curl -sS -X POST https://filecoinfoundation.grafana.net/api/folders \
 #     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-#     -d '{"uid":"forge","title":"Forge"}'
+#     -d '{"uid":"forge","title":"Dashboards","parentUid":"<parent uid>"}'
 #
-# The uids must match folders.tf exactly: forge, forge-alerts, forge-previews.
-# Then grant, on each folder's Permissions tab: forge-terraform Admin on all
-# three, forge-sync View on forge, forge-previews Admin on forge-previews. The
-# first apply reconciles those grants with what folders.tf declares, so they only
-# have to be close enough to let it in.
+# The child uids must match folders.tf exactly: forge, forge-alerts,
+# forge-previews. Then grant forge-terraform Admin on the parent, which every
+# child inherits. The first apply reconciles the rest with what folders.tf
+# declares, so the hand-set grants only have to be enough to let it in.
 #
 # Same shape as the regional bootstrap root's three Grafana values, and the same
 # section of the same 1Password item. 1Password is where an operator's
@@ -120,6 +121,11 @@ resource "grafana_dashboard" "regions" {
 #
 # A folder's import id is its uid, and a folder permission's is the uid of the
 # folder it belongs to.
+#
+#   import {
+#     to = grafana_folder_permission.parent
+#     id = "<parent uid>"
+#   }
 #
 #   import {
 #     to = grafana_folder.dashboards
