@@ -19,13 +19,12 @@ terraform {
     use_lockfile = true
   }
 
-  # Deliberately unpinned until the first init. Every other root carries a
-  # constraint, and this one should too: run `tofu init`, read the version it
-  # resolved out of .terraform.lock.hcl, add `version = "~> X.0"` here and commit
-  # both together.
+  # Pinned, with .terraform.lock.hcl committed beside it, the way every other
+  # root here is. The lock file is what actually fixes the version; this
+  # constraint bounds what a regeneration or a `tofu init -upgrade` may pick.
   required_providers {
     grafana = {
-      source = "grafana/grafana"
+      source  = "grafana/grafana"
       version = "~> 4.46.0"
     }
   }
