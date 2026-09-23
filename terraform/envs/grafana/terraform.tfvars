@@ -1,12 +1,16 @@
-# Replace before the first apply. A service account id of 0 matches nothing, so
-# the folder permission would grant Admin to nobody and lock this root out of the
-# folder it just created. The id is on Administration -> Users and access ->
-# Service accounts, in the URL of the forge-terraform account.
-terraform_service_account_id = "0"
+# These are the numeric ids, not the uids. Administration -> Users and access ->
+# Service accounts -> the account: the page body states "Numeric ID: <n>". The
+# uid in the address bar (ffz5ccdye1a80a and the like) is a different
+# identifier and grafana_folder_permission does not accept it.
+#
+# A service account id of 0 matches nothing, so a placeholder left here grants
+# the permission to nobody -- and for the account below, locks this root out of
+# the folders it just created.
+terraform_service_account_id = "83"
 
-# Replace before the first apply, for the same reason as the id above: the
-# dashboards folder permission names this account, so a placeholder grants View
-# to nobody. The sync workflow cannot read a dashboard back until it is right.
+# Replace before the first apply: the dashboards folder permission names this
+# account, so a placeholder grants View to nobody and the sync workflow cannot
+# read a dashboard back.
 sync_service_account_id = "0"
 
 # Replace before the previews folder is of any use. The forge-previews service

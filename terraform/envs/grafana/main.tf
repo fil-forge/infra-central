@@ -47,7 +47,7 @@ variable "grafana_auth" {
 }
 
 variable "terraform_service_account_id" {
-  description = "Numeric id of the forge-terraform service account, read off Administration -> Users and access -> Service accounts. Not a secret. The account is made by hand rather than declared here: managing it would need serviceaccounts:read on every refresh, which the folder-scoped token this root runs as deliberately does not have."
+  description = "Numeric id of the forge-terraform service account, read off Administration -> Users and access -> Service accounts, from the account page, which states it as \"Numeric ID\". Not the uid in the address bar, which is a different identifier this field does not accept. Not a secret. The account is made by hand rather than declared here: managing it would need serviceaccounts:read on every refresh, which the folder-scoped token this root runs as deliberately does not have."
   type        = string
 }
 
