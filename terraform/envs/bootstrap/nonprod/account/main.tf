@@ -57,7 +57,22 @@ module "github_actions_iam" {
   # root also reads. A stage added to .github/workflows/check-and-deploy.yml has
   # to be added to the constants module too, or its first run fails reading
   # state.
-  state_key_prefixes = module.constants.nonprod_stages
+  #
+  # Plus grafana, which is not a stage. terraform/envs/grafana holds the Forge
+  # dashboards and alert rules; it describes every stage at once through a
+  # $stage template variable, so it belongs to none of them, and its state key
+  # carries no stage either. The apply-grafana job in the workflow cannot reach
+  # grafana/forge.tfstate without this, and fails at `tofu init` with an access
+  # denial on every push to main.
+  #
+  # Appended here rather than added to nonprod_stages, because that output is
+  # also what the regional root hands modules/telemetry as its `stages`, one log
+  # Firehose per entry. A "grafana" stage there would build a Firehose for a
+  # stage that does not exist.
+  #
+  # Bootstrap state stays excluded, as the variable's description says: these
+  # roots are applied by an operator from a laptop and no CI role needs them.
+  state_key_prefixes = concat(module.constants.nonprod_stages, ["grafana"])
 }
 
 output "state_bucket_name" {

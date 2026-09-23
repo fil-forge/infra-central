@@ -20,7 +20,7 @@ variable "state_bucket_name" {
 }
 
 variable "state_key_prefixes" {
-  description = "Key prefixes in the state bucket the roles may touch, one per stage the workflow deploys. Bootstrap state is deliberately excluded: it is applied by an operator from a laptop, so no CI role needs to write it."
+  description = "Key prefixes in the state bucket the roles may touch: one per stage the workflow deploys, plus any stageless root it also applies. Bootstrap state is deliberately excluded: it is applied by an operator from a laptop, so no CI role needs to write it."
   type        = list(string)
   default     = ["dev"]
 }
