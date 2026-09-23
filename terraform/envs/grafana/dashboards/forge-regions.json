@@ -53,7 +53,7 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "sum by (region) (\n  up{service_name=~\"appliance-.*-(host|caddy)\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
+                        "expr": "min by (region) (\n  sum by (region, node) (\n    up{service_name=~\"appliance-.*-(host|caddy)\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n  )\n)\n",
                         "format": "time_series",
                         "instant": false,
                         "legendFormat": "{{region}}",
@@ -77,7 +77,7 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "min by (region) (\n  time()\n  - deploy_last_success_timestamp{project=\"reconcile\", service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
+                        "expr": "max by (region) (\n  time()\n  - deploy_last_success_timestamp{project=\"reconcile\", service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n)",
                         "format": "time_series",
                         "instant": false,
                         "legendFormat": "{{region}}",
@@ -1123,7 +1123,7 @@
                         "expr": "time() - deploy_last_success_timestamp{service_name=~\"appliance-.*-host\", appliance=~\"$stage-.*\", region=~\"($region)\", project=~\"apps|platform|reconcile\"}",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{project}}",
+                        "legendFormat": "{{project}} @ {{node}}",
                         "range": true
                       }
                     },
