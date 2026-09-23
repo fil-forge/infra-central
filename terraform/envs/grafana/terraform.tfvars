@@ -8,13 +8,13 @@
 # the folders it just created.
 terraform_service_account_id = "83"
 
-# Replace before the first apply: the dashboards folder permission names this
-# account, so a placeholder grants View to nobody and the sync workflow cannot
-# read a dashboard back.
-sync_service_account_id = "0"
+# forge-sync. Named by the dashboards folder permission, which grants it View so
+# the sync workflow can read a dashboard back out of Grafana to raise the pull
+# request that returns a UI edit to git.
+sync_service_account_id = "84"
 
-# Replace before the previews folder is of any use. The forge-previews service
-# account holds Admin on that folder and nothing else, because the preview
-# workflow runs on pull_request and its credential is reachable by any action a
-# pull request brings with it.
-previews_service_account_id = "0"
+# forge-previews. Admin on the previews folder and nothing else, because the
+# preview workflow runs on pull_request and its credential is reachable by any
+# action a pull request brings with it. Scoped this way the worst case is a
+# trashed preview.
+previews_service_account_id = "85"
