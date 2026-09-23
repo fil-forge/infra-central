@@ -1,8 +1,8 @@
 # Uid of the hand-made Forge folder the three below nest under. Unlike theirs it
 # is whatever Grafana generated, because it is made in the UI rather than through
-# the API -- read it off the folder's URL. Replace before the first apply: a
-# wrong uid here puts the whole tree somewhere unexpected, or fails the apply.
-parent_folder_uid = "REPLACE_ME"
+# the API. Short and opaque where the children's are meaningful; that asymmetry
+# is the price of the UI not letting you choose one.
+parent_folder_uid = "fhmttd"
 
 # These are the numeric ids, not the uids. Administration -> Users and access ->
 # Service accounts -> the account: the page body states "Numeric ID: <n>". The
