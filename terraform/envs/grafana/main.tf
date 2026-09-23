@@ -85,3 +85,32 @@ resource "grafana_dashboard" "regions" {
   folder      = grafana_folder.dashboards.uid
   config_json = file("${path.module}/dashboards/forge-regions.json")
 }
+
+# Both dashboards already exist in the stack, so the first apply must adopt them
+# rather than create them. Creating instead leaves a duplicate under a fresh uid
+# while every saved link keeps pointing at the original.
+#
+# Declared as import blocks rather than run as `tofu import` commands, because a
+# command writes shared state the moment someone types it, and these have to be
+# runnable before this branch merges. An import block is part of the config: a
+# plan shows what it would adopt and writes nothing, it is reviewable in the
+# diff, and nobody has to remember two invocations in the right order.
+#
+# Delete both once the adopting apply has run. They are no-ops after that.
+#
+# If a plan says a *folder* will be created that you can see already exists in
+# the UI, it needs the same treatment; the id is its uid:
+#
+#   import {
+#     to = grafana_folder.dashboards
+#     id = "forge"
+#   }
+import {
+  to = grafana_dashboard.central
+  id = "forge-central"
+}
+
+import {
+  to = grafana_dashboard.regions
+  id = "forge-regions"
+}
