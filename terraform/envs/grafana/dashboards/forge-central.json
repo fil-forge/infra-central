@@ -1,0 +1,1734 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2",
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "forge-central"
+  },
+  "spec": {
+    "annotations": [
+      {
+        "kind": "AnnotationQuery",
+        "spec": {
+          "query": {
+            "kind": "DataQuery",
+            "group": "grafana",
+            "version": "v0",
+            "datasource": {
+              "name": "-- Grafana --"
+            },
+            "spec": {}
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "builtIn": true
+        }
+      }
+    ],
+    "cursorSync": "Off",
+    "editable": true,
+    "elements": {
+      "panel-1": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "CPU",
+          "description": "CPU Utilization for each service",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "aws_ecs_cpuutilization_average{dimension_ClusterName=\"fc-$stage\", dimension_ServiceName=\"fc-$stage-$service\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percent",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name",
+                    "fixedColor": "#808080",
+                    "seriesBy": "max"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.9,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineStyle": {
+                      "fill": "solid"
+                    },
+                    "lineWidth": 1,
+                    "pointSize": 1,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "always",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-10": {
+        "kind": "Panel",
+        "spec": {
+          "id": 10,
+          "title": "Service health",
+          "description": "One row per service. Each cell is a sparkline over the dashboard time range; the number beside it is the reduction shown in the column header tooltip: Status = last value (healthy host count), CPU / Response time / Requests = mean, 5xx = max. Click a service name to open its tab.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "max by (service) (\n  label_replace(\n    aws_applicationelb_healthy_host_count_minimum{\n      dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n      dimension_AvailabilityZone=\"\",\n      dimension_TargetGroup=~\"targetgroup/fc-$stage-($service)/.*\"\n    },\n    \"service\", \"$1\", \"dimension_TargetGroup\", \"targetgroup/fc-$stage-([^/]+)/.*\"\n  )\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{service}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "avg by (service) (\n  label_replace(\n    aws_ecs_cpuutilization_average{\n      dimension_ClusterName=\"fc-$stage\",\n      dimension_ServiceName=~\"fc-$stage-($service)\"\n    },\n    \"service\", \"$1\", \"dimension_ServiceName\", \"fc-$stage-(.+)\"\n  )\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{service}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "avg by (service) (\n  label_replace(\n    aws_applicationelb_target_response_time_average{\n      dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n      dimension_AvailabilityZone=\"\",\n      dimension_TargetGroup=~\"targetgroup/fc-$stage-($service)/.*\"\n    },\n    \"service\", \"$1\", \"dimension_TargetGroup\", \"targetgroup/fc-$stage-([^/]+)/.*\"\n  )\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{service}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (service) (\n  label_replace(\n    sum_over_time(\n      aws_applicationelb_request_count_sum{\n        dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n        dimension_AvailabilityZone=\"\",\n        dimension_TargetGroup=~\"targetgroup/fc-$stage-($service)/.*\"\n      }[$__interval]\n    ),\n    \"service\", \"$1\", \"dimension_TargetGroup\", \"targetgroup/fc-$stage-([^/]+)/.*\"\n  )\n) / ($__interval_ms / 60000)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{service}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "D",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (service) (\n  label_replace(\n    sum_over_time(\n      aws_applicationelb_httpcode_target_5_xx_count_sum{\n        dimension_LoadBalancer=~\"app/fc-$stage.*\",\n        dimension_AvailabilityZone=\"\",\n        dimension_TargetGroup=~\"targetgroup/fc-$stage-($service)/.*\"\n      }[$__interval]\n    ),\n    \"service\", \"$1\", \"dimension_TargetGroup\", \"targetgroup/fc-$stage-([^/]+)/.*\"\n  )\n) / ($__interval_ms / 60000)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{service}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "E",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [
+                {
+                  "kind": "Transformation",
+                  "group": "timeSeriesTable",
+                  "spec": {
+                    "options": {
+                      "A": {
+                        "stat": "lastNotNull"
+                      },
+                      "B": {
+                        "stat": "mean"
+                      },
+                      "C": {
+                        "stat": "mean"
+                      },
+                      "D": {
+                        "stat": "mean"
+                      },
+                      "E": {
+                        "stat": "max"
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "joinByField",
+                  "spec": {
+                    "options": {
+                      "byField": "service",
+                      "mode": "outerTabular"
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "organize",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {},
+                      "includeByName": {},
+                      "indexByName": {
+                        "Trend #A": 1,
+                        "Trend #B": 2,
+                        "Trend #C": 3,
+                        "Trend #D": 4,
+                        "Trend #E": 5,
+                        "service": 0
+                      },
+                      "renameByName": {
+                        "Trend #A": "Status",
+                        "Trend #B": "CPU",
+                        "Trend #C": "Response time",
+                        "Trend #D": "Requests/min",
+                        "Trend #E": "5xx/min",
+                        "service": "Service"
+                      }
+                    }
+                  }
+                }
+              ],
+              "queryOptions": {
+                "maxDataPoints": 200
+              }
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "cellHeight": "md",
+                "frameIndex": 0,
+                "showHeader": true,
+                "showTypeIcons": false,
+                "sortBy": [
+                  {
+                    "desc": false,
+                    "displayName": "Service"
+                  }
+                ]
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "custom": {
+                    "align": "auto",
+                    "cellOptions": {
+                      "type": "auto"
+                    },
+                    "footer": {
+                      "reducers": []
+                    },
+                    "inspect": false,
+                    "minWidth": 110
+                  }
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "service"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 180
+                      },
+                      {
+                        "id": "custom.align",
+                        "value": "left"
+                      },
+                      {
+                        "id": "links",
+                        "value": [
+                          {
+                            "title": "Open this service's tab",
+                            "url": "/d/forge-central?var-stage=$stage&dtab=${__data.fields.service}&${__url_time_range}"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Trend #A"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "barAlignment": 0,
+                          "drawStyle": "bars",
+                          "fillOpacity": 80,
+                          "hideValue": false,
+                          "lineWidth": 0,
+                          "showPoints": "never",
+                          "type": "sparkline"
+                        }
+                      },
+                      {
+                        "id": "custom.width",
+                        "value": 150
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "green",
+                          "mode": "fixed"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "options": {
+                              "0": {
+                                "color": "dark-red",
+                                "index": 0,
+                                "text": "down"
+                              },
+                              "1": {
+                                "color": "green",
+                                "index": 1,
+                                "text": "up"
+                              },
+                              "2": {
+                                "color": "blue",
+                                "index": 2,
+                                "text": "deploying"
+                              }
+                            },
+                            "type": "value"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Trend #B"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "drawStyle": "line",
+                          "fillOpacity": 20,
+                          "gradientMode": "none",
+                          "hideValue": false,
+                          "lineInterpolation": "smooth",
+                          "lineWidth": 1,
+                          "showPoints": "never",
+                          "type": "sparkline"
+                        }
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 2
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "thresholds"
+                        }
+                      },
+                      {
+                        "id": "thresholds",
+                        "value": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": 0
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Trend #C"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "drawStyle": "points",
+                          "fillOpacity": 0,
+                          "hideValue": false,
+                          "lineWidth": 0,
+                          "pointSize": 2,
+                          "showPoints": "always",
+                          "type": "sparkline"
+                        }
+                      },
+                      {
+                        "id": "unit",
+                        "value": "s"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "purple",
+                          "mode": "fixed"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Trend #D"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "barAlignment": 0,
+                          "drawStyle": "bars",
+                          "fillOpacity": 70,
+                          "hideValue": false,
+                          "lineWidth": 0,
+                          "showPoints": "never",
+                          "type": "sparkline"
+                        }
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 1
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "semi-dark-blue",
+                          "mode": "fixed"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Trend #E"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "barAlignment": 0,
+                          "drawStyle": "bars",
+                          "fillOpacity": 80,
+                          "hideValue": false,
+                          "lineWidth": 0,
+                          "showPoints": "never",
+                          "type": "sparkline"
+                        }
+                      },
+                      {
+                        "id": "unit",
+                        "value": "cpm"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "thresholds"
+                        }
+                      },
+                      {
+                        "id": "thresholds",
+                        "value": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": 0
+                            },
+                            {
+                              "color": "red",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "scope": "series",
+                      "options": "Status"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 58
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "panel-11": {
+        "kind": "Panel",
+        "spec": {
+          "id": 11,
+          "title": "Postgres Connections",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "aws_rds_database_connections_average{dimension_DBInstanceIdentifier=\"fc-$stage\"}",
+                        "legendFormat": "connections",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-12": {
+        "kind": "Panel",
+        "spec": {
+          "id": 12,
+          "title": "Memory",
+          "description": "Memory utilisation for each service, from the ECS metrics CloudWatch publishes. Metric names follow aws_<namespace>_<metric>_<statistic> with the CloudWatch name in snake case, so MemoryUtilization becomes memory_utilization.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "aws_ecs_memory_utilization_average{dimension_ClusterName=\"fc-$stage\", dimension_ServiceName=\"fc-$stage-$service\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percent",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name",
+                    "fixedColor": "#808080",
+                    "seriesBy": "max"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.9,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineStyle": {
+                      "fill": "solid"
+                    },
+                    "lineWidth": 1,
+                    "pointSize": 1,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "always",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-13": {
+        "kind": "Panel",
+        "spec": {
+          "id": 13,
+          "title": "Error rate",
+          "description": "5xx responses as a share of everything the service served. CloudWatch publishes a 5xx count only in minutes when a service returned one, so the numerator is absent for a healthy service; the trailing `or ... * 0` holds the line at zero where there is traffic, and leaves it absent where there is none. Threshold lines at 1% and 5%. The axis carries a soft max of 5%, so an idle panel sits at 0-5% with the threshold lines visible instead of Grafana inventing a 0-10000% range for an all-zero series; a real error rate above 5% expands it.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "sum(\n  sum_over_time(aws_applicationelb_httpcode_target_5_xx_count_sum{dimension_LoadBalancer=~\"app/fc-$stage.*\", dimension_AvailabilityZone=\"\", dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"}[$__interval])\n)\n/\nsum(\n  sum_over_time(aws_applicationelb_request_count_sum{dimension_LoadBalancer=~\"app/fc-$stage.*\", dimension_AvailabilityZone=\"\", dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"}[$__interval])\n)\nor\nsum(\n  sum_over_time(aws_applicationelb_request_count_sum{dimension_LoadBalancer=~\"app/fc-$stage.*\", dimension_AvailabilityZone=\"\", dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"}[$__interval])\n) * 0",
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 0.01,
+                        "color": "orange"
+                      },
+                      {
+                        "value": 0.05,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "dashed"
+                    },
+                    "axisSoftMax": 0.05
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "Server errors",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "sum_over_time(aws_applicationelb_httpcode_target_5_xx_count_sum{dimension_LoadBalancer=~\"app/fc-$stage.*\", dimension_AvailabilityZone=\"\", dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"}[$__interval]) / ($__interval_ms / 60000)",
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "cpm",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-6": {
+        "kind": "Panel",
+        "spec": {
+          "id": 6,
+          "title": "Status",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "aws_applicationelb_healthy_host_count_minimum{\n  dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n  dimension_AvailabilityZone=\"\",\n  dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"\n}",
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "state-timeline",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "alignValue": "center",
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "mergeValues": true,
+                "rowHeight": 0.9,
+                "showValue": "always",
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "mappings": [
+                    {
+                      "type": "value",
+                      "options": {
+                        "0": {
+                          "text": "down",
+                          "color": "dark-red",
+                          "index": 0
+                        },
+                        "1": {
+                          "text": "up",
+                          "color": "green",
+                          "index": 1
+                        },
+                        "2": {
+                          "text": "deploying",
+                          "color": "blue",
+                          "index": 2
+                        }
+                      }
+                    }
+                  ],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "continuous-GrYlRd"
+                  },
+                  "custom": {
+                    "axisPlacement": "auto",
+                    "fillOpacity": 70,
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineWidth": 0,
+                    "spanNulls": false
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-7": {
+        "kind": "Panel",
+        "spec": {
+          "id": 7,
+          "title": "Request Count",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "sum_over_time(\n  aws_applicationelb_request_count_sum{\n    dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n    dimension_AvailabilityZone=\"\",\n    dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"\n  }[$__interval]\n) / ($__interval_ms / 60000)",
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-8": {
+        "kind": "Panel",
+        "spec": {
+          "id": 8,
+          "title": "Target Response Time",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "aws_applicationelb_target_response_time_average{\n  dimension_LoadBalancer=~\"app/fc-$stage/.*\",\n  dimension_AvailabilityZone=\"\",\n  dimension_TargetGroup=~\"targetgroup/fc-$stage-$service/.*\"\n}",
+                        "legendFormat": "$service",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "s",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "palette-classic-by-name"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "points",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "always",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "TabsLayout",
+      "spec": {
+        "tabs": [
+          {
+            "kind": "TabsLayoutTab",
+            "spec": {
+              "title": "🌐 Overview",
+              "layout": {
+                "kind": "GridLayout",
+                "spec": {
+                  "items": [
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 0,
+                        "width": 24,
+                        "height": 11,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-10"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 11,
+                        "width": 24,
+                        "height": 7,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-11"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "kind": "TabsLayoutTab",
+            "spec": {
+              "title": "⚙️ $service",
+              "layout": {
+                "kind": "GridLayout",
+                "spec": {
+                  "items": [
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 0,
+                        "width": 24,
+                        "height": 3,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-6"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 3,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-13"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 12,
+                        "y": 3,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-3"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 13,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-7"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 12,
+                        "y": 13,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-8"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 23,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-1"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 12,
+                        "y": 23,
+                        "width": 12,
+                        "height": 10,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-12"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "repeat": {
+                "mode": "variable",
+                "value": "service"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "links": [],
+    "liveNow": false,
+    "preload": false,
+    "tags": [],
+    "timeSettings": {
+      "timezone": "browser",
+      "from": "now-6h",
+      "to": "now",
+      "autoRefresh": "",
+      "autoRefreshIntervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "1d"
+      ],
+      "hideTimepicker": false,
+      "fiscalYearStartMonth": 0
+    },
+    "title": "Forge Central",
+    "variables": [
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "name": "stage",
+          "current": {
+            "text": "dev",
+            "value": "dev"
+          },
+          "label": "Stage",
+          "hide": "dontHide",
+          "refresh": "onDashboardLoad",
+          "skipUrlSync": false,
+          "query": {
+            "kind": "DataQuery",
+            "group": "prometheus",
+            "version": "v0",
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "spec": {
+              "qryType": 1,
+              "query": "label_values(dimension_ClusterName)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            }
+          },
+          "regex": "/^fc-(.+)$/",
+          "regexApplyTo": "value",
+          "sort": "disabled",
+          "definition": "label_values(dimension_ClusterName)",
+          "options": [],
+          "multi": false,
+          "includeAll": false,
+          "allowCustomValue": true
+        }
+      },
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "name": "service",
+          "current": {
+            "text": "All",
+            "value": [
+              "$__all"
+            ]
+          },
+          "label": "Services",
+          "hide": "hideVariable",
+          "refresh": "onTimeRangeChanged",
+          "skipUrlSync": true,
+          "query": {
+            "kind": "DataQuery",
+            "group": "prometheus",
+            "version": "v0",
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "spec": {
+              "qryType": 5,
+              "query": "label_values(aws_applicationelb_healthy_host_count_minimum{dimension_LoadBalancer=~\"app/fc-$stage/.*\", dimension_AvailabilityZone=\"\"}, dimension_TargetGroup)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            }
+          },
+          "regex": "/targetgroup\\/fc-[^-]+-(.+)\\/.*/",
+          "regexApplyTo": "value",
+          "sort": "alphabeticalAsc",
+          "definition": "label_values(aws_applicationelb_healthy_host_count_minimum{dimension_LoadBalancer=~\"app/fc-$stage/.*\", dimension_AvailabilityZone=\"\"}, dimension_TargetGroup)",
+          "options": [],
+          "multi": true,
+          "includeAll": true,
+          "allowCustomValue": true
+        }
+      }
+    ],
+    "preferences": {
+      "layout": {
+        "kind": "AutoGridLayout",
+        "spec": {
+          "maxColumnCount": 3,
+          "columnWidthMode": "standard",
+          "rowHeightMode": "standard",
+          "items": []
+        }
+      }
+    }
+  }
+}
