@@ -3,7 +3,7 @@
 
 provider "registry.opentofu.org/grafana/grafana" {
   version     = "4.46.0"
-  constraints = "~> 4.46.0"
+  constraints = "~> 4.0"
   hashes = [
     "h1:4ht2uLwmZhnSgxD0eFaPdacz11yUEZ0N3vUfP1mnirE=",
     "h1:B/T/w2S/i2Ififrco0tlHU3IvclmbRb/J0sTc6hqG88=",
