@@ -650,7 +650,7 @@
         "kind": "Panel",
         "spec": {
           "id": 11,
-          "title": "Postgres Connections",
+          "title": "Postgres connections",
           "description": "",
           "links": [],
           "data": {
@@ -1240,7 +1240,7 @@
         "kind": "Panel",
         "spec": {
           "id": 7,
-          "title": "Request Count",
+          "title": "Request count",
           "description": "",
           "links": [],
           "data": {
@@ -1354,7 +1354,7 @@
         "kind": "Panel",
         "spec": {
           "id": 8,
-          "title": "Target Response Time",
+          "title": "Target response time",
           "description": "",
           "links": [],
           "data": {
