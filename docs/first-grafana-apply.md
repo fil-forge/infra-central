@@ -40,8 +40,9 @@ Check these rather than assuming; each one has a way of not being true.
    permission level, not the org role -- its basic role is `No basic role` and
    should stay that way. This single grant is what lets the apply create the
    three subfolders and write their permissions.
-3. **#133 has merged**, and you are on `main`. #135 and #139 may still be open;
-   they only add alert rules and they go out through CI afterwards.
+3. **You are on `main`.** #133 and #135 have both merged, so `main` already
+   carries the folders, the dashboards and four alert rules. #139 may still be
+   open; it only adds two more rules and goes out through CI afterwards.
 4. **`aws sts get-caller-identity` returns account `654654381893`.**
 
 ## Steps
@@ -96,8 +97,9 @@ This prints the plan and waits for `yes`. Read it before you answer. Expect:
   `parent_folder_uid = "fhmttd"`.
 - **Four folder permission sets written**, one of them on `fhmttd` itself.
 - **Two dashboards created.**
-- **Six alert rules created**, across three rule groups, if you are applying a
-  `main` that already has #135 and #139. Nine resources without them.
+- **Four alert rules created**, across two rule groups, applying `main` as it
+  stands; six across three groups once #139 merges. Nine resources without any
+  of them.
 
 `Plan: N to add, 0 to change, 0 to destroy.` Anything proposing to **destroy** or
 **replace** is wrong -- the state is empty, so everything should be a create.
@@ -108,16 +110,18 @@ Answer `no` and say what it showed.
 You are the only person who can do this part, and it means nobody has to do any
 of the above again.
 
-In `terraform/envs/bootstrap/nonprod/account/main.tf`, `state_key_prefixes` is
-one prefix per stage:
+The code change is already on `main`. #142 appended `grafana` to
+`state_key_prefixes` in `terraform/envs/bootstrap/nonprod/account/main.tf`,
+where it had been one prefix per stage and `grafana` is not a stage:
 
 ```hcl
-state_key_prefixes = module.constants.nonprod_stages   # ["dev", "staging"]
+state_key_prefixes = concat(module.constants.nonprod_stages, ["grafana"])
 ```
 
-`grafana` is not a stage, so neither CI role can reach `grafana/forge.tfstate`.
-Add it, and apply that root. After this, the `apply-grafana` job can do what you
-just did, and #135 and #139 deploy by merging.
+What has not happened is the apply. That root is applied by hand, by design, so
+the grant exists in the code and not yet in IAM -- neither CI role can reach
+`grafana/forge.tfstate` until someone applies it. Apply it. After that the
+`apply-grafana` job can do what you just did, and #139 deploys by merging.
 
 Do this **before** anyone sets `GRAFANA_APPLY_ENABLED`: without it every push to
 main fails at `tofu init` with an access denial, on every merge, until someone
