@@ -51,6 +51,15 @@ by pull request, and an export taken from the UI goes through
 else in the stack the root is deliberately not allowed to touch, is in
 [decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
 
+Alert rules live in the same folder and the same root. Each carries
+`team = "forge"`, and a route in the notification policy tree — which is
+maintained in the UI, not here — is what turns that label into a channel. Four
+rules exist so far: `Service has no healthy hosts` and `Service 5xx errors` on
+Central, and `Appliance has stopped reporting` and `Appliance free disk space
+below 40%` on the appliances. The end of `terraform/envs/grafana/alerts.tf`
+lists the alerts under FIL-1145 that are still unwritten and what each is
+waiting on — a threshold nobody has agreed, or a metric nothing publishes.
+
 ## Logs
 
 One service:

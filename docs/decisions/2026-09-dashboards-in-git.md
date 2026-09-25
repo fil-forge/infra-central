@@ -1,4 +1,4 @@
-# The Forge dashboards are Terraform, in a root of their own
+# The Forge dashboards and alert rules are Terraform, in a root of their own
 
 The two Grafana dashboards on-call reads during a SpiderOak perf run or an SP
 deployment are committed here and applied with the Grafana Terraform provider:
@@ -156,14 +156,60 @@ about whether Grafana still accepts the document without it. And a variable adde
 in the UI has no counterpart in the committed file, so its selection passes
 through as exported.
 
+## Alert rules carry a routing label; the routing tree stays in the UI
+
+`grafana_rule_group` sits in the same folder, in `alerts.tf`. Routing does not.
+
+Every rule carries `team = "forge"`, and a route in the notification policy tree
+turns that label into a channel. The tree is not managed here, for the same
+reason as everything else in the excluded list: `grafana_notification_policy` is
+the whole tree as a single resource, so owning it would mean owning FilOne's
+routes. `grafana_contact_point` is excluded for a second reason as well — a Slack
+integration keeps its token or webhook as an ordinary attribute, which would put
+a secret in this state exactly as a Firehose's access key would.
+
+`rule.notification_settings` would attach a contact point per rule and bypass the
+policy, but it needs the `alertingSimplifiedRouting` feature flag and it hides
+routing from whoever maintains the tree. One route matching `team = "forge"`,
+added by hand once, covers every rule this root will ever add.
+
+Grafana alert rules have no template variables, so the stage and region
+templating that `$stage` and `$region` do in the dashboards is done in Terraform
+instead. `var.alert_stages` builds every stage-dependent matcher — the
+appliance label's prefix, Central's `fc-<stage>` load balancer and target group
+names — and grouping by `appliance, region, node` or by `service` gives one alert
+instance per node or service without naming any of them. A new region needs no
+edit.
+
 ## Scope
 
-Dashboards only. Alert rules are the other half of every ticket under
-[FIL-1208](https://linear.app/filecoin-foundation/issue/FIL-1208) and belong in
-this root when they land — `grafana_rule_group` and `grafana_contact_point` are
-per-resource and adopt incrementally. `grafana_notification_policy` is not:
-it manages the whole routing tree, so adopting it means Terraform owns every
-route in a shared stack, and that is a separate decision.
+Four rules, in two groups. Three replace rules built by hand in the UI while
+there was no service account to apply Terraform with — no healthy hosts behind a
+target group, Central's 5xx count, and an appliance that has stopped reporting —
+and the fourth is
+[FIL-1209](https://linear.app/filecoin-foundation/issue/FIL-1209)'s disk-space
+rule. The hand-built ones were exported and translated, so the expression stages
+here follow shapes Grafana itself wrote rather than the provider's
+documentation.
+
+Of the seven alerts under
+[FIL-1145](https://linear.app/filecoin-foundation/issue/FIL-1145), FIL-1209 is
+still the only one that states a threshold. The others say "too high", or take
+theirs from an SLO that has not been written
+([FIL-1242](https://linear.app/filecoin-foundation/issue/FIL-1242)), or ask for a
+decision the team has not taken. The head of `alerts.tf` lists each one and what
+it is waiting on. A guessed threshold pages someone against a number nobody
+agreed, which is worse than no rule at all.
+
+Every one of those tickets is production-only, and production does not exist yet
+([FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147),
+[FIL-808](https://linear.app/filecoin-foundation/issue/FIL-808)).
+[FIL-1207](https://linear.app/filecoin-foundation/issue/FIL-1207) anticipates
+that: rules are authored now and templated by stage so they apply when
+production is stood up. `var.alert_stages` defaults to `["prod"]` for that day;
+`terraform.tfvars` holds `["staging"]` until then, because staging is what the
+rules these replace were watching and an alert nobody can trigger is not an
+alert.
 
 There is no drift check against the live stack. `make check` verifies the
 committed files are in normal form, not that Grafana agrees with them. Leaving
