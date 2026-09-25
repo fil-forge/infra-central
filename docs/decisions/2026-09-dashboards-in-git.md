@@ -36,12 +36,17 @@ from a plan.
 
 The state lives in the nonprod bucket because that is where an operator already
 applies from, and because nothing in this root is account-specific. Its key is
-`grafana/forge.tfstate`, under a prefix like every other key in that bucket, and
-outside every prefix in `github-actions-iam`'s `state_key_prefixes` — which is
-one per stage the workflow deploys, and which already holds `bootstrap` out on
-the same grounds: "applied by an operator from a laptop, so no CI role needs to
-write it". Neither CI role can touch this state. If CI ever applies this root,
-adding `grafana` to that list is the whole IAM change.
+`grafana/forge.tfstate`, under a prefix like every other key in that bucket.
+`grafana` sits in `github-actions-iam`'s `state_key_prefixes` alongside the one
+entry per stage the workflow deploys, so both CI roles can reach this state: the
+apply role to write it, the plan role to read it. That grant lands when someone
+applies `terraform/envs/bootstrap/nonprod/account` by hand — the root that
+creates the roles — and not when the change to it merges.
+
+`bootstrap` is still held out of the same list, on the grounds the variable's
+description gives: "applied by an operator from a laptop, so no CI role needs to
+write it". That reasoning stopped applying to the grafana root the moment CI was
+going to apply it.
 
 ## The whole Kubernetes-style document goes in config_json
 
