@@ -24,3 +24,14 @@ sync_service_account_id = "84"
 # action a pull request brings with it. Scoped this way the worst case is a
 # trashed preview.
 previews_service_account_id = "85"
+
+# The grafanacloud-prom data source's uid happens to equal its name, read off an
+# alert rule exported from the stack. Alert rules address a data source by uid
+# where a dashboard can use its name. Not a secret.
+prometheus_datasource_uid = "grafanacloud-prom"
+
+# Staging, not the variable's production-only default: production does not exist
+# yet (FIL-1147, FIL-808) and staging is what the hand-built rules these replace
+# were watching. Add "prod" alongside, or replace staging with it, once the prod
+# stage is stood up.
+alert_stages = ["staging"]

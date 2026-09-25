@@ -6,13 +6,15 @@
 # dashboards inside it, and the credential it runs as cannot reach past that
 # folder. What may be declared here:
 #
-#   grafana_folder, grafana_dashboard, grafana_folder_permission, and later
+#   grafana_folder, grafana_dashboard, grafana_folder_permission and
 #   grafana_rule_group. The folders and their permissions are in folders.tf,
-#   which is where the three ownership models are set out.
+#   which is where the three ownership models are set out; the rule groups are
+#   in alerts.tf.
 #
-# What may not, because each one reaches outside the slice:
+# What may not, because each one reaches outside the slice or into state:
 #
 #   grafana_notification_policy  the whole routing tree as a single resource
+#   grafana_contact_point        keeps its Slack token or webhook in state
 #   grafana_data_source          grafanacloud-prom and -logs belong to the stack
 #   grafana_organization         not supported on Grafana Cloud at all
 #   grafana_team, grafana_user   shared with FilOne
