@@ -31,10 +31,10 @@
 # That token is forge-terraform's, and it is the only one this root ever runs
 # as. It holds folder Admin on the three Forge folders and no org role, which is
 # enough to manage everything declared here and not enough to create a folder.
-# So the folders and their permissions are made once, by hand, by a person with
-# org Admin, and this root adopts them through the import blocks at the end of
-# this file. Nothing hands an org-admin credential to OpenTofu, at bootstrap or
-# after: a wrong plan cannot reach past the Forge tree even on its first run.
+# Nothing hands an org-admin credential to OpenTofu, at bootstrap or after: a
+# wrong plan cannot reach past the Forge tree even on its first run. There are no
+# import blocks in this root -- an earlier draft adopted the folders and the
+# dashboards that way, and bc34b8d replaced it with creating them fresh.
 #
 # One folder is made by hand, and only one. Make "Forge" in the UI, grant
 # forge-terraform Admin on it, and put its uid in terraform.tfvars as
@@ -60,6 +60,18 @@
 # root is applied from a laptop, so a laptop credential is what it wants. The
 # tokens the preview and sync workflows use are the other way round, and are
 # repository secrets that no human types.
+#
+# forge-terraform is the one account on both sides of that line, once
+# GRAFANA_APPLY_ENABLED is set. An operator reads its token from 1Password for
+# the command above; check-and-deploy.yml's apply-grafana job reads a token for
+# the same account from the GRAFANA_TERRAFORM_TOKEN repository secret, because a
+# runner cannot reach the vault. Prefer a second token over a copy of the first:
+# a service account may hold several, so rotating or revoking either one leaves
+# the other working, and no secret has to be moved between two stores by hand.
+# A repository secret is reachable by anyone who can land a workflow change on
+# main, which is why that job is gated on `github.event_name == 'push'` -- a pull
+# request never sees it -- and why the token is set on the apply step alone
+# rather than the job.
 #
 # The token is not minted here. grafana_service_account_token writes its value
 # into state, which is the reason the telemetry Firehoses sit in a bootstrap root
