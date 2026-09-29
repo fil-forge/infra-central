@@ -145,10 +145,32 @@ resource "grafana_folder" "alerts" {
 }
 
 # Adds nothing a person can use, so Editor and Viewer are View by inheritance
-# from the parent. Grafana marks file-provisioned and Git Sync resources
-# read-only and refuses to save over them; a rule written through the HTTP API,
-# which is what this provider uses, is an ordinary rule. The permission is the
-# only thing stopping a UI edit, so the title says where the truth is.
+# from the parent.
+#
+# What this permission buys is that nobody can *create* a rule here by hand.
+# Edit on a folder carries alert.rules:create, and a hand-made rule would land
+# in a group this root does not declare --
+# grafana_rule_group manages one named group, so anything in another group is
+# outside its view and no apply would ever remove it. An unmanaged rule in the
+# folder titled "managed in git" would simply accumulate.
+#
+# That is also the answer to whether the dashboards and the rules could share
+# one folder. They could technically; a shared folder would have to add Edit
+# for the dashboards to stay editable, and that reopens rule creation. One
+# folder can hold one answer to "who may change this", because
+# grafana_folder_permission manages a folder's whole permission set.
+#
+# There may be a second mechanism on top, and it is deliberately not relied on
+# here. Grafana stamps provenance on what the provisioning API writes and
+# rejects a later write whose provenance does not match what is stored
+# (ngalert/provisioning/alert_rules.go, errProvenanceMismatch). Whether that is
+# what removes the Edit button in the UI, or whether this permission alone
+# does, is untested: the rules in this folder differ from the hand-built ones in
+# both folder and provenance, so an Edit button present on one and absent on
+# the other does not tell them apart.
+#
+# The title still says where the truth is, because nothing enforces the
+# convention on the folder itself.
 resource "grafana_folder_permission" "alerts" {
   folder_uid = grafana_folder.alerts.uid
 
