@@ -19,6 +19,31 @@
 # ask for a decision the team has not taken (FIL-1211, FIL-1212); they are
 # listed at the end of this file rather than guessed at.
 #
+# Writing these rules needs two permissions on forge-terraform that folder
+# Admin does not carry, and both were found the hard way: three applies failed
+# with `putAlertRuleGroupForbidden` before the second one was granted.
+#
+#   alert.provisioning.provenance:write   Fixed role
+#                                         fixed:alerting.provisioning.provenance:writer,
+#                                         shown in the UI as "Alerting:Set
+#                                         provisioning status". Unscoped, and
+#                                         grants nothing on its own. It satisfies
+#                                         the routing middleware, which needs one
+#                                         permission no folder grant can confer
+#                                         (ngalert/api/authorization.go, the PUT
+#                                         rule-groups case).
+#
+#   datasources:query on grafanacloud-prom  On the data source's own Permissions
+#                                         tab, not the service account's roles.
+#                                         The handler runs a second check after
+#                                         the middleware passes, over every data
+#                                         source the rules query
+#                                         (ngalert/accesscontrol/rules.go,
+#                                         getRulesQueryEvaluator). Expression
+#                                         nodes are skipped, which is why the
+#                                         folders and dashboards in this root
+#                                         applied without it.
+#
 # Routing is deliberately not managed here. Every rule carries team = "forge",
 # and the notification policy tree in the UI is what turns that label into a
 # channel. grafana_notification_policy manages the entire tree as one resource,

@@ -44,8 +44,8 @@ folder. Both are parameterised by stage, and the second by region as well:
 | [Forge Central](https://filecoinfoundation.grafana.net/d/forge-central)     | Central services |
 | [Forge Regions](https://filecoinfoundation.grafana.net/d/forge-regions)     | Appliances       |
 
-The very first apply of that root is a two-credential job and has its own page:
-[first-grafana-apply.md](first-grafana-apply.md).
+The root was first applied by hand in September 2026; `apply-grafana` in
+`check-and-deploy.yml` has done it since.
 
 They are committed, not edited in place: the JSON is in
 `terraform/envs/grafana/dashboards/` and applied from that root. A panel changes
