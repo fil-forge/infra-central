@@ -54,8 +54,8 @@ by pull request, and an export taken from the UI goes through
 else in the stack the root is deliberately not allowed to touch, is in
 [decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
 
-Alert rules live in the same root, in a **separate** folder — `Forge alerts
-(managed in git)` — which grants Editor and Viewer `View` only, because a rule
+Alert rules live in the same root, in a separate folder — `Alerts (managed in
+git)` — which grants Editor and Viewer `View` only, because a rule
 edited in the UI would be silently reverted by the next apply. The dashboards
 are the other way round: editable in the UI, reviewed afterwards. `folders.tf`
 sets out the three ownership models.

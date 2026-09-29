@@ -10,8 +10,7 @@ same thing twice.
 While you are in here with AWS credentials, there is a second small job at the
 end that retires the need for anyone to do this by hand again.
 
-It needs two credentials that rarely sit with the same person, which is why this
-page exists rather than a line in a pull request:
+It needs two credentials, and you want both to hand before you start:
 
 - **AWS, for the `filone-sandbox` account** (`654654381893`), with read and write
   on `s3://forge-central-tfstate-654654381893/grafana/*`. The same access whoever
