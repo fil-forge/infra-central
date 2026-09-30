@@ -75,8 +75,9 @@ rules below evaluate but reach no one** until it exists.
 | Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
 | Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
 | Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
-| Appliance has stopped reporting     | Forge appliances          | deploy stamp      | FIL-1163 |
-| Appliance free disk space below 40% | Forge appliances          | node exporter     | FIL-1209 |
+| Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
+| Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
+| Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
 | Appliance container is not running  | Forge appliance containers| cAdvisor, staging | FIL-1163 |
 
 ## Logs
