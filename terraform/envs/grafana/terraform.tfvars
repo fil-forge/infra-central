@@ -32,8 +32,8 @@ prometheus_datasource_uid = "grafanacloud-prom"
 
 # The logs data source's uid, by the same convention: Grafana Cloud gives its
 # provisioned data sources the uids grafanacloud-prom and grafanacloud-logs
-# whatever their names. Not yet read off the stack: check it on the data
-# source's settings page before the first apply. Not a secret.
+# whatever their names. It is the last segment of the data source's settings
+# page URL. Not a secret.
 loki_datasource_uid = "grafanacloud-logs"
 
 # Staging, not the variable's production-only default: production does not exist
