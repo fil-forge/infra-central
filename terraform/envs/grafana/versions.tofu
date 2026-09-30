@@ -27,13 +27,6 @@ terraform {
   # Pinned, with .terraform.lock.hcl committed beside it, the way every other
   # root here is. The lock file is what actually fixes the version; this
   # constraint bounds what a regeneration or a `tofu init -upgrade` may pick.
-  #
-  # One loose end nobody has closed: that lock carries thirteen h1: hashes where
-  # the AWS roots carry fifteen. A different provider publishes a different set
-  # of release platforms, so this is not necessarily a gap -- but it has not been
-  # checked, and if CI ever rewrites the file it is the first thing to look at.
-  # `tofu providers lock -platform=linux_amd64 -platform=darwin_arm64
-  # -platform=darwin_amd64` is the command that settles it.
   required_providers {
     grafana = {
       source  = "grafana/grafana"

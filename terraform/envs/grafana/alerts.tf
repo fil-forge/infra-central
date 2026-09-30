@@ -1,48 +1,32 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# Six rules, in three groups so each can evaluate at the interval its source and
-# its ticket need: CloudWatch publishes once a minute, the appliance host
-# exporter is scraped once a minute but nothing reading it needs that
-# resolution, and the container rule has a ten-minute deadline in FIL-1163's
-# acceptance criteria that a five-minute interval cannot meet.
-#
-# Three of the six came from rules built by hand in the UI and exported; the
-# shapes below follow that export rather than the provider's documentation,
-# which is why the expression stages address __expr__ and put their own refId in
-# the condition's query.params. The other three -- FIL-1209's disk rule,
-# FIL-1151's Lambda rule and FIL-1163's container rule -- follow that same shape
-# rather than the provider documentation, deliberately.
+# The expression stages address __expr__ and repeat their own refId in the
+# condition's query.params. That is unusual -- the provider's documentation
+# shows neither -- but it is the shape Grafana's own rule export produces and
+# the shape that applies cleanly here. Follow the rules already in this file
+# rather than the provider docs.
 #
 # Of the seven alerts under FIL-1145 only FIL-1209 states a threshold. The rest
 # say "too high", or defer to an SLO that has not been written (FIL-1242), or
 # ask for a decision the team has not taken (FIL-1211, FIL-1212); they are
 # listed at the end of this file rather than guessed at.
 #
-# Writing these rules needs two permissions on forge-terraform that folder
-# Admin does not carry, and both were found the hard way: three applies failed
-# with `putAlertRuleGroupForbidden` before the second one was granted.
+# Writing a rule needs two permissions on forge-terraform beyond folder Admin,
+# and neither is sufficient alone:
 #
-#   alert.provisioning.provenance:write   Fixed role
-#                                         fixed:alerting.provisioning.provenance:writer,
-#                                         shown in the UI as "Alerting:Set
-#                                         provisioning status". Unscoped, and
-#                                         grants nothing on its own. It satisfies
-#                                         the routing middleware, which needs one
-#                                         permission no folder grant can confer
-#                                         (ngalert/api/authorization.go, the PUT
-#                                         rule-groups case).
+#   - `alert.provisioning.provenance:write`, carried by the fixed role
+#     `fixed:alerting.provisioning.provenance:writer` and shown in the UI as
+#     "Alerting:Set provisioning status". Unscoped. It satisfies the routing
+#     middleware, which demands a permission no folder grant can confer
+#     (ngalert/api/authorization.go, the PUT rule-groups case).
 #
-#   datasources:query on grafanacloud-prom  On the data source's own Permissions
-#                                         tab, not the service account's roles.
-#                                         The handler runs a second check after
-#                                         the middleware passes, over every data
-#                                         source the rules query
-#                                         (ngalert/accesscontrol/rules.go,
-#                                         getRulesQueryEvaluator). Expression
-#                                         nodes are skipped, which is why the
-#                                         folders and dashboards in this root
-#                                         applied without it.
+#   - `datasources:query` on grafanacloud-prom, granted on the data source's
+#     own Permissions tab rather than through a role. Once past the middleware
+#     the handler checks every data source the rules read
+#     (ngalert/accesscontrol/rules.go, getRulesQueryEvaluator). Expression
+#     nodes are skipped, which is why the folders and dashboards in this root
+#     apply without it.
 #
 # Routing is deliberately not managed here. Every rule carries team = "forge",
 # and the notification policy tree in the UI is what turns that label into a
@@ -112,17 +96,24 @@ locals {
   # appliance matcher narrows it to the alerting stages.
   piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
-  # The four containers FIL-1163 names. cAdvisor labels them with the same
-  # service_name the host metrics carry, so the appliance's own containers are
-  # selected the same way -- which matters on the Servers.com host, where
-  # cAdvisor also reports Lotus, Sophon and everything else the box runs.
+  # The appliance containers that are meant to stay up. On staging -- the only
+  # stage with cAdvisor -- these four are exactly the services declared
+  # `restart: unless-stopped` in infra-nodes' nodes/<node>/{apps,platform}. The
+  # fifth service there, postgres-init, is `restart: "no"`: exiting is what it
+  # is for.
   #
-  # Compose service names, per infra-nodes' nodes/<node>/apps and platform
-  # projects. A service added there and not added here is not watched.
+  # An allow-list rather than a pattern because a Compose restart policy is not
+  # a label cAdvisor exports, so nothing in the query can tell a service that
+  # should be running from one that should have exited. A service added to a
+  # Compose project and not added here is not watched -- dev's caddy and alloy
+  # already are not, which costs nothing while dev ships no cAdvisor.
   #
-  # Prometheus anchors the whole regex, which is what keeps postgres-init out:
-  # it is a one-shot init container that exits on every deploy, so matching it
-  # would fire this rule permanently.
+  # Narrowing by service_name rather than by node keeps the host's own
+  # containers out: on the Servers.com box cAdvisor also reports Lotus, Sophon
+  # and everything else it runs, none of which carries an appliance
+  # service_name.
+  #
+  # Prometheus anchors the whole regex, so these match exactly, not as prefixes.
   container_matcher = "service_name=~\"appliance-(${local.stages})-.*-(piri|ingot|postgres|openbao)\""
 
   # Fields every Prometheus query stage carries. `instant` picks one sample per
@@ -136,6 +127,8 @@ locals {
   }
 }
 
+# 60s because CloudWatch publishes these metrics once a minute; evaluating
+# slower would just add latency to a signal that is already a minute old.
 resource "grafana_rule_group" "central" {
   name             = "Forge Central"
   folder_uid       = grafana_folder.alerts.uid
@@ -320,21 +313,21 @@ resource "grafana_rule_group" "central" {
     }
   }
 
-  # FIL-1151: "provision Lambda errors ... Define Grafana alert rules on them".
+  # Any error out of the provision Lambda. The threshold is gt 0 because no
+  # number was ever specified and a provisioning error is always worth a look.
   #
-  # The Lambda namespace is not in this repository's metric stream. It arrives
-  # through fil-one/infra's stream, which names AWS/Lambda for the whole account
-  # -- docs/decisions/2026-09-grafana-telemetry.md says why Forge Central's
-  # stream deliberately does not. So this rule depends on that stream keeping
-  # the namespace, and goes blind rather than wrong if it stops.
+  # The AWS/Lambda namespace does not come from this repository's metric stream.
+  # It arrives through fil-one/infra's, which names the namespace for the whole
+  # account -- docs/decisions/2026-09-grafana-telemetry.md says why Forge
+  # Central's stream deliberately does not. If that stream ever drops it, this
+  # rule goes blind rather than wrong.
   #
   # CloudWatch publishes an error count only in minutes where the function
   # errored, so an empty result is zero errors and each sample is one minute's
-  # count. sum_over_time adds them; gt 0 is the threshold because the ticket
-  # names no number and any provisioning error is worth a look.
+  # count; sum_over_time adds them.
   #
-  # severity warning, not critical: a failed provision does not take serving
-  # traffic down. Chosen, not specified.
+  # warning rather than critical: a failed provision does not take serving
+  # traffic down.
   rule {
     name           = "Provision Lambda errors"
     condition      = "B"
@@ -407,6 +400,9 @@ resource "grafana_rule_group" "central" {
   }
 }
 
+# 300s although the host exporter is scraped once a minute. Nothing in this
+# group is time-critical enough to want the extra resolution, and a slower
+# interval costs nothing here.
 resource "grafana_rule_group" "appliance" {
   name             = "Forge appliances"
   folder_uid       = grafana_folder.alerts.uid
@@ -716,56 +712,30 @@ resource "grafana_rule_group" "appliance" {
   }
 }
 
-# FIL-1163's acceptance criteria are the only ones under FIL-1145 that name a
-# response time: "Stopping the Ingot container on staging produces a Slack alert
-# from Grafana within ten minutes", and "Recovery clears the alert."
-#
-# Its own group, at 60s, because the 300s the other appliance rules run at
-# cannot meet that. Worst case here is one scrape gap (cAdvisor scrapes every
-# fifteen seconds), the 5m absence window and one evaluation: about six minutes.
-# At 300s it would be about eleven, which fails the criterion on paper.
+# Its own group at 60s. FIL-1163 wants a Slack alert "within ten minutes" of a
+# container stopping, and the 300s the other appliance rules run at cannot meet
+# it: one scrape gap plus the 5m absence window plus one evaluation is about
+# eleven minutes. At 60s it is about six.
 resource "grafana_rule_group" "appliance_containers" {
   name             = "Forge appliance containers"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
 
-  # Same present_over_time/unless shape as "Appliance has stopped reporting", and
-  # for the same reason: cAdvisor stops publishing a container's series when the
-  # container goes away, so the signal is absence, and absence cannot be compared
-  # against a threshold directly. The 24h left side makes it self-cleaning -- a
-  # service removed from the Compose project falls out of both sides and stops
-  # alerting with no edit here. It also means a container that has been down
-  # longer than a day stops alerting, which is the same trade the node rule makes.
+  # Absence is the signal. cAdvisor stops publishing a container's series when
+  # the container goes away, so there is no value to compare against a
+  # threshold; the expression tests for a series that was there and is not. The
+  # clauses are annotated inline below.
   #
-  # Recovery clears it as soon as one sample lands in the 5m window, which
-  # satisfies the second criterion.
+  # Only staging is watched, because only staging runs cAdvisor -- the dev EC2
+  # node's Alloy container has no cgroup mount
+  # (infra-nodes/docs/observability.md). Where it does not run every clause is
+  # absent, so the rule is silent rather than firing for every container.
   #
-  # Only staging ships this: cAdvisor runs on the Servers.com host and not on the
-  # dev EC2 node, where the Alloy container has no cgroup mount
-  # (infra-nodes/docs/observability.md). On a stage with no cAdvisor the query
-  # returns nothing and the rule is silent rather than firing for every
-  # container, because the left side is absent too.
-  #
-  # The `and on (node)` is what keeps a telemetry outage from reading as an
-  # outage. cAdvisor never having run is the harmless case above; cAdvisor
-  # having run and then stopped is not. If the scrape or its Alloy pipeline dies
-  # after a container has reported, the 24h side stays present while the 5m side
-  # empties, and without the gate every watched container on that node pages at
-  # once. `no_data_state = "OK"` does not help: the query still returns the
-  # stale 24h series, so it is data, not no-data. The gate requires cAdvisor to
-  # have reported *something* on that node in the same five minutes, which is a
-  # far wider net than the four watched services -- cAdvisor reports the host's
-  # other containers too, Lotus and Sophon among them, all under job="cadvisor"
-  # (infra-nodes/docs/observability.md). So it stays true while cAdvisor lives,
-  # even with all four watched containers down, and goes false the moment the
-  # scrape does, suppressing the rule for that node rather than paging for it.
-  #
-  # What that trades away: a node whose cAdvisor dies is no longer watched by
-  # this rule, and nothing here says so. "Appliance has stopped reporting"
-  # covers a node that goes silent entirely, but it reads the deploy stamp, not
-  # cAdvisor, so a live node with a dead cAdvisor is a blind spot. Closing it
-  # needs a rule on the scrape's own health, which is FIL-1163 territory once
-  # somebody decides what to do about it.
+  # Known blind spot: a node whose cAdvisor dies is deliberately not watched by
+  # this rule (see the `and on (node)` gate), and nothing else covers it.
+  # "Appliance has stopped reporting" reads the deploy stamp rather than
+  # cAdvisor, so a live node with a dead scrape goes unnoticed. Closing it needs
+  # a rule on the scrape's own health.
   rule {
     name           = "Appliance container is not running"
     condition      = "C"
@@ -803,14 +773,28 @@ resource "grafana_rule_group" "appliance_containers" {
         legendFormat = "{{service_name}}"
         expr         = <<-PROMQL
           (
+            # 24h rather than "ever", so this is self-cleaning: a service dropped
+            # from a Compose project falls out of both sides and stops alerting
+            # with no edit here. The cost is that a container down longer than a
+            # day stops alerting too, the same trade the node rule makes.
             max by (node, region, appliance, service_name) (
               present_over_time(container_cpu_usage_seconds_total{${local.container_matcher}}[24h])
             )
             unless
+            # Recovery clears the alert as soon as one sample lands in this window.
             max by (node, region, appliance, service_name) (
               present_over_time(container_cpu_usage_seconds_total{${local.container_matcher}}[5m])
             )
           )
+          # Gate: only alert on a node cAdvisor is still reporting from. Without
+          # it, a scrape that dies after a container has reported leaves the 24h
+          # side present and the 5m side empty, and every watched container on
+          # that node pages at once. no_data_state does not help -- the stale 24h
+          # series is data, not no-data. job="cadvisor" is a far wider net than
+          # the watched services (it covers the host's other containers, Lotus
+          # and Sophon among them), so the gate holds while cAdvisor lives even
+          # with every watched container down, and goes false the moment the
+          # scrape does.
           and on (node)
           max by (node) (
             present_over_time(container_cpu_usage_seconds_total{job="cadvisor"}[5m])
