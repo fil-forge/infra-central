@@ -44,6 +44,9 @@ folder. Both are parameterised by stage, and the second by region as well:
 | [Forge Central](https://filecoinfoundation.grafana.net/d/forge-central)     | Central services |
 | [Forge Regions](https://filecoinfoundation.grafana.net/d/forge-regions)     | Appliances       |
 
+The root was first applied by hand in September 2026; `apply-grafana` in
+`check-and-deploy.yml` has done it since.
+
 They are committed, not edited in place: the JSON is in
 `terraform/envs/grafana/dashboards/` and applied from that root. A panel changes
 by pull request, and an export taken from the UI goes through
@@ -51,14 +54,30 @@ by pull request, and an export taken from the UI goes through
 else in the stack the root is deliberately not allowed to touch, is in
 [decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
 
-Alert rules live in the same folder and the same root. Each carries
-`team = "forge"`, and a route in the notification policy tree — which is
-maintained in the UI, not here — is what turns that label into a channel. Four
-rules exist so far: `Service has no healthy hosts` and `Service 5xx errors` on
-Central, and `Appliance has stopped reporting` and `Appliance free disk space
-below 40%` on the appliances. The end of `terraform/envs/grafana/alerts.tf`
-lists the alerts under FIL-1145 that are still unwritten and what each is
-waiting on — a threshold nobody has agreed, or a metric nothing publishes.
+Alert rules live in the same root, in a separate folder — `Alerts (managed in
+git)` — which grants Editor and Viewer `View` only. That is what stops a rule
+being *created* there by hand: Grafana's folder roles are coarse, and the `Edit`
+the dashboards need would carry rule creation with it, so the two cannot share a
+folder. `folders.tf` sets out the three ownership models and what each buys.
+
+The dashboards folder grants `Edit`, so a panel can be changed in the UI and
+then exported into the repository. Whether Grafana actually resolves that in
+`Edit`'s favour over the `View` the parent folder gives by inheritance has not
+been tested; if it does not, the export route is the only one.
+
+Each rule carries `team = "forge"`, and a route in the notification policy tree
+— which is maintained in the UI, not here — is what turns that label into a
+channel. Adding that one route is a manual step nobody has done yet, so **the
+rules below evaluate but reach no one** until it exists.
+
+| Rule                                | Group                     | Source            | Ticket   |
+| ----------------------------------- | ------------------------- | ----------------- | -------- |
+| Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
+| Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
+| Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
+| Appliance has stopped reporting     | Forge appliances          | deploy stamp      | FIL-1163 |
+| Appliance free disk space below 40% | Forge appliances          | node exporter     | FIL-1209 |
+| Appliance container is not running  | Forge appliance containers| cAdvisor, staging | FIL-1163 |
 
 ## Logs
 

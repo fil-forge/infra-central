@@ -1,23 +1,21 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# Nine rules, in two groups so Central and the appliances can evaluate at
-# different intervals: CloudWatch publishes once a minute, the appliance host
-# exporter is scraped once a minute but nothing here needs that resolution.
+# Writing a rule needs two permissions on forge-terraform beyond folder Admin,
+# and neither is sufficient alone:
 #
-# Three of the nine came from rules built by hand in the UI and exported; the
-# shapes below follow that export rather than the provider's documentation,
-# which is why the expression stages address __expr__ and put their own refId in
-# the condition's query.params. The fourth is FIL-1209's disk rule. The fifth,
-# Piri's chain notifications, is the only one that reads logs rather than
-# metrics. The last four read the chain head and proving gauges Piri exports
-# over OTLP, and between them replace that log rule once every alerting stage
-# runs a Piri that has them.
+#   - `alert.provisioning.provenance:write`, carried by the fixed role
+#     `fixed:alerting.provisioning.provenance:writer` and shown in the UI as
+#     "Alerting:Set provisioning status". Unscoped. It satisfies the routing
+#     middleware, which demands a permission no folder grant can confer
+#     (ngalert/api/authorization.go, the PUT rule-groups case).
 #
-# Of the seven alerts under FIL-1145 only FIL-1209 states a threshold. The rest
-# say "too high", or defer to an SLO that has not been written (FIL-1242), or
-# ask for a decision the team has not taken (FIL-1211, FIL-1212); they are
-# listed at the end of this file rather than guessed at.
+#   - `datasources:query` on grafanacloud-prom, granted on the data source's
+#     own Permissions tab rather than through a role. Once past the middleware
+#     the handler checks every data source the rules read
+#     (ngalert/accesscontrol/rules.go, getRulesQueryEvaluator). Expression
+#     nodes are skipped, which is why the folders and dashboards in this root
+#     apply without it.
 #
 # Routing is deliberately not managed here. Every rule carries team = "forge",
 # and the notification policy tree in the UI is what turns that label into a
@@ -53,9 +51,9 @@ locals {
   stages = join("|", var.alert_stages)
 
   # The appliance label is <stage>-<region>, so one regex covers every region of
-  # every alerting stage and a new region needs no edit here. That is FIL-1207's
-  # "templated by node label so a new region needs no Grafana edit", done in
-  # Terraform because a Grafana alert rule has no template variables.
+  # every alerting stage and a new region needs no edit here. Templating a rule
+  # by node label is a requirement; it happens in Terraform because a Grafana
+  # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
@@ -75,10 +73,10 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The same filesystem filter the dashboards use. FIL-1209 names the control and
-  # data volumes; their mountpoints differ between the EC2 nodes and the
-  # Servers.com host, so the rule covers every real filesystem instead, which is
-  # a superset and needs no per-node edit.
+  # The same filesystem filter the dashboards use. What wants watching is the
+  # control and data volumes, but their mountpoints differ between the EC2 nodes
+  # and the Servers.com host, so this covers every real filesystem instead --
+  # a superset, and one that needs no per-node edit.
   filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
 
   # Piri's container log stream. Alloy names it appliance-<stage>-<region>-piri
@@ -96,6 +94,27 @@ locals {
   # reused: its service_name is the host exporter's.
   piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
 
+  # Every appliance container that is meant to stay up: all of them except the
+  # one whose job is to exit.
+  #
+  # A deny-list, not an allow-list, so a service added to a Compose project is
+  # watched from the day it ships rather than the day somebody remembers to
+  # list it here. The failure modes are not symmetric -- a missing allow-list
+  # entry is a container nobody is watching and nothing says so, while a wrong
+  # deny-list entry is an alert naming the service it is wrong about. Loud beats
+  # silent.
+  #
+  # `service_name` is `appliance-<stage>-<region>-<compose service>`, set by the
+  # node's Alloy from the Compose service label and absent on anything started
+  # by hand (infra-nodes/docs/observability.md). So the prefix already excludes
+  # the host's own containers -- on the Servers.com box cAdvisor reports Lotus,
+  # Sophon and the rest, none of which carries one.
+  #
+  # postgres-init is excluded because it is `restart: "no"`: it exits on every
+  # deploy by design, and watching it would fire this rule permanently. Anything
+  # else added with that policy needs excluding here too.
+  container_matcher = "service_name=~\"appliance-(${local.stages})-.*\", service_name!~\".*-postgres-init\""
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -107,6 +126,8 @@ locals {
   }
 }
 
+# 60s because CloudWatch publishes these metrics once a minute; evaluating
+# slower would just add latency to a signal that is already a minute old.
 resource "grafana_rule_group" "central" {
   name             = "Forge Central"
   folder_uid       = grafana_folder.alerts.uid
@@ -162,6 +183,22 @@ resource "grafana_rule_group" "central" {
       }))
     }
 
+    # __expr__ is Grafana's built-in server-side expression engine, addressed as
+    # if it were a data source. A stage pointed at it queries nothing: it
+    # transforms the stages before it, inside Grafana, after their queries have
+    # returned. That is what lets one rule reduce a query to a single number and
+    # then threshold it.
+    #
+    # Two quirks of the shape below, both unusual and both deliberate. The
+    # provider's documentation shows neither; this is what Grafana's own rule
+    # export produces, and what applies cleanly. Follow the rules already in
+    # this file rather than the docs.
+    #
+    #   - `datasource_uid` and the model's nested `datasource` both carry the
+    #     literal "__expr__" rather than a real uid.
+    #   - a threshold stage repeats its *own* refId in
+    #     `conditions[].query.params` rather than naming the stage it reads.
+    #     `expression` is what actually names its input.
     data {
       ref_id         = "B"
       query_type     = "expression"
@@ -290,8 +327,97 @@ resource "grafana_rule_group" "central" {
       })
     }
   }
+
+  # Any error out of the provision Lambda. The threshold is gt 0 because a
+  # provisioning error is always worth a look.
+  #
+  # The AWS/Lambda namespace does not come from this repository's metric stream.
+  # It arrives through fil-one/infra's, which names the namespace for the whole
+  # account -- docs/decisions/2026-09-grafana-telemetry.md says why Forge
+  # Central's stream deliberately does not. If that stream ever drops it, this
+  # rule goes blind rather than wrong.
+  #
+  # CloudWatch publishes an error count only in minutes where the function
+  # errored, so an empty result is zero errors and each sample is one minute's
+  # count; sum_over_time adds them.
+  #
+  # warning rather than critical: a failed provision does not take serving
+  # traffic down.
+  rule {
+    name           = "Provision Lambda errors"
+    condition      = "B"
+    for            = "0m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.dimension_FunctionName }} returned errors in the last five minutes"
+      description = "The provision Lambda is erroring. Its log group is /aws/lambda/{{ $labels.dimension_FunctionName }}; docs/observability.md says how to read it in Grafana."
+    }
+
+    labels = {
+      team      = "forge"
+      component = "central"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        intervalMs   = 1000
+        legendFormat = "{{dimension_FunctionName}}"
+        expr         = <<-PROMQL
+          sum by (dimension_FunctionName) (
+            sum_over_time(
+              aws_lambda_errors_sum{dimension_FunctionName=~"fc-(${local.stages})-provision"}[5m]
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
+# 300s although the host exporter is scraped once a minute. Nothing in this
+# group is time-critical enough to want the extra resolution, and a slower
+# interval costs nothing here.
 resource "grafana_rule_group" "appliance" {
   name             = "Forge appliances"
   folder_uid       = grafana_folder.alerts.uid
@@ -423,8 +549,8 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # FIL-1209: "Create an alert when remaining free space drops below 40% of the
-  # total volume size."
+  # 40% of the total volume size. The one threshold in this file that was agreed
+  # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
   # service_name and are told apart by node. An instant query, so no reduce stage.
@@ -987,21 +1113,143 @@ resource "grafana_rule_group" "appliance" {
   }
 }
 
-# Not written, and why. Each needs a number or a decision that is not in the
-# ticket, and inventing one would page someone against a threshold nobody agreed:
-#
-#   FIL-1207  5xx error rate.      The "Service 5xx errors" rule above is a
-#                                  count, not the rate FIL-1207 asks for. The
-#                                  availability target it wants is FIL-1242,
-#                                  which is in the backlog, and its acceptance
-#                                  criteria defer the channel to FIL-1164.
-#   FIL-1210  TTFB.                Threshold is explicitly "comes from the SLO
-#                                  definition in FIL-1242". R1.6.
-#   FIL-1213  TTLB.                Same, and needs PutObject, GetObject and
-#                                  CompleteMultipartUpload excluded, which Caddy
-#                                  can only approximate by method.
-#   FIL-1211  Request rate anomaly. "Decide with the team whether we want an
-#                                  alert." Not decided.
-#   FIL-1212  Ingress/egress.      Same. Not decided.
-#   FIL-1214  CPU and memory.      "Propose the thresholds and discuss them with
-#                                  the team." Not proposed.
+# Its own group at 60s. A stopped container should reach Slack within ten
+# minutes, and the 300s the other appliance rules run at cannot do it: one
+# scrape gap plus the 5m absence window plus one evaluation is about eleven
+# minutes. At 60s it is about six.
+resource "grafana_rule_group" "appliance_containers" {
+  name             = "Forge appliance containers"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 60
+
+  # Absence is the signal. cAdvisor stops publishing a container's series when
+  # the container goes away, so there is no value to compare against a
+  # threshold; the expression tests for a series that was there and is not. The
+  # clauses are annotated inline below.
+  #
+  # Only staging is watched, because only staging runs cAdvisor -- the dev EC2
+  # node's Alloy container has no cgroup mount
+  # (infra-nodes/docs/observability.md). Where it does not run every clause is
+  # absent, so the rule is silent rather than firing for every container.
+  #
+  # Known blind spot: a node whose cAdvisor dies is deliberately not watched by
+  # this rule (see the `and on (node)` gate), and nothing else covers it.
+  # "Appliance has stopped reporting" reads the deploy stamp rather than
+  # cAdvisor, so a live node with a dead scrape goes unnoticed. Closing it needs
+  # a rule on the scrape's own health.
+  rule {
+    name           = "Appliance container is not running"
+    condition      = "C"
+    for            = "0m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "{{ $labels.service_name }} is not running on {{ $labels.node }}"
+      description      = "cAdvisor reported this container within the last day and not within the last five minutes, so it has stopped. Container logs: {service_name=\"{{ $labels.service_name }}\"}."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "1"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = false
+        range        = true
+        legendFormat = "{{service_name}}"
+        expr         = <<-PROMQL
+          (
+            # 24h rather than "ever", so this is self-cleaning: a service dropped
+            # from a Compose project falls out of both sides and stops alerting
+            # with no edit here. The cost is that a container down longer than a
+            # day stops alerting too, the same trade the node rule makes.
+            max by (node, region, appliance, service_name) (
+              present_over_time(container_cpu_usage_seconds_total{${local.container_matcher}}[24h])
+            )
+            unless
+            # Recovery clears the alert as soon as one sample lands in this window.
+            max by (node, region, appliance, service_name) (
+              present_over_time(container_cpu_usage_seconds_total{${local.container_matcher}}[5m])
+            )
+          )
+          # Gate: only alert on a node cAdvisor is still reporting from. Without
+          # it, a scrape that dies after a container has reported leaves the 24h
+          # side present and the 5m side empty, and every watched container on
+          # that node pages at once. no_data_state does not help -- the stale 24h
+          # series is data, not no-data. job="cadvisor" is a far wider net than
+          # the watched services (it covers the host's other containers, Lotus
+          # and Sophon among them), so the gate holds while cAdvisor lives even
+          # with every watched container down, and goes false the moment the
+          # scrape does.
+          and on (node)
+          max by (node) (
+            present_over_time(container_cpu_usage_seconds_total{job="cadvisor"}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "reduce"
+        expression    = "A"
+        reducer       = "last"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+      })
+    }
+
+    data {
+      ref_id         = "C"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "B"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+}

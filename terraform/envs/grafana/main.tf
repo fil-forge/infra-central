@@ -68,6 +68,12 @@
 # runner cannot reach the vault. Prefer a second token over a copy of the first:
 # a service account may hold several, so rotating or revoking either one leaves
 # the other working, and no secret has to be moved between two stores by hand.
+# Either credential is needed for a plan as much as an apply: a plan refreshes
+# every managed resource, and refreshing grafana_folder_permission calls
+# folders.permissions:read, which is an Admin-level action. There is no
+# read-only credential that can plan this root, which is why check-and-deploy.yml
+# carries no plan job for it.
+#
 # A repository secret is reachable by anyone who can land a workflow change on
 # main, which is why that job is gated on `github.event_name == 'push'` -- a pull
 # request never sees it -- and why the token is set on the apply step alone
@@ -122,7 +128,8 @@ resource "grafana_dashboard" "regions" {
 # it as what you set "to overwrite existing dashboard with newer version, same
 # dashboard title in folder or same dashboard uid" -- so creating forge-central
 # while a forge-central already exists fails rather than duplicating. Delete the
-# originals first, then apply. docs/first-grafana-apply.md says so in order.
+# originals first, then apply. This bites again on a rebuild or a state loss,
+# not only on the first apply.
 #
 # Leaving overwrite unset is deliberate beyond this: afterwards it means an apply
 # against a dashboard someone has saved in the UI fails on the version conflict
