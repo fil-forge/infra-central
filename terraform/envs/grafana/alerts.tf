@@ -10,9 +10,8 @@
 #     middleware, which demands a permission no folder grant can confer
 #     (ngalert/api/authorization.go, the PUT rule-groups case).
 #
-#   - `datasources:query` on every data source the group's rules read, today
-#     grafanacloud-prom and grafanacloud-logs, granted on each data source's
-#     own Permissions tab rather than through a role. Once past the middleware
+#   - `datasources:query` on every data source the group's rules read,
+#     granted on each data source's own Permissions tab rather than through a role. Once past the middleware
 #     the handler checks every data source the rules read
 #     (ngalert/accesscontrol/rules.go, getRulesQueryEvaluator), and a group
 #     with one it cannot query is refused whole, as a 403
