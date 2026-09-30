@@ -89,6 +89,28 @@ locals {
   # postgres service and not postgres-init.
   postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
 
+  # Caddy's request metrics, narrowed to traffic the appliance's own sites
+  # answered. caddy_http_request_duration_seconds_count is the series to read:
+  # the plain request counter carries no code label at all, because Caddy
+  # increments it before a status exists (caddyserver/caddy,
+  # modules/caddyhttp/metrics.go -- the counter takes a label set without code,
+  # the histograms take one with it).
+  #
+  # What is left out, and why it matters: each of these would otherwise sit in
+  # the denominator of an error ratio without being traffic a site served.
+  #
+  #   remaining_auto_https_redirects is the :80 listener Caddy generates by
+  #   itself. It only ever redirects, so it can add to the denominator and
+  #   never to the numerator.
+  #
+  #   _other is where Caddy puts a request whose Host matches no configured
+  #   site, which is junk by definition. per_host is what creates that bucket.
+  #
+  #   An empty host is the same traffic on the staging node, where the host's
+  #   Alloy blanks the label rather than letting Caddy bucket it. Prometheus
+  #   treats an empty label value as absent, so host=~".+" is what drops it.
+  caddy_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-caddy\", server!=\"remaining_auto_https_redirects\", host!=\"_other\", host=~\".+\""
+
   # Every appliance container that is meant to stay up: all of them except the
   # one whose job is to exit.
   #
@@ -809,6 +831,103 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+
+  # 5xx as a share of what each site answered, split by host so Piri's traffic
+  # and Ingot's are judged apart -- a site serving nothing but errors would
+  # otherwise be diluted by a healthy one beside it.
+  #
+  # The threshold is chosen, not derived: the availability target that would
+  # set it is FIL-1242, which has not been written. 5% sits well above the 502s
+  # a deploy produces while an upstream restarts, and `for` is 10m so a deploy
+  # cannot hold it there.
+  #
+  # no_data_state is OK. A site with no 5xx at all produces no series on the
+  # numerator's side, so the division drops it and an empty result is the
+  # healthy state. An instant query, so no reduce stage.
+  rule {
+    name           = "Appliance 5xx rate too high"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
+      description = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            sum by (appliance, region, node, host) (
+              rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}, code=~"5.."}[5m])
+            )
+            /
+            sum by (appliance, region, node, host) (
+              rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}}[5m])
+            )
+          )
+          # Gate on the site actually being used. Overnight a site can serve a
+          # handful of requests, where one error is a large share of them; below
+          # roughly thirty requests in the window the ratio says nothing. `and`
+          # needs both sides to carry the same labels, which is why the grouping
+          # repeats here.
+          and
+          sum by (appliance, region, node, host) (
+            rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}}[5m])
+          ) > 0.1
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.05] }
         }]
       })
     }
