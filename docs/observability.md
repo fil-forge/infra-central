@@ -78,7 +78,7 @@ rules below evaluate but reach no one** until it exists.
 | Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
 | Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
 | Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
-| Appliance container is not running  | Forge appliance containers| cAdvisor, staging | FIL-1163 |
+| Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
 
 ## Logs
 

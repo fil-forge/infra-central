@@ -726,7 +726,7 @@ resource "grafana_rule_group" "appliance" {
 # scrape gap plus the 5m absence window plus one evaluation is about eleven
 # minutes. At 60s it is about six.
 resource "grafana_rule_group" "appliance_containers" {
-  name             = "Forge appliance containers"
+  name             = "Forge Regions containers"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
 
