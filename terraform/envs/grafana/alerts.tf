@@ -653,8 +653,8 @@ resource "grafana_rule_group" "appliance" {
   # returns a series only for a node that logged the line, so an empty result is
   # the healthy state. An instant query, so no reduce stage.
   #
-  # Superseded by "Piri's chain head is stale" and the three rules after it,
-  # which read the head and the proving schedule directly, once the alerting
+  # Superseded by the rules below that read Piri's chain head and proving
+  # schedule directly, once the alerting
   # stages run a Piri that exports those gauges. Kept until then, since a Piri
   # without them leaves this rule the only one watching the chain; delete it
   # after that rather than run both.
@@ -732,7 +732,7 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # The four rules below read gauges Piri exports from its PDP pipeline (piri
+  # The rules below read gauges Piri exports from its PDP pipeline (piri
   # docs/content/operator-guide/monitoring.md, "PDP Proving Health"), starting
   # from the PromQL given there. They are grouped by node as well as region for
   # the reason the disk rule gives. Filecoin epochs are thirty seconds, which is
