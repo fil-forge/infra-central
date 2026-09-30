@@ -1,8 +1,8 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# Writing a rule needs two permissions on forge-terraform beyond folder Admin,
-# and neither is sufficient alone:
+# Writing a rule needs more on forge-terraform than folder Admin. Each of these
+# is necessary and none is sufficient alone:
 #
 #   - `alert.provisioning.provenance:write`, carried by the fixed role
 #     `fixed:alerting.provisioning.provenance:writer` and shown in the UI as
@@ -725,11 +725,11 @@ resource "grafana_rule_group" "appliance" {
   # staging Postgres refused 3,629 connections in 27 minutes, every multipart
   # object's CompleteMultipartUpload failed at least once, and nothing alerted.
   #
-  # Two log lines mean the same thing and both are matched. Postgres logs
-  # "sorry, too many clients already" when max_connections is exhausted, and
-  # "remaining connection slots are reserved ..." when only the superuser
-  # reserve is left -- the wording of the second differs across major versions,
-  # so the pattern stops before the part that varies.
+  # Postgres reports connection exhaustion in more than one wording and the
+  # pattern covers them: "sorry, too many clients already" when max_connections
+  # is gone, and "remaining connection slots are reserved ..." when only the
+  # superuser reserve is left. The rest of that second sentence differs across
+  # major versions, so the pattern stops before the part that varies.
   #
   # The signal is dense while it lasts: a rate that high puts a line in every
   # window. `for` is 5m rather than firing on one line, which is what keeps a
