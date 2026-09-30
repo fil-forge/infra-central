@@ -416,7 +416,7 @@ jobs:
 
       # For the S3 backend only. Nothing in this root is an AWS resource; the
       # role is here to read and write grafana/forge.tfstate.
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
