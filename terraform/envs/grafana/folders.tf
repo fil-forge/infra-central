@@ -145,10 +145,32 @@ resource "grafana_folder" "alerts" {
 }
 
 # Adds nothing a person can use, so Editor and Viewer are View by inheritance
-# from the parent. Grafana marks file-provisioned and Git Sync resources
-# read-only and refuses to save over them; a rule written through the HTTP API,
-# which is what this provider uses, is an ordinary rule. The permission is the
-# only thing stopping a UI edit, so the title says where the truth is.
+# from the parent.
+#
+# What this permission buys is that nobody can *create* a rule here by hand.
+# Edit on a folder carries alert.rules:create, and a hand-made rule would land
+# in a group this root does not declare -- grafana_rule_group manages one named
+# group, so anything in another group is outside its view and no apply would
+# ever remove it. An unmanaged rule in the folder titled "managed in git" would
+# simply accumulate.
+#
+# That is also why the dashboards and the rules can't share one folder. A shared
+# folder would have to grant Edit for the dashboards to stay editable, and
+# Grafana's folder roles are coarse: Edit bundles dashboards:write with
+# alert.rules:create, so granting one grants the other. Neither
+# grafana_folder_permission nor grafana_folder_permission_item can split that --
+# they assign the same View/Edit/Admin roles and differ only in whether they
+# manage the whole set or one entry.
+#
+# The fine-grained actions can be assigned separately, but not from a folder's
+# permissions: it takes a custom role (grafana_role) carrying dashboards:write
+# scoped to folders:uid:<x> and no alert action, assigned with
+# grafana_role_assignment. Untried here, and it costs something -- a custom role
+# does not show on the folder's Permissions tab, so the folder would no longer
+# say who may change what. Two folders do.
+#
+# The title still says where the truth is, because nothing enforces the
+# convention on the folder itself.
 resource "grafana_folder_permission" "alerts" {
   folder_uid = grafana_folder.alerts.uid
 
