@@ -55,10 +55,15 @@ else in the stack the root is deliberately not allowed to touch, is in
 [decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
 
 Alert rules live in the same root, in a separate folder — `Alerts (managed in
-git)` — which grants Editor and Viewer `View` only, because a rule
-edited in the UI would be silently reverted by the next apply. The dashboards
-are the other way round: editable in the UI, reviewed afterwards. `folders.tf`
-sets out the three ownership models.
+git)` — which grants Editor and Viewer `View` only. That is what stops a rule
+being *created* there by hand: Grafana's folder roles are coarse, and the `Edit`
+the dashboards need would carry rule creation with it, so the two cannot share a
+folder. `folders.tf` sets out the three ownership models and what each buys.
+
+The dashboards folder grants `Edit`, so a panel can be changed in the UI and
+then exported into the repository. Whether Grafana actually resolves that in
+`Edit`'s favour over the `View` the parent folder gives by inheritance has not
+been tested; if it does not, the export route is the only one.
 
 Each rule carries `team = "forge"`, and a route in the notification policy tree
 — which is maintained in the UI, not here — is what turns that label into a
@@ -74,9 +79,9 @@ rules below evaluate but reach no one** until it exists.
 | Appliance free disk space below 40% | Forge appliances          | node exporter     | FIL-1209 |
 | Appliance container is not running  | Forge appliance containers| cAdvisor, staging | FIL-1163 |
 
-The notes at the end of `terraform/envs/grafana/alerts.tf` say what each alert
-that is *not* written is waiting on — a threshold nobody has agreed, a decision
-nobody has taken, or a metric nothing publishes.
+Most of the alerts under FIL-1145 are still unwritten, each waiting on a
+threshold nobody has agreed, a decision nobody has taken, or a metric nothing
+publishes. Each one's Linear issue records which.
 
 ## Logs
 

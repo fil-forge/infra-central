@@ -1,16 +1,11 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# The expression stages address __expr__ and repeat their own refId in the
-# condition's query.params. That is unusual -- the provider's documentation
-# shows neither -- but it is the shape Grafana's own rule export produces and
-# the shape that applies cleanly here. Follow the rules already in this file
-# rather than the provider docs.
-#
-# Of the seven alerts under FIL-1145 only FIL-1209 states a threshold. The rest
-# say "too high", or defer to an SLO that has not been written (FIL-1242), or
-# ask for a decision the team has not taken (FIL-1211, FIL-1212); they are
-# listed at the end of this file rather than guessed at.
+# Most of the alerts under FIL-1145 are not here. They name no threshold -- they
+# say "too high", defer to an SLO nobody has written, or ask for a decision
+# nobody has taken -- and a number invented here would page someone against a
+# threshold they never agreed. Each such alert's own Linear issue says what it
+# is waiting on.
 #
 # Writing a rule needs two permissions on forge-terraform beyond folder Admin,
 # and neither is sufficient alone:
@@ -62,9 +57,9 @@ locals {
   stages = join("|", var.alert_stages)
 
   # The appliance label is <stage>-<region>, so one regex covers every region of
-  # every alerting stage and a new region needs no edit here. That is FIL-1207's
-  # "templated by node label so a new region needs no Grafana edit", done in
-  # Terraform because a Grafana alert rule has no template variables.
+  # every alerting stage and a new region needs no edit here. Templating a rule
+  # by node label is a requirement; it happens in Terraform because a Grafana
+  # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
@@ -84,10 +79,10 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The same filesystem filter the dashboards use. FIL-1209 names the control and
-  # data volumes; their mountpoints differ between the EC2 nodes and the
-  # Servers.com host, so the rule covers every real filesystem instead, which is
-  # a superset and needs no per-node edit.
+  # The same filesystem filter the dashboards use. What wants watching is the
+  # control and data volumes, but their mountpoints differ between the EC2 nodes
+  # and the Servers.com host, so this covers every real filesystem instead --
+  # a superset, and one that needs no per-node edit.
   filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
 
   # Piri's container log stream. Alloy names it appliance-<stage>-<region>-piri
@@ -96,25 +91,26 @@ locals {
   # appliance matcher narrows it to the alerting stages.
   piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
-  # The appliance containers that are meant to stay up. On staging -- the only
-  # stage with cAdvisor -- these four are exactly the services declared
-  # `restart: unless-stopped` in infra-nodes' nodes/<node>/{apps,platform}. The
-  # fifth service there, postgres-init, is `restart: "no"`: exiting is what it
-  # is for.
+  # Every appliance container that is meant to stay up: all of them except the
+  # one whose job is to exit.
   #
-  # An allow-list rather than a pattern because a Compose restart policy is not
-  # a label cAdvisor exports, so nothing in the query can tell a service that
-  # should be running from one that should have exited. A service added to a
-  # Compose project and not added here is not watched -- dev's caddy and alloy
-  # already are not, which costs nothing while dev ships no cAdvisor.
+  # A deny-list, not an allow-list, so a service added to a Compose project is
+  # watched from the day it ships rather than the day somebody remembers to
+  # list it here. The failure modes are not symmetric -- a missing allow-list
+  # entry is a container nobody is watching and nothing says so, while a wrong
+  # deny-list entry is an alert naming the service it is wrong about. Loud beats
+  # silent.
   #
-  # Narrowing by service_name rather than by node keeps the host's own
-  # containers out: on the Servers.com box cAdvisor also reports Lotus, Sophon
-  # and everything else it runs, none of which carries an appliance
-  # service_name.
+  # `service_name` is `appliance-<stage>-<region>-<compose service>`, set by the
+  # node's Alloy from the Compose service label and absent on anything started
+  # by hand (infra-nodes/docs/observability.md). So the prefix already excludes
+  # the host's own containers -- on the Servers.com box cAdvisor reports Lotus,
+  # Sophon and the rest, none of which carries one.
   #
-  # Prometheus anchors the whole regex, so these match exactly, not as prefixes.
-  container_matcher = "service_name=~\"appliance-(${local.stages})-.*-(piri|ingot|postgres|openbao)\""
+  # postgres-init is excluded because it is `restart: "no"`: it exits on every
+  # deploy by design, and watching it would fire this rule permanently. Anything
+  # else added with that policy needs excluding here too.
+  container_matcher = "service_name=~\"appliance-(${local.stages})-.*\", service_name!~\".*-postgres-init\""
 
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
@@ -184,6 +180,22 @@ resource "grafana_rule_group" "central" {
       }))
     }
 
+    # __expr__ is Grafana's built-in server-side expression engine, addressed as
+    # if it were a data source. A stage pointed at it queries nothing: it
+    # transforms the stages before it, inside Grafana, after their queries have
+    # returned. That is what lets one rule reduce a query to a single number and
+    # then threshold it.
+    #
+    # Two quirks of the shape below, both unusual and both deliberate. The
+    # provider's documentation shows neither; this is what Grafana's own rule
+    # export produces, and what applies cleanly. Follow the rules already in
+    # this file rather than the docs.
+    #
+    #   - `datasource_uid` and the model's nested `datasource` both carry the
+    #     literal "__expr__" rather than a real uid.
+    #   - a threshold stage repeats its *own* refId in
+    #     `conditions[].query.params` rather than naming the stage it reads.
+    #     `expression` is what actually names its input.
     data {
       ref_id         = "B"
       query_type     = "expression"
@@ -313,8 +325,8 @@ resource "grafana_rule_group" "central" {
     }
   }
 
-  # Any error out of the provision Lambda. The threshold is gt 0 because no
-  # number was ever specified and a provisioning error is always worth a look.
+  # Any error out of the provision Lambda. The threshold is gt 0 because a
+  # provisioning error is always worth a look.
   #
   # The AWS/Lambda namespace does not come from this repository's metric stream.
   # It arrives through fil-one/infra's, which names the namespace for the whole
@@ -534,8 +546,8 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # FIL-1209: "Create an alert when remaining free space drops below 40% of the
-  # total volume size."
+  # 40% of the total volume size. The one threshold in this file that was agreed
+  # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
   # service_name and are told apart by node. An instant query, so no reduce stage.
@@ -712,10 +724,10 @@ resource "grafana_rule_group" "appliance" {
   }
 }
 
-# Its own group at 60s. FIL-1163 wants a Slack alert "within ten minutes" of a
-# container stopping, and the 300s the other appliance rules run at cannot meet
-# it: one scrape gap plus the 5m absence window plus one evaluation is about
-# eleven minutes. At 60s it is about six.
+# Its own group at 60s. A stopped container should reach Slack within ten
+# minutes, and the 300s the other appliance rules run at cannot do it: one
+# scrape gap plus the 5m absence window plus one evaluation is about eleven
+# minutes. At 60s it is about six.
 resource "grafana_rule_group" "appliance_containers" {
   name             = "Forge appliance containers"
   folder_uid       = grafana_folder.alerts.uid
@@ -852,53 +864,3 @@ resource "grafana_rule_group" "appliance_containers" {
     }
   }
 }
-
-# Not written, and why. Each needs a number or a decision that is not in the
-# ticket, and inventing one would page someone against a threshold nobody agreed:
-#
-#   FIL-1207  5xx error rate.      The "Service 5xx errors" rule above is a
-#                                  count, not the rate FIL-1207 asks for. The
-#                                  availability target it wants is FIL-1242,
-#                                  which is in the backlog, and its acceptance
-#                                  criteria defer the channel to FIL-1164.
-#   FIL-1210  TTFB.                Threshold is explicitly "comes from the SLO
-#                                  definition in FIL-1242". R1.6.
-#   FIL-1213  TTLB.                Same, and needs PutObject, GetObject and
-#                                  CompleteMultipartUpload excluded, which Caddy
-#                                  can only approximate by method.
-#   FIL-1211  Request rate anomaly. "Decide with the team whether we want an
-#                                  alert." Not decided.
-#   FIL-1212  Ingress/egress.      Same. Not decided.
-#   FIL-1214  CPU and memory.      "Propose the thresholds and discuss them with
-#                                  the team." Not proposed.
-#
-# Two more are blocked on a metric rather than a number:
-#
-#   FIL-1163  TLS certificate      No metric carries it. Caddy 2.9.1 exports
-#             expiry.              seven caddy_http_* series and none is a
-#                                  certificate expiry
-#                                  (caddyserver/caddy modules/caddyhttp/metrics.go
-#                                  at v2.9.1); certificate activity is legible in
-#                                  Caddy's runtime log only. The usual source is
-#                                  a blackbox exporter publishing
-#                                  probe_ssl_earliest_cert_expiry, which means an
-#                                  Alloy config change on the staging host --
-#                                  whose Alloy config lives outside infra-nodes.
-#                                  The other three FIL-1163 bullets are covered:
-#                                  the deploy stamp by "Appliance has stopped
-#                                  reporting", the containers by the group above,
-#                                  and Caddy 5xx by FIL-1207's rule once it has a
-#                                  threshold.
-#
-#   FIL-1151  ECS running count    AWS/ECS publishes CPUUtilization and
-#             below desired.       MemoryUtilization; RunningTaskCount is a
-#                                  Container Insights metric, in the
-#                                  ECS/ContainerInsights namespace, which no
-#                                  stream in this account ships. A crash-looping
-#                                  task with an ALB route is already caught by
-#                                  "Service has no healthy hosts"; one without a
-#                                  route (hostname == null in
-#                                  modules/shared/ecs-service) is not caught by
-#                                  anything. Enabling Container Insights on the
-#                                  cluster and adding the namespace to
-#                                  modules/telemetry would close that gap.

@@ -154,11 +154,20 @@ resource "grafana_folder" "alerts" {
 # ever remove it. An unmanaged rule in the folder titled "managed in git" would
 # simply accumulate.
 #
-# That is also why the dashboards and the rules can't share one folder. They
-# could technically; a shared folder would have to add Edit for the dashboards
-# to stay editable, and that reopens rule creation. One folder can hold one
-# answer to "who may change this", because grafana_folder_permission manages a
-# folder's whole permission set.
+# That is also why the dashboards and the rules can't share one folder. A shared
+# folder would have to grant Edit for the dashboards to stay editable, and
+# Grafana's folder roles are coarse: Edit bundles dashboards:write with
+# alert.rules:create, so granting one grants the other. Neither
+# grafana_folder_permission nor grafana_folder_permission_item can split that --
+# they assign the same View/Edit/Admin roles and differ only in whether they
+# manage the whole set or one entry.
+#
+# The fine-grained actions can be assigned separately, but not from a folder's
+# permissions: it takes a custom role (grafana_role) carrying dashboards:write
+# scoped to folders:uid:<x> and no alert action, assigned with
+# grafana_role_assignment. Untried here, and it costs something -- a custom role
+# does not show on the folder's Permissions tab, so the folder would no longer
+# say who may change what. Two folders do.
 #
 # The title still says where the truth is, because nothing enforces the
 # convention on the folder itself.
