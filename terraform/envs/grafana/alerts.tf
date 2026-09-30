@@ -85,6 +85,10 @@ locals {
   # appliance matcher narrows it to the alerting stages.
   piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
+  # Postgres's container log stream, same scheme. Anchored, so this is the
+  # postgres service and not postgres-init.
+  postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
+
   # Every appliance container that is meant to stay up: all of them except the
   # one whose job is to exit.
   #
@@ -716,6 +720,100 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Postgres refusing connections. Seen for real in the 2026-09-24 load test:
+  # staging Postgres refused 3,629 connections in 27 minutes, every multipart
+  # object's CompleteMultipartUpload failed at least once, and nothing alerted.
+  #
+  # Two log lines mean the same thing and both are matched. Postgres logs
+  # "sorry, too many clients already" when max_connections is exhausted, and
+  # "remaining connection slots are reserved ..." when only the superuser
+  # reserve is left -- the wording of the second differs across major versions,
+  # so the pattern stops before the part that varies.
+  #
+  # The signal is dense while it lasts: a rate that high puts a line in every
+  # window. `for` is 5m rather than firing on one line, which is what keeps a
+  # deploy out of it -- postgres-init runs and Postgres restarts on every
+  # deploy, and a client that reconnects during the gap can see one refusal.
+  # Five minutes of continuous refusals is not that.
+  #
+  # no_data_state is OK for the same reason as the rules above: count_over_time
+  # returns a series only for a node that logged the line, so an empty result is
+  # the healthy state. An instant query, so no reduce stage.
+  rule {
+    name           = "Postgres is refusing connections"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Postgres on {{ $labels.node }} ({{ $labels.region }}) is refusing connections"
+      description = "Postgres has been out of connection slots for five minutes, so requests that need the database are failing. Ingot's uploads are the first thing to break. Check what is holding connections (`SELECT count(*), state FROM pg_stat_activity GROUP BY state;`) against max_connections, and read the container log: {service_name=\"{{ $labels.service_name }}\"}."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, service_name) (
+            count_over_time(
+              {${local.postgres_log_matcher}}
+                |~ "too many clients already|remaining connection slots are reserved"
+              [5m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
