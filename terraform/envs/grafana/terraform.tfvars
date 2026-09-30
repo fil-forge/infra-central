@@ -30,6 +30,12 @@ previews_service_account_id = "85"
 # where a dashboard can use its name. Not a secret.
 prometheus_datasource_uid = "grafanacloud-prom"
 
+# The logs data source's uid, by the same convention: Grafana Cloud gives its
+# provisioned data sources the uids grafanacloud-prom and grafanacloud-logs
+# whatever their names. It is the last segment of the data source's settings
+# page URL. Not a secret.
+loki_datasource_uid = "grafanacloud-logs"
+
 # Staging, not the variable's production-only default: production does not exist
 # yet (FIL-1147, FIL-808) and staging is what the hand-built rules these replace
 # were watching. Add "prod" alongside, or replace staging with it, once the prod

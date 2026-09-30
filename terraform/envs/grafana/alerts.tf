@@ -1,14 +1,16 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# Four rules, in two groups so Central and the appliances can evaluate at
+# Five rules, in two groups so Central and the appliances can evaluate at
 # different intervals: CloudWatch publishes once a minute, the appliance host
 # exporter is scraped once a minute but nothing here needs that resolution.
 #
-# Three of the four came from rules built by hand in the UI and exported; the
+# Three of the five came from rules built by hand in the UI and exported; the
 # shapes below follow that export rather than the provider's documentation,
 # which is why the expression stages address __expr__ and put their own refId in
-# the condition's query.params. The fourth is FIL-1209's disk rule.
+# the condition's query.params. The fourth is FIL-1209's disk rule. The fifth,
+# Piri's chain notifications, is the only one that reads logs rather than
+# metrics.
 #
 # Of the seven alerts under FIL-1145 only FIL-1209 states a threshold. The rest
 # say "too high", or defer to an SLO that has not been written (FIL-1242), or
@@ -37,6 +39,11 @@ variable "alert_stages" {
 
 variable "prometheus_datasource_uid" {
   description = "UID of the grafanacloud-prom data source. Alert rules address a data source by uid where a dashboard can use its name. It is in the URL of the data source's settings page, and it is not a secret."
+  type        = string
+}
+
+variable "loki_datasource_uid" {
+  description = "UID of the grafanacloud-filecoinfoundation-logs data source, the stack's Loki. Addressed by uid for the same reason as the Prometheus one. It is in the URL of the data source's settings page, and it is not a secret."
   type        = string
 }
 
@@ -71,6 +78,12 @@ locals {
   # Servers.com host, so the rule covers every real filesystem instead, which is
   # a superset and needs no per-node edit.
   filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
+
+  # Piri's container log stream. Alloy names it appliance-<stage>-<region>-piri
+  # from the Compose service and stamps appliance, region and node on it
+  # (infra-nodes nodes/dev/platform/config/alloy/config.alloy), so the same
+  # appliance matcher narrows it to the alerting stages.
+  piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
@@ -474,6 +487,103 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "lt", params = [0.4] }
+        }]
+      })
+    }
+  }
+
+  # A stopgap for a Lotus whose head has stopped moving. Piri's chain scheduler
+  # (curio lib/chainsched) ticks every five minutes and, when no head change has
+  # arrived since the last tick, logs
+  #
+  #   no notifications received in 5m0s, resubscribing to ChainNotify
+  #
+  # and resubscribes. A stuck Lotus answers the new subscription with its current
+  # tipset and nothing after, so the line recurs roughly every ten minutes for as
+  # long as the head is stuck. Nothing else Piri exports says so: it stays up,
+  # answers its health check and keeps its metrics flowing, and only its proofs
+  # stop. A Lotus that is down outright fails the subscription instead, and logs
+  # something else.
+  #
+  # Any line in fifteen minutes is a match, since with a ten-minute cadence that
+  # window always holds one while the head is stuck. `for` is 15m so a single
+  # line does not fire on its own: fifteen minutes of pending needs a second line
+  # inside the window, which is about twenty minutes of a head that has not
+  # moved. Filecoin produces a tipset every thirty seconds, so that is well past
+  # anything a healthy chain does.
+  #
+  # no_data_state is OK for the reason the 5xx rule gives: count_over_time
+  # returns a series only for a node that logged the line, so an empty result is
+  # the healthy state. An instant query, so no reduce stage.
+  rule {
+    name           = "Piri has stopped receiving chain notifications"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped receiving chain head changes"
+      description = "Piri's chain scheduler has logged \"no notifications received ... resubscribing to ChainNotify\" repeatedly for fifteen minutes: the Lotus it reads the chain from is up but its head is not moving, so Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                |~ "no notifications received in .* resubscribing to ChainNotify"
+              [15m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }
