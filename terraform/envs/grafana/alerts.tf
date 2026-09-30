@@ -10,12 +10,14 @@
 #     middleware, which demands a permission no folder grant can confer
 #     (ngalert/api/authorization.go, the PUT rule-groups case).
 #
-#   - `datasources:query` on grafanacloud-prom, granted on the data source's
-#     own Permissions tab rather than through a role. Once past the middleware
-#     the handler checks every data source the rules read
-#     (ngalert/accesscontrol/rules.go, getRulesQueryEvaluator). Expression
-#     nodes are skipped, which is why the folders and dashboards in this root
-#     apply without it.
+#   - `datasources:query` on every data source the group's rules read, granted
+#     on each data source's own Permissions tab rather than through a role. Once
+#     past the middleware the handler checks every data source the rules read
+#     (ngalert/accesscontrol/rules.go, getRulesQueryEvaluator), and a group with
+#     one it cannot query is refused whole, as a 403 putAlertRuleGroupForbidden.
+#     So a rule on a new data source needs that grant before it merges.
+#     Expression nodes are skipped, which is why the folders and dashboards in
+#     this root apply without it.
 #
 # Routing is deliberately not managed here. Every rule carries team = "forge",
 # and the notification policy tree in the UI is what turns that label into a
@@ -419,7 +421,7 @@ resource "grafana_rule_group" "central" {
 # group is time-critical enough to want the extra resolution, and a slower
 # interval costs nothing here.
 resource "grafana_rule_group" "appliance" {
-  name             = "Forge appliances"
+  name             = "Forge Regions"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 300
 
@@ -1118,7 +1120,7 @@ resource "grafana_rule_group" "appliance" {
 # scrape gap plus the 5m absence window plus one evaluation is about eleven
 # minutes. At 60s it is about six.
 resource "grafana_rule_group" "appliance_containers" {
-  name             = "Forge appliance containers"
+  name             = "Forge Regions containers"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
 
