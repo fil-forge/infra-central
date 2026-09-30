@@ -79,10 +79,6 @@ rules below evaluate but reach no one** until it exists.
 | Appliance free disk space below 40% | Forge appliances          | node exporter     | FIL-1209 |
 | Appliance container is not running  | Forge appliance containers| cAdvisor, staging | FIL-1163 |
 
-Most of the alerts under FIL-1145 are still unwritten, each waiting on a
-threshold nobody has agreed, a decision nobody has taken, or a metric nothing
-publishes. Each one's Linear issue records which.
-
 ## Logs
 
 One service:

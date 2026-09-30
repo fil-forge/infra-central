@@ -1,12 +1,6 @@
 # Grafana alert rules for Forge, in their own folder. folders.tf sets out why
 # these are git only where the dashboards beside them are not.
 #
-# Most of the alerts under FIL-1145 are not here. They name no threshold -- they
-# say "too high", defer to an SLO nobody has written, or ask for a decision
-# nobody has taken -- and a number invented here would page someone against a
-# threshold they never agreed. Each such alert's own Linear issue says what it
-# is waiting on.
-#
 # Writing a rule needs two permissions on forge-terraform beyond folder Admin,
 # and neither is sufficient alone:
 #
