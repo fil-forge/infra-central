@@ -11,7 +11,13 @@ output "zone_id" {
 }
 
 output "route53_zone_id" {
-  value = data.aws_route53_zone.this.zone_id
+  description = "The zone every hostname shares, or null where each hostname has its own."
+  value       = one(data.aws_route53_zone.this[*].zone_id)
+}
+
+output "route53_zone_ids" {
+  description = "Zone each public hostname's records go into, keyed by hostname."
+  value       = local.zone_ids
 }
 
 # What a public hostname should point at: the accelerator where the stage has

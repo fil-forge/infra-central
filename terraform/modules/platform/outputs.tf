@@ -57,7 +57,13 @@ output "alb_zone_id" {
 }
 
 output "route53_zone_id" {
-  value = module.ingress.route53_zone_id
+  description = "The zone every public hostname shares, or null where each hostname has its own; see route53_zone_ids."
+  value       = module.ingress.route53_zone_id
+}
+
+output "route53_zone_ids" {
+  description = "Zone each public hostname's records go into, keyed by hostname."
+  value       = module.ingress.route53_zone_ids
 }
 
 output "bucket_names" {

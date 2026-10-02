@@ -7,11 +7,40 @@
 
 locals {
   name = "fc-${var.stage}"
+
+  # Dev and staging write every record into one delegated zone. Prod's service
+  # names sit directly beneath a Cloudflare apex, so each one is delegated to
+  # Route53 as a zone of its own, and a null zone_name selects that layout.
+  zone_per_hostname = var.zone_name == null
+
+  # Sorted so the certificate's primary name does not move when a service is
+  # added; a new name in the middle of the list would replace the certificate
+  # for nothing.
+  hostnames = sort(var.hostnames)
 }
 
 data "aws_route53_zone" "this" {
+  count = local.zone_per_hostname ? 0 : 1
+
   name         = var.zone_name
   private_zone = false
+}
+
+data "aws_route53_zone" "hostname" {
+  for_each = local.zone_per_hostname ? toset(local.hostnames) : toset([])
+
+  name         = each.key
+  private_zone = false
+}
+
+locals {
+  zone_ids = {
+    for hostname in local.hostnames : hostname => (
+      local.zone_per_hostname
+      ? data.aws_route53_zone.hostname[hostname].zone_id
+      : data.aws_route53_zone.this[0].zone_id
+    )
+  }
 }
 
 resource "aws_lb" "this" {
@@ -47,13 +76,22 @@ resource "aws_lb" "this" {
   tags = { Name = local.name }
 }
 
-# One wildcard certificate covers every service hostname in the stage, so
-# adding a service does not mean waiting on certificate validation.
+# Where every hostname shares a zone, one wildcard certificate covers them all,
+# so adding a service does not mean waiting on certificate validation.
+#
+# Where each hostname has its own zone, a wildcard cannot work: the validation
+# record for *.fil-forge.com belongs in the fil-forge.com zone, which is in
+# Cloudflare. The certificate names each hostname instead, and each one
+# validates in its own zone.
 resource "aws_acm_certificate" "this" {
-  domain_name       = "*.${var.hostname_suffix}"
+  domain_name       = local.zone_per_hostname ? local.hostnames[0] : "*.${var.hostname_suffix}"
   validation_method = "DNS"
 
-  subject_alternative_names = [var.hostname_suffix]
+  subject_alternative_names = (
+    local.zone_per_hostname
+    ? slice(local.hostnames, 1, length(local.hostnames))
+    : [var.hostname_suffix]
+  )
 
   lifecycle {
     create_before_destroy = true
@@ -67,10 +105,10 @@ resource "aws_route53_record" "validation" {
     for option in aws_acm_certificate.this.domain_validation_options :
     option.domain_name => option
     # The wildcard and the apex validate through the same record.
-    if option.domain_name != var.hostname_suffix
+    if local.zone_per_hostname || option.domain_name != var.hostname_suffix
   }
 
-  zone_id = data.aws_route53_zone.this.zone_id
+  zone_id = local.zone_per_hostname ? local.zone_ids[each.key] : data.aws_route53_zone.this[0].zone_id
   name    = each.value.resource_record_name
   type    = each.value.resource_record_type
   records = [each.value.resource_record_value]
