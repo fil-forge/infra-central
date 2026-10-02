@@ -69,10 +69,12 @@ module "apps" {
   subnet_ids        = local.platform.private_subnet_ids
   security_group_id = local.platform.service_security_group_id
 
-  listener_arn    = local.platform.listener_arn
-  route53_zone_id = local.platform.route53_zone_id
-  alb_dns_name    = local.platform.alb_dns_name
-  alb_zone_id     = local.platform.alb_zone_id
+  listener_arn = local.platform.listener_arn
+
+  # Each public hostname is a zone of its own in prod; see the platform root.
+  route53_zone_ids = local.platform.route53_zone_ids
+  alb_dns_name     = local.platform.alb_dns_name
+  alb_zone_id      = local.platform.alb_zone_id
 
   namespace_id   = local.platform.namespace_id
   namespace_name = local.platform.namespace_name
@@ -110,6 +112,28 @@ module "apps" {
   allow_provision_without_payment_plan = false
 
   log_level = "info"
+
+  # Sized for the launch rate. Sprue is the only service on the per-PUT path:
+  # at about 45 requests/s it makes some seven database calls and three S3
+  # writes per request. Every other service keeps the module default, restated
+  # here because a map passed in replaces the default whole.
+  sizes = {
+    sprue           = { cpu = 1024, memory = 2048 }
+    hilt            = { cpu = 512, memory = 1024 }
+    swarf           = { cpu = 256, memory = 512 }
+    delegator       = { cpu = 256, memory = 512 }
+    signing_service = { cpu = 256, memory = 512 }
+    plc             = { cpu = 256, memory = 512 }
+  }
+
+  # Twice sprue's default, for the same request rate. The database allows
+  # roughly 900 connections; see the platform root.
+  sprue_postgres_max_conns = 20
+}
+
+# Read by the workflow's wait for steady state.
+output "cluster_arn" {
+  value = local.platform.cluster_arn
 }
 
 output "service_urls" {

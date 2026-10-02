@@ -1,24 +1,23 @@
 # Pinned per service, by digest. A digest names one artifact and cannot move
 # underneath a running service, so a redeploy cannot silently change what runs.
 #
-# No values yet: prod is not set up, and the digests have to come from the
-# images the services actually publish. A plan fails until they are filled in,
-# which is the right outcome for a stage nobody has deployed.
+# Seeded from the digests staging ran when prod was created. Promote later
+# versions here in a deliberate pull request after they are healthy in staging,
+# copying the reviewed digest from staging's terraform.tfvars.
 #
-# Keep the blank lines when filling these in. Bumps rewrite one line each and
-# git conflicts on changes to adjacent lines, which is what dev's pins are
-# spaced apart to avoid.
-#
-# image_digests = {
-#   sprue = "sha256:..."
-#
-#   hilt = "sha256:..."
-#
-#   swarf = "sha256:..."
-#
-#   delegator = "sha256:..."
-#
-#   signing_service = "sha256:..."
-#
-#   plc = "sha256:..."
-# }
+# The blank lines between the pins are what keeps two services' bumps from
+# conflicting. Each bump rewrites one line, and git conflicts on changes to
+# adjacent lines.
+image_digests = {
+  sprue = "sha256:b6a4f84b497684ef4a53e53a3bea3a49d7b573742d32f7bbb15ad62c1d84b27e"
+
+  hilt = "sha256:3992eef211db014e02a45c696692ddbc2dc96f4390877e0c1a768004eb8c3401"
+
+  swarf = "sha256:1edd6ed2610a1c4fdb288ab6e21be2e56897af9aa513f68188c729fbd406c581"
+
+  delegator = "sha256:30b1757986ce213a8eecacbd7a463142a242b0f3932180796aad62c2f2ccc2fe"
+
+  signing_service = "sha256:b7ef5f0ea7e035c183d69ae90c98f30a4e04b944dfbf7ccbf27608e1b904e461"
+
+  plc = "sha256:ebb12470f6fc50906c0ed867d009a056e131db1a994b45d7c3f1c8d2eb26dee9"
+}
