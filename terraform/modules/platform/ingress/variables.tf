@@ -3,13 +3,24 @@ variable "stage" {
 }
 
 variable "zone_name" {
-  description = "Existing Route53 hosted zone, e.g. fil.one."
+  description = "Existing Route53 hosted zone every public record goes into, e.g. staging.fil-forge.com. Null means each hostname is its own delegated zone, named after the hostname, which is how prod is laid out."
   type        = string
+  default     = null
 }
 
 variable "hostname_suffix" {
   description = "Suffix every service hostname shares, e.g. dev.fil.one. Services are reachable at <service>.<suffix>."
   type        = string
+}
+
+variable "hostnames" {
+  description = "Every public hostname the stage serves. The certificate covers them, and route53_zone_ids maps each one to the zone its records go into."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.hostnames) > 0
+    error_message = "hostnames is empty. A stage with no public hostname has nothing to certify, and a null zone_name would leave the certificate without a name."
+  }
 }
 
 variable "public_subnet_ids" {

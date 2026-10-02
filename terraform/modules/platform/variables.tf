@@ -3,8 +3,9 @@ variable "stage" {
 }
 
 variable "zone_name" {
-  description = "Existing Route53 hosted zone, e.g. fil.one."
+  description = "Existing Route53 hosted zone every public record goes into, e.g. staging.fil-forge.com. Null means each public hostname is a delegated zone of its own, which is how prod is laid out; see the ingress module."
   type        = string
+  default     = null
 }
 
 variable "hostname_suffix" {
