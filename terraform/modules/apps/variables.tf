@@ -29,7 +29,15 @@ variable "listener_arn" {
 }
 
 variable "route53_zone_id" {
-  type = string
+  description = "Zone every public record goes into, for a stage whose hostnames share one delegated zone. Null where route53_zone_ids covers every hostname."
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_ids" {
+  description = "Zone per public hostname, keyed by hostname, for a stage that delegates each service name as its own zone, as prod does. A hostname missing here falls back to route53_zone_id."
+  type        = map(string)
+  default     = {}
 }
 
 variable "alb_dns_name" {
@@ -141,6 +149,12 @@ variable "sizes" {
     signing_service = { cpu = 256, memory = 512 }
     plc             = { cpu = 256, memory = 512 }
   }
+}
+
+variable "sprue_postgres_max_conns" {
+  description = "Size of sprue's Postgres connection pool. Null keeps sprue's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
+  type        = number
+  default     = null
 }
 
 variable "log_forwarding" {
