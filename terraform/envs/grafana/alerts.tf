@@ -87,6 +87,15 @@ locals {
   # appliance matcher narrows it to the alerting stages.
   piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
+  # Piri's OTLP metrics, and the target_info series that carries its resource
+  # attributes. Alloy's OTLP conversion sets job to service.namespace/
+  # service.name, forge/piri since Piri reports the forge namespace, and the
+  # remote writer's external_labels stamp appliance, region and node on every
+  # series it sends, target_info included (infra-nodes
+  # nodes/dev/platform/config/alloy/config.alloy). appliance_matcher cannot be
+  # reused: its service_name is the host exporter's.
+  piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
+
   # Postgres's container log stream, same scheme. Anchored, so this is the
   # postgres service and not postgres-init.
   postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
@@ -671,6 +680,11 @@ resource "grafana_rule_group" "appliance" {
   # no_data_state is OK for the reason the 5xx rule gives: count_over_time
   # returns a series only for a node that logged the line, so an empty result is
   # the healthy state. An instant query, so no reduce stage.
+  #
+  # Superseded by the rules below that read Piri's chain head and proving
+  # schedule directly, once the alerting stages run a Piri that exports those
+  # gauges. Kept until then, since a Piri without them leaves this rule the only
+  # one watching the chain; delete it after that rather than run both.
   rule {
     name           = "Piri has stopped receiving chain notifications"
     condition      = "B"
@@ -935,6 +949,385 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
+  # The rules below read gauges Piri exports from its PDP pipeline (piri
+  # docs/content/operator-guide/monitoring.md, "PDP Proving Health"), starting
+  # from the PromQL given there. They are grouped by node as well as region for
+  # the reason the disk rule gives. Filecoin epochs are thirty seconds, which is
+  # where every 30 below comes from.
+
+  # The timestamp of the last tipset Piri's chain scheduler applied, against the
+  # wall clock. Five minutes is ten tipsets, far past what null rounds or a slow
+  # block produce, so this is Lotus stalled or unreachable, or Piri's
+  # subscription to it stuck.
+  #
+  # `for` is 5m, the shortest pending period a group evaluated every five
+  # minutes can give: one more evaluation to confirm the first. The threshold
+  # already holds five minutes of grace.
+  #
+  # no_data_state is OK: a Piri that has not seen a head since it started, or
+  # one that exports no chain gauges at all, has no series here. The first is
+  # the next rule's job; the second is a Piri older than these metrics.
+  rule {
+    name           = "Piri's chain head is stale"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not seen a new chain head for more than five minutes"
+      description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          time() - max by (appliance, region, node) (
+            piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [300] }
+        }]
+      })
+    }
+  }
+
+  # Piri is reporting but its chain scheduler has never applied a head. The head
+  # gauges appear only once the first tipset arrives after start-up, which with
+  # a working Lotus is within seconds, so a Piri that restarted against a Lotus
+  # it cannot reach has no head series at all and the rule above never sees it.
+  #
+  # target_info is the evidence Piri is up: it carries the same job and
+  # appliance, region and node labels as every other Piri series, so the same
+  # matcher applies to it. On its own it would also match every Piri too old to
+  # export the head, which is every Piri until these metrics are deployed. So
+  # the node must also export one of the gauges Piri reads from its database,
+  # which do not depend on the chain: they prove the running Piri has the
+  # metrics, and so that the missing head means something. A node with no proof
+  # sets and no successful proof yet is left out, and has nothing to lose.
+  #
+  # Five-minute windows are ten of Piri's thirty-second pushes. `for` is 10m, so
+  # a restart that takes a moment to reach Lotus does not fire.
+  #
+  # no_data_state is OK, and not NoData, even though "no head" is what the rule
+  # is about: the `unless` is what finds the missing head, so the result is
+  # empty on every healthy node, and NoData would page for the whole fleet. It
+  # also means a Piri that has stopped reporting entirely, target_info and all,
+  # is not caught here; nothing in this file watches for that yet.
+  rule {
+    name           = "Piri is reporting but has no chain head"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) is running but has not seen a chain head"
+      description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            present_over_time(target_info{${local.piri_metric_matcher}}[5m])
+          )
+          and
+          (
+            max by (appliance, region, node) (
+              present_over_time(piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}}[5m])
+            )
+            or
+            max by (appliance, region, node) (
+              present_over_time(piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}[5m])
+            )
+          )
+          unless
+          max by (appliance, region, node) (
+            present_over_time(piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # A proof set whose challenge window has closed without its next proving
+  # period being scheduled: epochs past the window's close, per proof set. The
+  # current epoch is the last head plus the wall-clock time since it, so this
+  # still fires when the head itself is stale.
+  #
+  # Some overshoot is normal. Curio's NextProvingPeriod watcher
+  # (tasks/pdpv0/task_next_pp.go) only queues the task once a head reaches
+  # prove_at_epoch + challenge_window, and the task moves prove_at_epoch on
+  # when it sends nextProvingPeriod, without waiting for it to land. Add
+  # harmonytask's three-second poll, a handful of contract reads and Piri's
+  # thirty-second push, and a healthy proof set is a few epochs past its window
+  # for a minute or two each period, which an evaluation can catch. `for` is
+  # 10m: three evaluations in a row, twenty epochs, which that never reaches,
+  # while a scheduling task that is failing, or held back by the hundred-epoch
+  # backoff curio applies after a failed attempt, stays past the window for
+  # longer than that.
+  #
+  # no_data_state is OK: a node with no proof sets, or a proof set with no next
+  # challenge (briefly between periods, or proving disabled), has no series.
+  rule {
+    name           = "Piri proof set is past its challenge window"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) is past its challenge window"
+      description = "The proof set's challenge window closed more than ten minutes ago and Piri has not scheduled its next proving period, so this period's proof is missed or at risk and the proof set may be faulted on chain. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's on-chain state with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove and PDPv0_ProvPeriod task logs say why it failed."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+              max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+            + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+          )
+          - on (appliance, region, node) group_right
+          max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
+            + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The backstop: no successful PDPv0_Prove on the node in one and a half
+  # proving periods. The value is the time since the last success in proving
+  # periods, so the threshold is 1.5.
+  #
+  # Per node, not per proof set: one proof set proving keeps it quiet while
+  # another does not, which is the rule above's job. What this adds is the case
+  # that rule cannot see. A proof set curio gives up on after repeated failures
+  # has its next challenge cleared and drops out of the proof set gauges
+  # altogether. The period is read over three days for that reason, so it
+  # outlasts one and a half of the longest period (2880 epochs, a day) after
+  # the gauge is gone, and still lapses on its own once proving on the node has
+  # ended for good.
+  #
+  # `for` is 10m. The threshold is the grace; this only confirms it.
+  #
+  # no_data_state is OK: a node that has never proved, or has no proof sets in
+  # three days, has no series.
+  rule {
+    name           = "Piri has not proved in 1.5 proving periods"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not submitted a successful proof in 1.5 proving periods"
+      description = "No PDPv0_Prove task has succeeded on this node for more than one and a half proving periods, so at least one proving period has passed without a proof. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why proofs are failing."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team      = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node) (
+              piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}, task_name="PDPv0_Prove"}
+            )
+          )
+          / on (appliance, region, node)
+          (
+            30 * max by (appliance, region, node) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[3d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1.5] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
