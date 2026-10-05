@@ -8,12 +8,8 @@ hostname_suffix       = "fil-forge.com"
 ingot_hostname_suffix = "filonecontent.com"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
-# deploy. `make publish` prints the line to paste here.
-#
-# The sentinel is deliberate: a syntactically valid digest would read as a real
-# pin and fail late, while this one fails the plan against the provision
-# module's validation, which names the command to run.
-provision_image_digest = "REPLACE_ME"
+# deploy. `make publish STAGE=prod` prints the line to paste here.
+provision_image_digest = "sha256:e67c2b32550596f1dadddacfc8d361c01a95087cb7eb83d342907f39cd30a0de"
 
 # Calibration testnet, with the proxy addresses dev and staging use, for the
 # first prod stack's test run. Prod moves to mainnet with the Forge contracts
