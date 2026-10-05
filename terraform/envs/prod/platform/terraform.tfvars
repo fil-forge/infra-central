@@ -15,10 +15,9 @@ ingot_hostname_suffix = "filonecontent.com"
 # module's validation, which names the command to run.
 provision_image_digest = "REPLACE_ME"
 
-# Calibration testnet, with the proxy addresses dev and staging use. The first
-# prod stack's test run needs no mainnet contracts, and its wallets stay
-# unfunded. Prod moves to mainnet with the Forge contracts from FIL-1277; see
-# docs/decisions/2026-10-prod-first-stack.md.
+# Calibration testnet, with the proxy addresses dev and staging use, for the
+# first prod stack's test run. Prod moves to mainnet with the Forge contracts
+# from FIL-1277; see docs/decisions/2026-10-prod-first-stack.md.
 #
 # Public on-chain addresses, and a contract redeployment should arrive as a
 # reviewable diff. Sources:

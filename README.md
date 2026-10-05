@@ -441,9 +441,9 @@ pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
 
-Prod is not deployed yet: `terraform/envs/prod/` is committed and neither of its
-bootstrap roots has ever been applied. No workflow names it, because its
-`terraform.tfvars` still carries `REPLACE_ME` contract addresses.
+Prod is not deployed yet: neither of its bootstrap roots has been applied, and
+its `terraform.tfvars` still carries a `REPLACE_ME` provision image digest. The
+workflow applies the prod platform root on every merge to `main`.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
