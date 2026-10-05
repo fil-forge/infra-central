@@ -153,6 +153,8 @@ jobs:
             root: staging/apps
           - name: prod-platform
             root: prod/platform
+          - name: prod-apps
+            root: prod/apps
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.root }}
@@ -417,6 +419,46 @@ jobs:
 
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
+  apply-prod-apps:
+    if: github.event_name == 'push'
+    needs: apply-prod-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/prod/apps
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-prod-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/prod/apps/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+      - name: wait for every service to reach steady state
+        timeout-minutes: 25
+        run: |
+          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
+
   # The Grafana root: the dashboards, the alert rules and the three folders they
   # live in. Not a stage, and not in the plan matrix above — it describes every
   # stage at once through a $stage template variable, so there is no stage deploy
@@ -543,6 +585,27 @@ jobs:
           echo "the staging stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
+  smoke-prod:
+    if: github.event_name == 'push'
+    needs: apply-prod-apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: make smoke STAGE=prod
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "=== attempt $attempt of 5, after 60s ==="
+              sleep 60
+            fi
+            if make smoke STAGE=prod; then
+              exit 0
+            fi
+          done
+          echo "the prod stage did not come up: 5 attempts over 4 minutes" >&2
+          exit 1
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
@@ -599,6 +662,24 @@ jobs:
 
       - run: scripts/tail-logs.sh staging --since 45m --lines 50
 
+  diagnose-prod:
+    if: failure() && github.event_name == 'push'
+    needs: [apply-prod-apps, smoke-prod]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-prod-${{ github.run_id }}
+
+      - run: scripts/tail-logs.sh prod --since 45m --lines 50
+
   # One job for the whole workflow rather than a notification step in each: a
   # failed apply and a failed smoke test want the same message, and `failure()`
   # is true here when anything above it failed. A job skipped because the run is
@@ -619,6 +700,8 @@ jobs:
       - apply-staging-apps
       - smoke-staging
       - apply-prod-platform
+      - apply-prod-apps
+      - smoke-prod
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
