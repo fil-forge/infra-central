@@ -163,7 +163,7 @@ terraform/
     bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
-    prod/platform/     prod/apps/                  committed, not deployed yet
+    prod/platform/     prod/apps/                  platform applied on every push to main; apps not yet
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -441,8 +441,8 @@ pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
 
-Prod is not deployed yet: neither of its bootstrap roots has been applied. The
-workflow applies the prod platform root on every merge to `main`.
+The workflow applies the prod platform root on every merge to `main`. The prod
+apps root has no CI job yet.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
@@ -467,9 +467,8 @@ kinds, and the split is what keeps a second region cheap:
   outlive the platform root. One per account _and_ region, described in
   [Setting up an AWS region](#setting-up-an-aws-region).
 
-Both accounts this project uses already have an account root. Non-prod's has
-been applied; prod's is committed under `bootstrap/prod/` and has never been
-applied, so prod is the account that will walk through this section next.
+Both accounts this project uses already have an account root, and both have
+been applied.
 
 #### Copying the root for a new account
 
