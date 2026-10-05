@@ -35,7 +35,7 @@ output "prod_stages" {
   value       = ["prod"]
 }
 
-output "prod_database_key_alias" {
+output "prod_aurora_key_alias" {
   description = "Alias of the KMS key encrypting the prod Aurora cluster. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
-  value       = "alias/fc-prod-database"
+  value       = "alias/fc-prod-aurora"
 }

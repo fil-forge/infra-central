@@ -33,16 +33,16 @@ module "ecr" {
 # in the DR region (FIL-1298) and the Global Database secondary (FIL-1297)
 # need a replica of this key there. FIL-1303 adds that replica and the policy
 # that stops anyone but a break-glass role from deleting or disabling the key.
-resource "aws_kms_key" "database" {
+resource "aws_kms_key" "aurora" {
   description             = "Forge prod: the Aurora cluster"
   multi_region            = true
   enable_key_rotation     = true
   deletion_window_in_days = 30
 }
 
-resource "aws_kms_alias" "database" {
-  name          = module.constants.prod_database_key_alias
-  target_key_id = aws_kms_key.database.key_id
+resource "aws_kms_alias" "aurora" {
+  name          = module.constants.prod_aurora_key_alias
+  target_key_id = aws_kms_key.aurora.key_id
 }
 
 output "provision_repository_url" {

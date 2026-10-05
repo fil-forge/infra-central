@@ -81,8 +81,8 @@ variable "retired_appliance_regions" {
 }
 
 # Created by the regional bootstrap, which outlives this root.
-data "aws_kms_alias" "database" {
-  name = module.constants.prod_database_key_alias
+data "aws_kms_alias" "aurora" {
+  name = module.constants.prod_aurora_key_alias
 }
 
 module "platform" {
@@ -123,7 +123,7 @@ module "platform" {
   db_instance_class        = "db.r8g.large"
   db_instance_count        = 2
   db_backup_retention_days = 35
-  db_kms_key_arn           = data.aws_kms_alias.database.target_key_arn
+  db_kms_key_arn           = data.aws_kms_alias.aurora.target_key_arn
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
