@@ -156,6 +156,12 @@ variable "sizes" {
   }
 }
 
+variable "sprue_postgres_max_conns" {
+  description = "Size of sprue's Postgres connection pool. Null keeps sprue's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
+  type        = number
+  default     = null
+}
+
 variable "log_forwarding" {
   description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, read from the platform root's outputs and passed to every service. Null leaves the log groups in CloudWatch only."
   type = object({
