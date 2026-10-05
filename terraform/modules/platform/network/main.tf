@@ -60,6 +60,21 @@ resource "aws_subnet" "private" {
   tags = { Name = "${local.name}-private-${each.key}" }
 }
 
+# The database's own subnets, when the stage asks for them. Their route table
+# holds only the VPC's local route: no NAT, no internet gateway and no S3
+# endpoint, so even a database that gained an egress rule or an extension that
+# calls out would have nowhere to send the traffic. They take the /20 blocks
+# after the private subnets.
+resource "aws_subnet" "database" {
+  for_each = var.database_subnets ? { for index, az in local.azs : az => index } : {}
+
+  vpc_id            = aws_vpc.this.id
+  availability_zone = each.key
+  cidr_block        = cidrsubnet(var.vpc_cidr, 4, each.value + 2 * var.az_count)
+
+  tags = { Name = "${local.name}-database-${each.key}" }
+}
+
 # How many NAT gateways a stage runs is nat_gateway_per_az's decision: one
 # shared gateway is a single point of failure for egress at roughly half the
 # standing cost, one per AZ survives losing a zone. The names below keep their
@@ -136,6 +151,24 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private[var.nat_gateway_per_az ? index(local.azs, each.key) : 0].id
+}
+
+resource "aws_route_table" "database" {
+  count = var.database_subnets ? 1 : 0
+
+  vpc_id = aws_vpc.this.id
+
+  # Empty and authoritative: a route added by hand is removed on the next apply.
+  route = []
+
+  tags = { Name = "${local.name}-database" }
+}
+
+resource "aws_route_table_association" "database" {
+  for_each = aws_subnet.database
+
+  subnet_id      = each.value.id
+  route_table_id = aws_route_table.database[0].id
 }
 
 # Sprue's bucket traffic would otherwise leave through the NAT gateway: metered

@@ -216,6 +216,7 @@ terraform/modules/
   platform/                everything the platform root builds
     main.tf                the wiring, calling the eight below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
+    aurora/                prod's database, in place of database/
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root
@@ -316,7 +317,7 @@ PendingDeletion stops serving decryption at once, so tying the parameters to it
 would leave every secret unreadable the moment the stage came down and would
 fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
 nothing else, and what it protects is meant to die with the stage: OpenBao's
-storage sits in the same RDS instance and goes at the same time.
+storage sits in the stage's database and goes at the same time.
 
 So **a destroyed and recreated stage silently comes back with its previous
 identities and wallets.** An appliance's stored delegation is one of them: a
@@ -681,7 +682,8 @@ before it can initialise it, inside a synchronous Lambda call that Lambda caps a
 nothing that already exists, which is what protects funded wallets.
 
 Prod will differ from dev inside `main.tf` rather than by being a different
-shape: multi-AZ database, deletion protection on, a larger OpenBao connection
+shape: an Aurora cluster with a writer and a reader in its own subnets,
+deletion protection on, a larger OpenBao connection
 budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
 is promoted rather than written by whatever was built last. It will also want a
 gated apply rather than dev's automatic one; see [Planned
