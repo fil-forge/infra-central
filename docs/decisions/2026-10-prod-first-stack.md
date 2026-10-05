@@ -7,7 +7,8 @@ reset with the Round 1 hardening, following
 and apps roots are destroyed and re-applied, or its data is wiped and the hardening is applied in
 place, keeping the Aurora cluster, its subnets and the VPC. Either way, the bootstrap roots, the
 per-service Route53 zones, the KMS keys of the Aurora cluster and of OpenBao's seal, and the payer
-and transactor keys survive.
+and transactor keys survive. The appliances enrolled for the test run are wiped and re-onboarded
+after the reset, so none of them needs a transit key from the first stack.
 
 ## Topology and sizes
 
@@ -58,9 +59,10 @@ lists each hostname and validates it in that hostname's own zone.
 
 ## Contracts
 
-Prod starts on Filecoin mainnet with the FWSS deployment recorded in
-[fil-forge/filecoin-services](https://github.com/fil-forge/filecoin-services/blob/main/service_contracts/deployments.json)
-and USDFC. It moves to the contracts from
+The test run uses the Calibration testnet (chain 314159) and the same FWSS, FilecoinPay, service
+provider registry and USDFC addresses as dev and staging, from
+`terraform/envs/staging/platform/terraform.tfvars`. The payer and transactor wallets are not funded
+for the test run. Prod moves to Filecoin mainnet with the contracts from
 [FIL-1277](https://linear.app/filecoin-foundation/issue/FIL-1277) once they are deployed.
 
 ## Database subnets
