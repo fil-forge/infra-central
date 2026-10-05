@@ -7,8 +7,7 @@
 # account's repository by hand.
 #
 # .github/workflows/check-and-deploy.yml applies this root on every push to main,
-# the same as staging. The first stack in this account is disposable; see
-# docs/decisions/2026-10-prod-first-stack.md.
+# the same as staging.
 
 provider "aws" {
   region = var.region
