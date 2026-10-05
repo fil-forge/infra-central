@@ -150,10 +150,12 @@ CPU across a stage's services:
 aws_ecs_cpuutilization_average{dimension_ClusterName="fc-dev"}
 ```
 
-Postgres connections on the stage's instance:
+Postgres connections on each of the stage's database instances. Dev and staging run one RDS
+instance named `fc-<stage>`; prod runs an Aurora cluster whose instances are `fc-prod-1` and
+`fc-prod-2`:
 
 ```promql
-aws_rds_database_connections_average{dimension_DBInstanceIdentifier="fc-dev"}
+aws_rds_database_connections_average{dimension_DBInstanceIdentifier=~"fc-dev(-[0-9]+)?"}
 ```
 
 Server errors returned by the stage's services, per target group:
@@ -200,7 +202,7 @@ list, `aws_ecs_.*` for example.
 | -------------------- | --------------------------------------------------------------------- |
 | `AWS/ECS`            | `dimension_ClusterName="fc-<stage>"`, `dimension_ServiceName`         |
 | `AWS/ApplicationELB` | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
-| `AWS/RDS`            | `dimension_DBInstanceIdentifier="fc-<stage>"`                         |
+| `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
 | `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
