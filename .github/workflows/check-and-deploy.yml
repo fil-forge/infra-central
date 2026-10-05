@@ -381,9 +381,7 @@ jobs:
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
   # Prod deploys on every merge, the same as staging, with its own account's
-  # roles. The first prod stack is disposable, which is why it needs no approval
-  # step yet; FIL-1394 adds one before production data arrives. See
-  # docs/decisions/2026-10-prod-first-stack.md.
+  # roles. FIL-1394 adds an approval step before production data arrives.
   apply-prod-platform:
     if: github.event_name == 'push'
     needs: check
