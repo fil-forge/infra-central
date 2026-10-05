@@ -15,21 +15,23 @@ ingot_hostname_suffix = "filonecontent.com"
 # module's validation, which names the command to run.
 provision_image_digest = "REPLACE_ME"
 
-# Filecoin mainnet.
+# Calibration testnet, with the proxy addresses dev and staging use. The first
+# prod stack's test run needs no mainnet contracts, and its wallets stay
+# unfunded. Prod moves to mainnet with the Forge contracts from FIL-1277; see
+# docs/decisions/2026-10-prod-first-stack.md.
 #
-# Public on-chain addresses. fwss, filecoin_pay and service_provider_registry
-# are the chain 314 entries in fil-forge/filecoin-services; usdfc_token is the
-# token FWSS on mainnet is constructed with. A contract redeployment arrives as
-# a reviewable diff here; FIL-1277 will replace FWSS with Forge's own fork.
+# Public on-chain addresses, and a contract redeployment should arrive as a
+# reviewable diff. Sources:
+#   https://github.com/FilOzone/filecoin-services/releases
 #   https://github.com/fil-forge/filecoin-services/blob/main/service_contracts/deployments.json
 chain = {
-  rpc_url  = "https://api.node.glif.io/rpc/v1"
-  chain_id = 314
+  rpc_url  = "https://api.calibration.node.glif.io/rpc/v1"
+  chain_id = 314159
 
   contracts = {
-    fwss                      = "0x56e53c5e7F27504b810494cc3b88b2aa0645a839"
-    filecoin_pay              = "0x23b1e018F08BB982348b15a86ee926eEBf7F4DAa"
-    service_provider_registry = "0xf55dDbf63F1b55c3F1D4FA7e339a68AB7b64A5eB"
-    usdfc_token               = "0x80B98d3aa09ffff255c3ba4A241111Ff1262F045"
+    fwss                      = "0x0c6875983B20901a7C3c86871f43FdEE77946424"
+    filecoin_pay              = "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0"
+    service_provider_registry = "0x839e5c9988e4e9977d40708d0094103c0839Ac9D"
+    usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
