@@ -61,8 +61,7 @@ lists each hostname and validates it in that hostname's own zone.
 
 The test run uses the Calibration testnet (chain 314159) and the same FWSS, FilecoinPay, service
 provider registry and USDFC addresses as dev and staging, from
-`terraform/envs/staging/platform/terraform.tfvars`. The payer and transactor wallets are not funded
-for the test run. Prod moves to Filecoin mainnet with the contracts from
+`terraform/envs/staging/platform/terraform.tfvars`. Prod moves to Filecoin mainnet with the contracts from
 [FIL-1277](https://linear.app/filecoin-foundation/issue/FIL-1277) once they are deployed.
 
 ## Database subnets
