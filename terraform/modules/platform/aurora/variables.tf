@@ -25,6 +25,11 @@ variable "engine_version" {
   description = "Aurora PostgreSQL release, pinned to a minor version. 16 matches the RDS instances in dev and staging."
   type        = string
   default     = "16.15"
+
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+$", var.engine_version))
+    error_message = "The engine version must name a minor release, such as 16.15."
+  }
 }
 
 variable "instance_class" {

@@ -7,7 +7,8 @@
 # creates them from inside the private subnets instead.
 
 locals {
-  name = "fc-${var.stage}"
+  name          = "fc-${var.stage}"
+  engine_family = "aurora-postgresql${split(".", var.engine_version)[0]}"
 }
 
 resource "aws_db_subnet_group" "this" {
@@ -22,8 +23,8 @@ resource "aws_db_subnet_group" "this" {
 # cmd/provision/seed.go), which encrypts only when the server insists, so the
 # setting is stated here rather than inherited.
 resource "aws_rds_cluster_parameter_group" "this" {
-  name   = "${local.name}-aurora-postgresql16"
-  family = "aurora-postgresql16"
+  name   = "${local.name}-${local.engine_family}"
+  family = local.engine_family
 
   parameter {
     name         = "rds.force_ssl"
