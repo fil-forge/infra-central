@@ -423,12 +423,15 @@ the failure is. The groups are discovered from CloudWatch, so a service added to
 either root is covered. It runs on the apply role, because reading log events
 needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
 
-A failed run on `main` posts to `#filone-alerts` in Slack with the commit
-subject, its author and a link to the run. When the commit is an image bump, a
-second line names the service commit that produced the image and who wrote it,
-looked up from the source commit link Bump deployed image puts in the commit
-body. A lookup that fails drops the line and still sends the alert. Any failed
-job triggers it, from `make check` through the smoke test. Pull request failures
+A failed run on `main` posts to `#filone-alerts` in Slack with the stage that
+failed, the failed jobs, the commit subject, its author and a link to the run.
+The stage comes from the job name: `apply-<stage>-<root>` and `smoke-<stage>`
+name a stage, `apply-grafana` reports as `grafana`, and `check` as itself.
+When the commit is an image bump, one more line names the service commit that
+produced the image and who wrote it, looked up from the source commit link Bump
+deployed image puts in the commit body. A lookup that fails drops the line and
+still sends the alert. Any failed job triggers it, from `make check` through the
+smoke test. Pull request failures
 are not announced, because the author already sees the red check on the pull
 request. The job reads one repository secret, `SLACK_BOT_TOKEN`, holding the bot
 token of a Slack app with the `chat:write` scope; without the secret the
