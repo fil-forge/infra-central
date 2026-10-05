@@ -982,7 +982,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }
@@ -1073,7 +1073,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "warning"
     }
@@ -1175,7 +1175,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }
@@ -1267,7 +1267,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "warning"
     }
