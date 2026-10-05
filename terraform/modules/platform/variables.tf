@@ -73,6 +73,12 @@ variable "db_kms_key_arn" {
   }
 }
 
+variable "openbao_kms_key_arn" {
+  description = "Customer-managed key OpenBao seals with, for a stage whose key must outlive this module. When null, the module creates one that is destroyed with the stage."
+  type        = string
+  default     = null
+}
+
 variable "db_instance_class" {
   description = "The RDS instance's class, or the class of every Aurora instance. The aurora module rejects burstable classes."
   type        = string
