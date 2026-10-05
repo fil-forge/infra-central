@@ -37,7 +37,7 @@ permissions:
 jobs:
   refresh:
     name: Refresh bump pull requests
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     # Before the checkout, so an unrelated pull request costs nothing. A fork
     # cannot reach the signing key anyway, so admitting one would only fail the
     # token step loudly on every fork branch that borrowed the name.
