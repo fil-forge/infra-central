@@ -36,8 +36,8 @@ prometheus_datasource_uid = "grafanacloud-prom"
 # page URL. Not a secret.
 loki_datasource_uid = "grafanacloud-logs"
 
-# Staging, not the variable's production-only default: production does not exist
-# yet (FIL-1147, FIL-808) and staging is what the hand-built rules these replace
-# were watching. Add "prod" alongside, or replace staging with it, once the prod
-# stage is stood up.
-alert_stages = ["staging"]
+# Staging as well as the variable's production-only default. Staging is what the
+# hand-built rules these replace were watching, and it keeps the rules whose
+# no_data_state is NoData quiet while a prod reset leaves prod with nothing to
+# report.
+alert_stages = ["staging", "prod"]

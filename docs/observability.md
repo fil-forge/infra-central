@@ -70,6 +70,11 @@ Each rule carries `team = "forge"`, and a route in the notification policy tree
 channel. Adding that one route is a manual step nobody has done yet, so **the
 rules below evaluate but reach no one** until it exists.
 
+The rules watch staging and prod, the stages listed in `alert_stages` in
+`terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
+`fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
+appliance label.
+
 | Rule                                | Group                     | Source            | Ticket   |
 | ----------------------------------- | ------------------------- | ----------------- | -------- |
 | Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
@@ -78,6 +83,8 @@ rules below evaluate but reach no one** until it exists.
 | Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
 | Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
 | Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
+| Postgres is refusing connections    | Forge Regions             | Postgres's logs, Loki | FIL-1163 |
+| Appliance 5xx rate too high         | Forge Regions             | Caddy             | FIL-1163 |
 | Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
 
 ## Logs
