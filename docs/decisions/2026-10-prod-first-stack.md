@@ -1,27 +1,40 @@
-# The first prod stack is disposable
+# The first prod stack carries a test run before launch
 
-Prod first runs as a disposable stack in the filone-production account (`811430801166`), region
-`us-east-2`. It carries a 100–200 TB test run of synthetic data at the launch rate of 3 GB/s. After
-the test run, its platform and apps roots are destroyed and re-applied with the Round 1 hardening,
-following [FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396). The bootstrap roots,
-the per-service Route53 zones and the payer and transactor keys survive.
+Prod first runs in the filone-production account (`811430801166`), region `us-east-2`. It carries a
+100–200 TB test run of synthetic data at the launch rate of 3 GB/s. After the test run, the stack is
+reset with the Round 1 hardening, following
+[FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396), in one of two ways: its platform
+and apps roots are destroyed and re-applied, or its data is wiped and the hardening is applied in
+place, keeping the Aurora cluster, its subnets and the VPC. Either way, the bootstrap roots, the
+per-service Route53 zones, the database's KMS key and the payer and transactor keys survive.
 
 ## Topology and sizes
 
-Prod uses its committed topology: three availability zones, a NAT gateway per zone, a Multi-AZ RDS
-instance, Global Accelerator and Container Insights.
+Prod uses its committed topology: three availability zones, a NAT gateway per zone, an Aurora
+PostgreSQL cluster with a writer and a reader in different zones, Global Accelerator and Container
+Insights.
 
-The database is a `db.m7g.large` with 50 GiB of gp3, autoscaling to 100 GiB, with backups kept for
-30 days. At the launch rate, central sees 12–22 object PUTs per second. Each PUT costs Sprue about
-15 new rows in 7 commits, so the database takes about 150 commits/s for the whole run. A burstable
-class would run out of CPU credits during an 18-hour run at that rate. A 200 TB run adds about
-7.5 GB of live rows.
+At the launch rate, central sees 12–22 object PUTs per second. Each PUT costs Sprue about 15 new
+rows in 7 commits, so the database takes about 150 commits/s for the whole run. A burstable class
+would run out of CPU credits during an 18-hour run at that rate. A 200 TB run adds about 7.5 GB of
+live rows.
+
+Both cluster instances are `db.r8g.large`, 2 vCPU and 16 GiB. The reader has the writer's class
+because it takes the writer's load after a failover. The cluster runs Aurora PostgreSQL 16 on
+Aurora Standard storage and keeps 35 days of point-in-time recovery. Its key is a multi-region KMS
+key from the regional bootstrap, so backups can be copied to another region and another account
+([FIL-1298](https://linear.app/filecoin-foundation/issue/FIL-1298),
+[FIL-1292](https://linear.app/filecoin-foundation/issue/FIL-1292)). The r-class and the engine
+version both support Global Database, so the DR secondary
+([FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297)) needs no instance change. The
+two instances cost about $404 a month before I/O, against about $258 for a Multi-AZ RDS
+`db.m7g.large`; the reader and Aurora's storage make the difference.
 
 Sprue runs at 1 vCPU and 2 GiB with a 20-connection pool. It is the only service on the per-PUT
 path. Every other service, OpenBao included, keeps its default size and runs one task.
 
-The test run's Sprue CPU, database CPU, commit latency and lock waits set the starting size of the
-Aurora cluster that replaces this instance at the reset.
+The test run's Sprue CPU, database CPU, commit latency, lock waits and I/O rate confirm or correct
+the instance class and the storage type before launch.
 
 ## Deploys
 
@@ -46,7 +59,8 @@ and USDFC. It moves to the contracts from
 
 ## Database subnets
 
-The first stack uses the shared private subnets. Moving a live instance to a new subnet group
-replaces it, which the reset does anyway.
-[FIL-1295](https://linear.app/filecoin-foundation/issue/FIL-1295) creates the database for the
-hardened stack and decides whether it gets dedicated subnets with no route out.
+The cluster has its own subnets, one per zone, whose route table holds only the local route. The
+database security group already allows no outbound connections, so the subnets are a second layer
+in case that rule ever changes. They cost nothing. A live cluster cannot move to another subnet
+group, so the choice is made before the first apply, and it holds if the cluster carries over into
+launch.
