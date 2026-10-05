@@ -6,7 +6,8 @@ reset with the Round 1 hardening, following
 [FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396), in one of two ways: its platform
 and apps roots are destroyed and re-applied, or its data is wiped and the hardening is applied in
 place, keeping the Aurora cluster, its subnets and the VPC. Either way, the bootstrap roots, the
-per-service Route53 zones, the database's KMS key and the payer and transactor keys survive.
+per-service Route53 zones, the KMS keys of the Aurora cluster and of OpenBao's seal, and the payer
+and transactor keys survive.
 
 ## Topology and sizes
 
@@ -29,6 +30,11 @@ version both support Global Database, so the DR secondary
 ([FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297)) needs no instance change. The
 two instances cost about $404 a month before I/O, against about $258 for a Multi-AZ RDS
 `db.m7g.large`; the reader and Aurora's storage make the difference.
+
+OpenBao seals its storage with a multi-region KMS key from the regional bootstrap, like the
+cluster's. A key's multi-region flag is fixed when the key is created, so OpenBao never has to move
+to a new seal key, and a platform root applied in the DR region unseals with the key's replica
+there ([FIL-1303](https://linear.app/filecoin-foundation/issue/FIL-1303)).
 
 Sprue runs at 1 vCPU and 2 GiB with a 20-connection pool. It is the only service on the per-PUT
 path. Every other service, OpenBao included, keeps its default size and runs one task.
