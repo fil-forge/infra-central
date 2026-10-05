@@ -34,3 +34,13 @@ output "prod_stages" {
   description = "Stages deployed into the prod account."
   value       = ["prod"]
 }
+
+output "prod_aurora_key_alias" {
+  description = "Alias of the KMS key encrypting the prod Aurora cluster. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
+  value       = "alias/fc-prod-aurora"
+}
+
+output "prod_openbao_seal_key_alias" {
+  description = "Alias of the KMS key prod OpenBao seals its storage with. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
+  value       = "alias/fc-prod-openbao-seal"
+}
