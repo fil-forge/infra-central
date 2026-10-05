@@ -629,6 +629,33 @@ jobs:
       - id: commit
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
 
+      # Names what failed, so the alert says whether prod is broken without a
+      # click. The stage comes from the job name: apply-<stage>-<root> and
+      # smoke-<stage> give the stage, apply-grafana gives grafana, and any other
+      # job stands for itself. Only "failure" counts; the jobs downstream of a
+      # failure are "skipped" and would bury the one that broke.
+      #
+      # Best-effort like the source lookup below: if this step breaks, the alert
+      # still goes out without the stage and the job line.
+      - id: failed
+        continue-on-error: true
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed=$(jq -c 'to_entries | map(select(.value.result == "failure") | .key)' <<<"$NEEDS")
+          if [ "$failed" = "[]" ]; then
+            echo "::warning::no job in needs has the result failure"
+            exit 0
+          fi
+
+          stages=$(jq -r '
+            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; ""))
+            | unique | join(", ")' <<<"$failed")
+          jobs=$(jq -r 'map("`\(.)`") | join(", ")' <<<"$failed")
+          echo "stages=$stages" >> "$GITHUB_OUTPUT"
+          echo "line=Failed jobs: $jobs" >> "$GITHUB_OUTPUT"
+
       # A bump commit says which service image changed and nothing about what
       # changed inside it, so the alert names a digest nobody recognises. Bump
       # deployed image writes the source commit into the body as a link, and
@@ -693,15 +720,16 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deploy of `{0}` failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deploy of `{0}` failed{1}. {2}Commit: {3} by @{4}. {5}Details: {6}/{7}/actions/runs/{8}', github.event.repository.name, steps.failed.outputs.stages && format(' in {0}', steps.failed.outputs.stages) || '', steps.failed.outputs.line && format('{0}. ', steps.failed.outputs.line) || '', steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed{1}* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, steps.failed.outputs.stages && format(' in {0}', steps.failed.outputs.stages) || '', github.server_url, github.repository, github.run_id)) }}
                   }
                 },
+                ${{ steps.failed.outputs.line && format('{{"type":"section","text":{{"type":"mrkdwn","text":{0}}}}},', toJSON(steps.failed.outputs.line)) || '' }}
                 {
                   "type": "section",
                   "text": {
