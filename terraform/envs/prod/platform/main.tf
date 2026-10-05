@@ -85,6 +85,10 @@ data "aws_kms_alias" "aurora" {
   name = module.constants.prod_aurora_key_alias
 }
 
+data "aws_kms_alias" "openbao_seal" {
+  name = module.constants.prod_openbao_seal_key_alias
+}
+
 module "platform" {
   source = "../../../modules/platform"
 
@@ -132,6 +136,10 @@ module "platform" {
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
   # about 80 of them with OpenBao's 24 included.
   openbao_max_parallel = 24
+
+  # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
+  # outlives this root, so the key it seals with has to as well.
+  openbao_kms_key_arn = data.aws_kms_alias.openbao_seal.target_key_arn
 
   container_insights = true
 

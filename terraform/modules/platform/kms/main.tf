@@ -11,6 +11,11 @@
 # down. They take the account's AWS-managed SSM key instead, which cannot be
 # deleted. What this key protects therefore dies with the stage by design:
 # OpenBao's storage lives in the same RDS instance and goes at the same time.
+#
+# Prod skips this module. Its OpenBao storage outlives the platform root in the
+# Aurora cluster's final snapshot and DR copies, so its seal key is a
+# multi-region key from envs/bootstrap/prod/us-east-2, passed in as
+# openbao_kms_key_arn.
 
 locals {
   name = "fc-${var.stage}"

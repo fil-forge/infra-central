@@ -453,8 +453,10 @@ kinds, and the split is what keeps a second region cheap:
   global and IAM is not regional, so a second region must not create these
   again.
 - `bootstrap/<account>/<region>/` holds the **ECR repository** for the provision
-  Lambda image and the **telemetry egress** to Grafana Cloud. One per account
-  _and_ region, described in [Setting up an AWS region](#setting-up-an-aws-region).
+  Lambda image and the **telemetry egress** to Grafana Cloud. In prod it also
+  holds the **KMS keys** of the Aurora cluster and of OpenBao's seal, which must
+  outlive the platform root. One per account _and_ region, described in
+  [Setting up an AWS region](#setting-up-an-aws-region).
 
 Both accounts this project uses already have an account root. Non-prod's has
 been applied; prod's is committed under `bootstrap/prod/` and has never been
@@ -683,7 +685,8 @@ nothing that already exists, which is what protects funded wallets.
 
 Prod will differ from dev inside `main.tf` rather than by being a different
 shape: an Aurora cluster with a writer and a reader in its own subnets,
-deletion protection on, a larger OpenBao connection
+deletion protection on, KMS keys for the cluster and for OpenBao's seal from
+the regional bootstrap, a larger OpenBao connection
 budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
 is promoted rather than written by whatever was built last. It will also want a
 gated apply rather than dev's automatic one; see [Planned

@@ -31,11 +31,18 @@ module "network" {
   database_subnets   = var.db_engine == "aurora"
 }
 
+# Created only for a stage that brings no seal key of its own.
 module "kms" {
   source = "./kms"
+  count  = var.openbao_kms_key_arn == null ? 1 : 0
 
   stage                   = var.stage
   deletion_window_in_days = var.protect_stateful_resources ? 30 : 7
+}
+
+moved {
+  from = module.kms
+  to   = module.kms[0]
 }
 
 # One of the two database modules exists, chosen by db_engine. Both export the
@@ -196,8 +203,10 @@ module "openbao" {
   security_group_id = module.network.service_security_group_id
   alb_cidrs         = module.network.public_subnet_cidrs
 
-  kms_key_id  = module.kms.key_id
-  kms_key_arn = module.kms.key_arn
+  # KMS accepts an ARN wherever it takes a key id, and the seal stanza is the
+  # only place OpenBao uses the id.
+  kms_key_id  = coalesce(var.openbao_kms_key_arn, one(module.kms[*].key_id))
+  kms_key_arn = coalesce(var.openbao_kms_key_arn, one(module.kms[*].key_arn))
   ssm_prefix  = "/forge-central/${var.stage}/openbao"
 
   listener_arn      = module.ingress.listener_arn
