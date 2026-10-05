@@ -441,8 +441,7 @@ pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
 
-Prod is not deployed yet: neither of its bootstrap roots has been applied, and
-its `terraform.tfvars` still carries a `REPLACE_ME` provision image digest. The
+Prod is not deployed yet: neither of its bootstrap roots has been applied. The
 workflow applies the prod platform root on every merge to `main`.
 
 See [Planned work](#planned-work) for the manual steps that remain.
@@ -818,9 +817,18 @@ machine is applied nowhere.
 Dev and staging share an ECR repository. Promote the Lambda to staging by
 copying dev's digest into
 `terraform/envs/staging/platform/image.auto.tfvars`. The image is already in
-ECR, so the promotion needs no build or push. A production promotion will
-likewise copy the digest into
-`terraform/envs/prod/platform/terraform.tfvars` when the change is ready.
+ECR, so the promotion needs no build or push.
+
+Prod is a separate account with its own ECR repository, so a dev digest means
+nothing there. Promote the Lambda to prod by publishing into the prod account:
+
+```bash
+make publish STAGE=prod
+```
+
+For prod the command writes nothing. It prints the `provision_image_digest`
+line to paste into `terraform/envs/prod/platform/terraform.tfvars`, where prod
+pins its digest. Commit that file and merge it.
 
 ### Deploying a service
 
