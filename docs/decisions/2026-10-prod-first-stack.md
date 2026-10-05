@@ -35,7 +35,8 @@ two instances cost about $404 a month before I/O, against about $258 for a Multi
 OpenBao seals its storage with a multi-region KMS key from the regional bootstrap, like the
 cluster's. A key's multi-region flag is fixed when the key is created, so OpenBao never has to move
 to a new seal key, and a platform root applied in the DR region unseals with the key's replica
-there ([FIL-1303](https://linear.app/filecoin-foundation/issue/FIL-1303)).
+there ([FIL-1303](https://linear.app/filecoin-foundation/issue/FIL-1303),
+[FIL-1445](https://linear.app/filecoin-foundation/issue/FIL-1445)).
 
 Sprue runs at 1 vCPU and 2 GiB with a 20-connection pool. It is the only service on the per-PUT
 path. Every other service, OpenBao included, keeps its default size and runs one task.
