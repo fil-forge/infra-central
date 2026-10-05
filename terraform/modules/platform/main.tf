@@ -15,10 +15,21 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+module "constants" {
+  source = "../shared/constants"
+}
+
 locals {
   name       = "fc-${var.stage}"
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
+
+  # Every public hostname in the stage, OpenBao's and the apps root's alike,
+  # because the ingress module certifies all of them.
+  public_hostnames = {
+    for service, label in module.constants.public_hostname_labels :
+    service => "${label}.${var.hostname_suffix}"
+  }
 }
 
 module "network" {
@@ -106,6 +117,7 @@ module "ingress" {
   stage                     = var.stage
   zone_name                 = var.zone_name
   hostname_suffix           = var.hostname_suffix
+  hostnames                 = values(local.public_hostnames)
   public_subnet_ids         = module.network.public_subnet_ids
   security_group_id         = module.network.alb_security_group_id
   deletion_protection       = var.protect_stateful_resources
@@ -195,7 +207,7 @@ module "openbao" {
 
   image        = var.openbao_image
   max_parallel = var.openbao_max_parallel
-  hostname     = "ssm.${var.hostname_suffix}"
+  hostname     = local.public_hostnames.openbao
 
   cluster_arn       = aws_ecs_cluster.this.arn
   vpc_id            = module.network.vpc_id
@@ -211,7 +223,7 @@ module "openbao" {
 
   listener_arn      = module.ingress.listener_arn
   listener_priority = 100
-  route53_zone_id   = module.ingress.route53_zone_id
+  route53_zone_id   = module.ingress.route53_zone_ids[local.public_hostnames.openbao]
   alb_dns_name      = module.ingress.public_dns_name
   alb_zone_id       = module.ingress.public_zone_id
 

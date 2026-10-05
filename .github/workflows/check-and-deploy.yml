@@ -36,6 +36,11 @@ env:
   # what the plan jobs run. See modules/github-actions-iam.
   PLAN_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-plan
   APPLY_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-apply
+  # The same two roles in the prod account, created by
+  # terraform/envs/bootstrap/prod/account. Each account's roles reach only that
+  # account's state bucket, so a prod root cannot run on the non-prod pair.
+  PROD_PLAN_ROLE: arn:aws:iam::811430801166:role/forge-central-ci-plan
+  PROD_APPLY_ROLE: arn:aws:iam::811430801166:role/forge-central-ci-apply
   # Where `tofu init` keeps downloaded providers, saved between runs by
   # actions/cache in every job that runs it. The registry serves providers
   # straight from GitHub Releases, and GitHub throttles unauthenticated downloads
@@ -117,8 +122,8 @@ jobs:
   # access, who writes the workflow file their own pull request runs. See
   # modules/github-actions-iam.
   plan:
-    # Set explicitly, so the four instances report as `plan-dev-platform`,
-    # `plan-dev-apps`, `plan-staging-platform` and `plan-staging-apps` rather than
+    # Set explicitly, so the instances report as `plan-dev-platform`,
+    # `plan-dev-apps`, `plan-staging-platform` and so on rather than
     # GitHub's default `plan (dev/platform)`. A branch protection rule has to
     # name its required checks literally, and the flat names are the ones worth
     # typing.
@@ -146,6 +151,8 @@ jobs:
             root: staging/platform
           - name: staging-apps
             root: staging/apps
+          - name: prod-platform
+            root: prod/platform
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.root }}
@@ -157,9 +164,11 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
+      # A matrix value cannot read the env context, so the prod entries pick
+      # their account's role here, by root.
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.PLAN_ROLE }}
+          role-to-assume: ${{ startsWith(matrix.root, 'prod/') && env.PROD_PLAN_ROLE || env.PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-${{ github.run_id }}
 
@@ -227,8 +236,7 @@ jobs:
 
       # -auto-approve, and the log is the audit trail: apply prints the whole plan
       # to stdout before it changes anything, so the run shows exactly what it
-      # did. dev deploys on merge, which is the point; a gated apply is what prod
-      # will want instead.
+      # did. dev deploys on merge, which is the point.
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
   apply-dev-apps:
@@ -371,6 +379,45 @@ jobs:
         timeout-minutes: 25
         run: |
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
+
+  # Prod deploys on every merge, the same as staging, with its own account's
+  # roles. The first prod stack is disposable, which is why it needs no approval
+  # step yet; FIL-1394 adds one before production data arrives. See
+  # docs/decisions/2026-10-prod-first-stack.md.
+  apply-prod-platform:
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/prod/platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-prod-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/prod/platform/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
   # The Grafana root: the dashboards, the alert rules and the three folders they
   # live in. Not a stage, and not in the plan matrix above — it describes every
@@ -573,6 +620,7 @@ jobs:
       - apply-staging-platform
       - apply-staging-apps
       - smoke-staging
+      - apply-prod-platform
       - apply-grafana
     runs-on: ubuntu-latest
     steps:

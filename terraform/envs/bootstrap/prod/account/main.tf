@@ -5,9 +5,8 @@
 # bootstrap is split into an account root and a regional one, and why this half
 # is the one applied by hand.
 #
-# Nothing here has been applied yet: this account holds no state bucket and no CI
-# roles. Its first apply follows the greenfield procedure in the README, because
-# the bucket its own backend names does not exist yet either.
+# Its first apply follows the greenfield procedure in the README, because the
+# bucket its own backend names does not exist until that apply creates it.
 
 provider "aws" {
   region = "us-east-2"
@@ -25,10 +24,7 @@ module "tfstate" {
   bucket_name = "forge-central-tfstate-${module.constants.prod_account_id}"
 }
 
-# Created now so prod needs no second bootstrap apply when it is stood up, and
-# so the trust policies are reviewed once rather than under deadline. No workflow
-# names these roles yet: check-and-deploy.yml covers dev only, because prod's tfvars still
-# carry REPLACE_ME contract addresses and no image digests.
+# The roles check-and-deploy.yml assumes for the prod plan and apply jobs.
 module "github_actions_iam" {
   source = "../../../../modules/github-actions-iam"
 
@@ -42,9 +38,33 @@ module "github_actions_iam" {
   account_id                = module.constants.prod_account_id
   state_bucket_name         = module.tfstate.bucket_name
 
-  # From the one list the regional root will also read once prod ships
-  # telemetry; see the constants module.
+  # From the one list the regional root also reads to create the stage's log
+  # Firehose; see the constants module.
   state_key_prefixes = module.constants.prod_stages
+}
+
+# One Route53 zone per public service name. fil-forge.com is served by
+# Cloudflare and prod's services sit directly beneath it (upload.fil-forge.com,
+# not upload.prod.fil-forge.com), so no single delegated subzone covers them.
+# fil-one/infrastructure delegates each name here with an NS record carrying the
+# name servers this root outputs.
+#
+# Here rather than in the prod platform root because the zones must outlive it.
+# The platform root is destroyed and re-applied when the first prod stack is
+# reset, and a recreated zone gets new name servers, which would break every
+# delegation until fil-one/infrastructure caught up. prevent_destroy makes that
+# mistake fail at plan time.
+#
+# The suffix is prod's hostname_suffix from envs/prod/platform/terraform.tfvars,
+# stated again here because a bootstrap root cannot read a stage's tfvars.
+resource "aws_route53_zone" "service" {
+  for_each = toset(values(module.constants.public_hostname_labels))
+
+  name = "${each.key}.fil-forge.com"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 output "state_bucket_name" {
@@ -57,4 +77,10 @@ output "ci_plan_role_arn" {
 
 output "ci_apply_role_arn" {
   value = module.github_actions_iam.apply_role_arn
+}
+
+# Paste these into the fil-one/infrastructure delegation, one NS record per
+# zone, with proxied = false.
+output "service_zone_name_servers" {
+  value = { for name, zone in aws_route53_zone.service : zone.name => zone.name_servers }
 }

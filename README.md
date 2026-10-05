@@ -252,9 +252,9 @@ fil-forge.com DNS
   ├── NS staging ─► Route53 zone staging.fil-forge.com  (non-prod account)
   │                 ├── upload.staging.fil-forge.com
   │                 └── ssm.staging.fil-forge.com
-  └────────────►  Route53 zone fil-forge.com       (production account)
-                    ├── upload.fil-forge.com
-                    └── ssm.fil-forge.com
+  ├── NS upload ──► Route53 zone upload.fil-forge.com  (production account)
+  ├── NS ssm ─────► Route53 zone ssm.fil-forge.com     (production account)
+  └── …            one zone per public service name
 ```
 
 Adding a personal stage beneath `dev.fil-forge.com` requires no change to the
@@ -285,8 +285,16 @@ Two per-stage settings follow, and this is where they diverge:
 The delegation itself lives in
 [fil-one/infrastructure](https://github.com/fil-one/infrastructure) and is added
 once per dev/staging domain root: an `aws_route53_zone` for the delegated name, plus a
-Cloudflare `NS` record carrying that zone's four name servers. In production, we will create one
-delegation for each service name.
+Cloudflare `NS` record carrying that zone's four name servers.
+
+Production has no domain root to delegate, because its service names sit
+directly beneath `fil-forge.com`. Each public service name is a Route53 zone of
+its own instead, created by `terraform/envs/bootstrap/prod/account` from the
+constants module's `public_hostname_labels`, so the zones survive a rebuild of
+the prod stage. fil-one/infrastructure carries one Cloudflare `NS` record per
+zone, copied from that root's `service_zone_name_servers` output. The prod
+platform root sets no `zone_name`, which tells the ingress module to write each
+record into its hostname's own zone.
 
 Those records are created with `proxied = false`, which matters: these hostnames
 serve `did:web` documents and terminate their own TLS at the ALB, so Cloudflare
@@ -295,7 +303,9 @@ must not sit in front of them.
 **Certificates belong here, not in the fil-one/infrastructure project.**
 
 The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
-records into the delegated zone, and waits for validation. Two reasons it
+records into the delegated zone, and waits for validation. In production a
+wildcard would validate through a record in the Cloudflare apex, so the
+certificate names every public hostname and validates each one in its own zone. Two reasons it
 cannot be one central certificate:
 
 - An ALB needs its certificate in the ALB's own region. A `us-east-1`
@@ -683,15 +693,15 @@ before it can initialise it, inside a synchronous Lambda call that Lambda caps a
 15 minutes. If it times out there, re-run the job. The seed phase regenerates
 nothing that already exists, which is what protects funded wallets.
 
-Prod will differ from dev inside `main.tf` rather than by being a different
+Prod differs from dev inside `main.tf` rather than by being a different
 shape: an Aurora cluster with a writer and a reader in its own subnets,
 deletion protection on, KMS keys for the cluster and for OpenBao's seal from
-the regional bootstrap, a larger OpenBao connection
-budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
-is promoted rather than written by whatever was built last. It will also want a
-gated apply rather than dev's automatic one; see [Planned
-work](#planned-work). Staging's choices on the same points are recorded in
-[the staging environment decision](docs/decisions/2026-09-staging-environment.md).
+the regional bootstrap, a larger OpenBao connection budget, a zone per public
+hostname, and a provision digest pinned in `terraform.tfvars`. It lives in its
+own account and deploys on every merge, like staging. Its choices are recorded
+in [the first prod stack decision](docs/decisions/2026-10-prod-first-stack.md),
+and staging's in [the staging environment
+decision](docs/decisions/2026-09-staging-environment.md).
 
 ### A personal sandbox stage
 
@@ -1020,7 +1030,9 @@ head's decision.
 
 See the following Linear tickets:
 
-- [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the Forge Central prod stage with a gated apply, and decide whether RDS gets dedicated subnets
+- [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the first, disposable Forge Central prod stack
+- [FIL-1394](https://linear.app/filecoin-foundation/issue/FIL-1394) Hold prod applies for a human approval
+- [FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396) Reset production after the test run
 - [FIL-1156](https://linear.app/filecoin-foundation/issue/FIL-1156) Narrow the apply role's IAM policy
 - [FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) Tooling for removing an appliance node from the network
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node

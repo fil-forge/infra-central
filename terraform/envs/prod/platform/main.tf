@@ -1,14 +1,14 @@
 # Prod platform.
 #
-# Differs from dev in three ways that matter: the database is an Aurora cluster
-# with a writer and a reader, protected from deletion; OpenBao gets a larger
-# connection budget; and the provision image digest is pinned in
-# terraform.tfvars, copied from dev when a change is promoted rather than
-# written by whatever was built last.
+# Differs from dev in the ways that matter: the database is an Aurora cluster
+# with a writer and a reader, protected from deletion, OpenBao gets a larger
+# connection budget, every public hostname is a Route53 zone of its own, and the
+# provision image digest is pinned in terraform.tfvars, published to this
+# account's repository by hand.
 #
-# Not deployed, and no workflow applies it. dev is applied on every push to main;
-# prod will want a gated job, and its tfvars still carry REPLACE_ME contract
-# addresses, so a plan here fails by design.
+# .github/workflows/check-and-deploy.yml applies this root on every push to main,
+# the same as staging. The first stack in this account is disposable; see
+# docs/decisions/2026-10-prod-first-stack.md.
 
 provider "aws" {
   region = var.region
@@ -32,11 +32,6 @@ module "constants" {
 variable "region" {
   type    = string
   default = "us-east-2"
-}
-
-variable "zone_name" {
-  description = "Route53 hosted zone this stage writes records into. fil.one is served by Cloudflare, so this must be the delegated subdomain that actually exists in Route53."
-  type        = string
 }
 
 variable "hostname_suffix" {
@@ -92,8 +87,14 @@ data "aws_kms_alias" "openbao_seal" {
 module "platform" {
   source = "../../../modules/platform"
 
-  stage                 = "prod"
-  zone_name             = var.zone_name
+  stage = "prod"
+
+  # fil-forge.com is served by Cloudflare and the service names sit directly
+  # beneath it, so each one is delegated to a Route53 zone of its own, created
+  # by terraform/envs/bootstrap/prod/account. A null zone_name selects that
+  # layout: records and certificate validation go into each hostname's zone.
+  zone_name = null
+
   hostname_suffix       = var.hostname_suffix
   ingot_hostname_suffix = var.ingot_hostname_suffix
 
