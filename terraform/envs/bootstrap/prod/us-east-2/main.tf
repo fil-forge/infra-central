@@ -31,7 +31,7 @@ module "ecr" {
 #
 # Multi-region because the flag is fixed when a key is created. Backup copies
 # in the DR region (FIL-1298) and the Global Database secondary (FIL-1297)
-# need a replica of this key there. FIL-1303 adds that replica and the policy
+# need a replica of this key there. FIL-1445 adds that replica and the policy
 # that stops anyone but a break-glass role from deleting or disabling the key.
 resource "aws_kms_key" "aurora" {
   description             = "Forge prod: the Aurora cluster"
