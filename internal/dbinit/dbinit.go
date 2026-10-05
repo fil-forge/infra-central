@@ -84,6 +84,14 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 		return fmt.Errorf("check database: %w", err)
 	}
 	if !dbExists {
+		// PostgreSQL 16 lets only a member that can SET ROLE to the owner
+		// create a database for it. The RDS master user is not a superuser,
+		// and creating the role gave it ADMIN OPTION but no membership.
+		// Re-granting an existing membership is a notice, not an error.
+		if _, err := conn.Exec(ctx, `GRANT `+quotedName+` TO CURRENT_USER`); err != nil {
+			return fmt.Errorf("grant role to admin: %w", err)
+		}
+
 		// CREATE DATABASE cannot run inside a transaction block, which is why
 		// this package uses a plain connection rather than a pool with an
 		// implicit transaction.
