@@ -65,8 +65,8 @@ then exported into the repository. Whether Grafana actually resolves that in
 `Edit`'s favour over the `View` the parent folder gives by inheritance has not
 been tested; if it does not, the export route is the only one.
 
-Each rule carries `team = "forge"`, and a route in the notification policy tree
-— which is maintained in the UI, not here — is what turns that label into a
+Each rule carries `team_name = "forge"`, and a route in the notification policy
+tree — which is maintained in the UI, not here — is what turns that label into a
 channel. Adding that one route is a manual step nobody has done yet, so **the
 rules below evaluate but reach no one** until it exists.
 
