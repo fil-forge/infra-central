@@ -19,10 +19,11 @@
 #     Expression nodes are skipped, which is why the folders and dashboards in
 #     this root apply without it.
 #
-# Routing is deliberately not managed here. Every rule carries team = "forge",
-# and the notification policy tree in the UI is what turns that label into a
-# channel. grafana_notification_policy manages the entire tree as one resource,
-# so adopting it would mean Terraform owning FilOne's routes as well as ours; and
+# Routing is deliberately not managed here. Every rule carries
+# team_name = "forge", and the notification policy tree in the UI is what turns
+# that label into a channel. grafana_notification_policy manages the entire tree
+# as one resource, so adopting it would mean Terraform owning FilOne's routes as
+# well as ours; and
 # grafana_contact_point keeps its Slack token or webhook as an ordinary
 # attribute, which would put a secret in this state for the same reason
 # docs/decisions/2026-09-grafana-telemetry.md keeps the Firehoses out of the
@@ -30,7 +31,7 @@
 # it needs the alertingSimplifiedRouting feature flag and it hides the routing
 # from whoever maintains the tree.
 #
-# So: add one route in the UI matching team = "forge" to whichever channel
+# So: add one route in the UI matching team_name = "forge" to whichever channel
 # FIL-1164 settles on, and every rule added here after that is routed already.
 
 variable "alert_stages" {
@@ -170,7 +171,7 @@ resource "grafana_rule_group" "central" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "central"
       severity  = "critical"
     }
@@ -264,7 +265,7 @@ resource "grafana_rule_group" "central" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "central"
       severity  = "warning"
     }
@@ -375,7 +376,7 @@ resource "grafana_rule_group" "central" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "central"
       severity  = "warning"
     }
@@ -480,7 +481,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }
@@ -592,7 +593,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "warning"
     }
@@ -685,7 +686,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }
@@ -778,7 +779,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }
@@ -865,7 +866,7 @@ resource "grafana_rule_group" "appliance" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "warning"
     }
@@ -977,7 +978,7 @@ resource "grafana_rule_group" "appliance_containers" {
     }
 
     labels = {
-      team      = "forge"
+      team_name = "forge"
       component = "appliance"
       severity  = "critical"
     }

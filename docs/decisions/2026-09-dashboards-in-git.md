@@ -158,20 +158,29 @@ through as exported.
 
 ## Alert rules carry a routing label; the routing tree stays in the UI
 
+*Amended 2026-10-05: the routing label was renamed from `team` to `team_name`,
+to match the key FilOne's rules and routes already use. Both are a misnomer —
+neither `forge` nor `filone` names a team, and the same people work on both —
+but one misspelling of the concept beats two, because a route matches a single
+key. Renaming the concept itself would mean changing FilOne's rules and routes
+as well. The text below is struck through where it names the old key.*
+
 `grafana_rule_group` sits in the same folder, in `alerts.tf`. Routing does not.
 
-Every rule carries `team = "forge"`, and a route in the notification policy tree
-turns that label into a channel. The tree is not managed here, for the same
-reason as everything else in the excluded list: `grafana_notification_policy` is
-the whole tree as a single resource, so owning it would mean owning FilOne's
-routes. `grafana_contact_point` is excluded for a second reason as well — a Slack
-integration keeps its token or webhook as an ordinary attribute, which would put
-a secret in this state exactly as a Firehose's access key would.
+Every rule carries ~~`team = "forge"`~~ [now `team_name = "forge"`], and a route
+in the notification policy tree turns that label into a channel. The tree is not
+managed here, for the same reason as everything else in the excluded list:
+`grafana_notification_policy` is the whole tree as a single resource, so owning
+it would mean owning FilOne's routes. `grafana_contact_point` is excluded for a
+second reason as well — a Slack integration keeps its token or webhook as an
+ordinary attribute, which would put a secret in this state exactly as a
+Firehose's access key would.
 
 `rule.notification_settings` would attach a contact point per rule and bypass the
 policy, but it needs the `alertingSimplifiedRouting` feature flag and it hides
-routing from whoever maintains the tree. One route matching `team = "forge"`,
-added by hand once, covers every rule this root will ever add.
+routing from whoever maintains the tree. One route matching
+~~`team = "forge"`~~ [now `team_name = "forge"`], added by hand once, covers
+every rule this root will ever add.
 
 Grafana alert rules have no template variables, so the stage and region
 templating that `$stage` and `$region` do in the dashboards is done in Terraform
