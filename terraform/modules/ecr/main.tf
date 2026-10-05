@@ -8,11 +8,10 @@
 #
 # The repository holding the provision Lambda image.
 #
-# One instance per account *and* region. ECR repositories are regional, Lambda
-# pulls an image only from ECR in the same region as the function, and a pull
-# from another account additionally needs a repository policy that nothing here
-# creates. Stages sharing an account and a region share this repository: they
-# pin different digests, so they do not interfere.
+# One instance per account *and* region. ECR repositories are regional, and
+# Lambda pulls an image only from ECR in the same region as the function. Stages
+# sharing an account and a region share this repository: they pin different
+# digests, so they do not interfere.
 #
 # The repository name is the same everywhere, which is what lets a stage derive
 # its image URL from its own account and region.
@@ -30,12 +29,44 @@ module "constants" {
   source = "../shared/constants"
 }
 
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
 resource "aws_ecr_repository" "provision" {
   name                 = module.constants.provision_repository_name
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
+  }
+}
+
+# The provision Lambda's pull. Lambda reads the image with this grant rather
+# than with the function's execution role, and checks for it when the function
+# is created or its image changes. Without it, Lambda tries to add the grant
+# itself, which works only when the caller may set repository policies; the CI
+# apply role may not, so CreateFunction fails with AccessDeniedException.
+resource "aws_ecr_repository_policy" "provision" {
+  repository = aws_ecr_repository.provision.name
+  policy     = data.aws_iam_policy_document.provision.json
+}
+
+data "aws_iam_policy_document" "provision" {
+  statement {
+    sid     = "LambdaECRImageRetrievalPolicy"
+    actions = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:lambda:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:function:fc-*-provision"]
+    }
   }
 }
 

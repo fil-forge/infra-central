@@ -551,7 +551,9 @@ The regional root, `bootstrap/<account>/<region>/`, holds two things:
 - `forge-central/provision`, the **ECR repository** for the provision Lambda
   image. Lambda pulls an image only from ECR in the same region as the
   function. Stages sharing an account and region share the repository and pin
-  different digests.
+  different digests. Its repository policy is what lets Lambda pull the image;
+  without it, creating a stage's provision Lambda fails with
+  `AccessDeniedException`.
 - The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
   the stage list in `terraform/modules/shared/constants`, and one CloudWatch
   metric stream, which covers one account in one region.
