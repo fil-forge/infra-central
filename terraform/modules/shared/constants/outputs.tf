@@ -19,6 +19,19 @@ output "provision_repository_name" {
   value       = "forge-central/provision"
 }
 
+output "public_hostname_labels" {
+  description = "First label of every public hostname a stage serves, by service: <label>.<hostname_suffix>. The platform module names OpenBao from it and the apps module names the other services, the ingress module certifies the same names, and the prod account bootstrap creates one Route53 zone per label, so a new public service cannot be missed by any of them."
+  value = {
+    sprue           = "upload"
+    hilt            = "auth"
+    swarf           = "revoke"
+    delegator       = "delegator"
+    signing-service = "signer"
+    plc             = "plc"
+    openbao         = "ssm"
+  }
+}
+
 # The stages each account holds. Read by both bootstrap roots in an account:
 # the account root grants the CI roles state access by stage prefix, and the
 # regional root creates one log Firehose per stage. A stage listed in one and
