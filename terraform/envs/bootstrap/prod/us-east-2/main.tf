@@ -58,7 +58,7 @@ resource "aws_kms_alias" "aurora" {
 # Multi-region because the flag is fixed when a key is created, and changing
 # the key later means migrating a running OpenBao to a new seal. After losing
 # us-east-2, the platform root applied in the DR region unseals the Global
-# Database secondary's copy of OpenBao with a replica of this key. FIL-1303 adds
+# Database secondary's copy of OpenBao with a replica of this key. FIL-1445 adds
 # that replica, the same alias on it in the DR region (an alias does not follow
 # a key into its replicas), and the same deletion guard as the Aurora key's.
 resource "aws_kms_key" "openbao_seal" {
