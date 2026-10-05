@@ -29,7 +29,20 @@ variable "listener_arn" {
 }
 
 variable "route53_zone_id" {
-  type = string
+  description = "The zone every public hostname shares. Null where each hostname has a zone of its own; see route53_zone_ids."
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_ids" {
+  description = "Zone each public hostname's record goes into, keyed by hostname, for a stage whose hostnames each have a zone of their own."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = (var.route53_zone_id == null) != (length(var.route53_zone_ids) == 0)
+    error_message = "Set exactly one of route53_zone_id, for a zone the hostnames share, and route53_zone_ids, for a zone per hostname."
+  }
 }
 
 variable "alb_dns_name" {

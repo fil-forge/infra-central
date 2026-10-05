@@ -20,7 +20,7 @@ output "provision_repository_name" {
 }
 
 output "public_hostname_labels" {
-  description = "First label of every public hostname a stage serves, by service: <label>.<hostname_suffix>. The apps module names its services from it, the ingress module certifies the same names, and the prod account bootstrap creates one Route53 zone per label, so a new public service cannot be missed by any of them."
+  description = "First label of every public hostname a stage serves, by service: <label>.<hostname_suffix>. The platform module names OpenBao from it and the apps module names the other services, the ingress module certifies the same names, and the prod account bootstrap creates one Route53 zone per label, so a new public service cannot be missed by any of them."
   value = {
     sprue           = "upload"
     hilt            = "auth"

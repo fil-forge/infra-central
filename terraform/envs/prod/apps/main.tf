@@ -69,10 +69,10 @@ module "apps" {
   subnet_ids        = local.platform.private_subnet_ids
   security_group_id = local.platform.service_security_group_id
 
-  listener_arn    = local.platform.listener_arn
-  route53_zone_id = local.platform.route53_zone_id
-  alb_dns_name    = local.platform.alb_dns_name
-  alb_zone_id     = local.platform.alb_zone_id
+  listener_arn     = local.platform.listener_arn
+  route53_zone_ids = local.platform.route53_zone_ids
+  alb_dns_name     = local.platform.alb_dns_name
+  alb_zone_id      = local.platform.alb_zone_id
 
   namespace_id   = local.platform.namespace_id
   namespace_name = local.platform.namespace_name
