@@ -8,7 +8,7 @@ and apps roots are destroyed and re-applied, or its data is wiped and the harden
 place, keeping the Aurora cluster, its subnets and the VPC. Either way, the bootstrap roots, the
 per-service Route53 zones, the KMS keys of the Aurora cluster and of OpenBao's seal, and the payer
 and transactor keys survive. The appliances enrolled for the test run are wiped and re-onboarded
-after the reset, so none of them needs a transit key from the first stack.
+after the reset.
 
 ## Topology and sizes
 
