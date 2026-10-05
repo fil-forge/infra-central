@@ -53,8 +53,9 @@ data "aws_iam_policy_document" "apply" {
   # the delegator's two tables but never touches a row in them, and an apply that
   # could read the allow list could read every tenant in the region.
   #
-  # No ecr:BatchGetImage either. The Lambda pulls its own image with its own
-  # execution role; the apply only pins a digest.
+  # No ecr:BatchGetImage either, and no ecr:SetRepositoryPolicy. Lambda pulls
+  # the provision image under the repository policy the bootstrap root sets;
+  # the apply only pins a digest.
 
   statement {
     sid       = "ManageStageRoles"

@@ -16,6 +16,7 @@ output "platform" {
     alb_dns_name              = module.platform.alb_dns_name
     alb_zone_id               = module.platform.alb_zone_id
     route53_zone_id           = module.platform.route53_zone_id
+    route53_zone_ids          = module.platform.route53_zone_ids
     bucket_names              = module.platform.bucket_names
     bucket_arns               = module.platform.bucket_arns
     allow_list_table_name     = module.platform.allow_list_table_name

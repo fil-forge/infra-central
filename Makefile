@@ -25,12 +25,18 @@ ECR_REPO    ?= forge-central/provision
 ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 
-# Where `make publish` records the digest. The file is committed: the stage is
-# planned by a workflow, which sees only what is in version control. Prod pins its
-# digest in a committed terraform.tfvars, copied from dev when a change is
-# promoted.
+# Where the digest is recorded. The file is committed: the stage is planned by a
+# workflow, which sees only what is in version control. Dev and staging read
+# image.auto.tfvars, which `make publish` writes. Prod pins its digest in
+# terraform.tfvars, so for prod `make publish` prints the line to paste there
+# instead. Prod is a separate account with its own ECR repository, so its digest
+# comes from publishing there, not from copying dev's.
 STAGE       ?= dev
+ifeq ($(STAGE),prod)
+TFVARS      := terraform/envs/$(STAGE)/platform/terraform.tfvars
+else
 TFVARS      := terraform/envs/$(STAGE)/platform/image.auto.tfvars
+endif
 
 METADATA    := build/metadata.json
 
@@ -58,13 +64,23 @@ publish: login builder
 	  if [[ -z "$$digest" || "$$digest" == "null" ]]; then \
 	    echo "no digest in $(METADATA); did the push succeed?" >&2; exit 1; \
 	  fi; \
-	  mkdir -p $(dir $(TFVARS)); \
-	  printf 'provision_image_digest = "%s"\n' "$$digest" > $(TFVARS); \
+	  line=$$(printf 'provision_image_digest = "%s"' "$$digest"); \
 	  echo; \
 	  echo "  image  $(IMAGE)@$$digest"; \
-	  echo "  wrote  $(TFVARS)"; \
-	  echo; \
-	  echo "Commit $(TFVARS) so the deploy workflow for $(STAGE) picks up the new image."
+	  if [[ "$(STAGE)" == prod ]]; then \
+	    echo; \
+	    echo "Replace the provision_image_digest line in $(TFVARS) with:"; \
+	    echo; \
+	    echo "  $$line"; \
+	    echo; \
+	    echo "Commit $(TFVARS) so the deploy workflow for $(STAGE) picks up the new image."; \
+	  else \
+	    mkdir -p $(dir $(TFVARS)); \
+	    echo "$$line" > $(TFVARS); \
+	    echo "  wrote  $(TFVARS)"; \
+	    echo; \
+	    echo "Commit $(TFVARS) so the deploy workflow for $(STAGE) picks up the new image."; \
+	  fi
 
 .PHONY: builder
 builder:

@@ -163,7 +163,7 @@ terraform/
     bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
-    prod/platform/     prod/apps/                  committed, not deployed yet
+    prod/platform/     prod/apps/                  platform applied on every push to main; apps not yet
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -216,6 +216,7 @@ terraform/modules/
   platform/                everything the platform root builds
     main.tf                the wiring, calling the eight below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
+    aurora/                prod's database, in place of database/
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root
@@ -251,9 +252,9 @@ fil-forge.com DNS
   ├── NS staging ─► Route53 zone staging.fil-forge.com  (non-prod account)
   │                 ├── upload.staging.fil-forge.com
   │                 └── ssm.staging.fil-forge.com
-  └────────────►  Route53 zone fil-forge.com       (production account)
-                    ├── upload.fil-forge.com
-                    └── ssm.fil-forge.com
+  ├── NS upload ──► Route53 zone upload.fil-forge.com  (production account)
+  ├── NS ssm ─────► Route53 zone ssm.fil-forge.com     (production account)
+  └── …            one zone per public service name
 ```
 
 Adding a personal stage beneath `dev.fil-forge.com` requires no change to the
@@ -284,8 +285,16 @@ Two per-stage settings follow, and this is where they diverge:
 The delegation itself lives in
 [fil-one/infrastructure](https://github.com/fil-one/infrastructure) and is added
 once per dev/staging domain root: an `aws_route53_zone` for the delegated name, plus a
-Cloudflare `NS` record carrying that zone's four name servers. In production, we will create one
-delegation for each service name.
+Cloudflare `NS` record carrying that zone's four name servers.
+
+Production has no domain root to delegate, because its service names sit
+directly beneath `fil-forge.com`. Each public service name is a Route53 zone of
+its own instead, created by `terraform/envs/bootstrap/prod/account` from the
+constants module's `public_hostname_labels`, so the zones survive a rebuild of
+the prod stage. fil-one/infrastructure carries one Cloudflare `NS` record per
+zone, copied from that root's `service_zone_name_servers` output. The prod
+platform root sets no `zone_name`, which tells the ingress module to write each
+record into its hostname's own zone.
 
 Those records are created with `proxied = false`, which matters: these hostnames
 serve `did:web` documents and terminate their own TLS at the ALB, so Cloudflare
@@ -294,7 +303,9 @@ must not sit in front of them.
 **Certificates belong here, not in the fil-one/infrastructure project.**
 
 The `ingress` module issues `*.<hostname_suffix>`, writes the DNS validation
-records into the delegated zone, and waits for validation. Two reasons it
+records into the delegated zone, and waits for validation. In production a
+wildcard would validate through a record in the Cloudflare apex, so the
+certificate names every public hostname and validates each one in its own zone. Two reasons it
 cannot be one central certificate:
 
 - An ALB needs its certificate in the ALB's own region. A `us-east-1`
@@ -316,7 +327,7 @@ PendingDeletion stops serving decryption at once, so tying the parameters to it
 would leave every secret unreadable the moment the stage came down and would
 fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
 nothing else, and what it protects is meant to die with the stage: OpenBao's
-storage sits in the same RDS instance and goes at the same time.
+storage sits in the stage's database and goes at the same time.
 
 So **a destroyed and recreated stage silently comes back with its previous
 identities and wallets.** An appliance's stored delegation is one of them: a
@@ -412,12 +423,15 @@ the failure is. The groups are discovered from CloudWatch, so a service added to
 either root is covered. It runs on the apply role, because reading log events
 needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
 
-A failed run on `main` posts to `#filone-alerts` in Slack with the commit
-subject, its author and a link to the run. When the commit is an image bump, a
-second line names the service commit that produced the image and who wrote it,
-looked up from the source commit link Bump deployed image puts in the commit
-body. A lookup that fails drops the line and still sends the alert. Any failed
-job triggers it, from `make check` through the smoke test. Pull request failures
+A failed run on `main` posts to `#filone-alerts` in Slack with the stage that
+failed, the failed jobs, the commit subject, its author and a link to the run.
+The stage comes from the job name: `apply-<stage>-<root>` and `smoke-<stage>`
+name a stage, `apply-grafana` reports as `grafana`, and `check` as itself.
+When the commit is an image bump, one more line names the service commit that
+produced the image and who wrote it, looked up from the source commit link Bump
+deployed image puts in the commit body. A lookup that fails drops the line and
+still sends the alert. Any failed job triggers it, from `make check` through the
+smoke test. Pull request failures
 are not announced, because the author already sees the red check on the pull
 request. The job reads one repository secret, `SLACK_BOT_TOKEN`, holding the bot
 token of a Slack app with the `chat:write` scope; without the secret the
@@ -430,9 +444,8 @@ pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
 
-Prod is not deployed yet: `terraform/envs/prod/` is committed and neither of its
-bootstrap roots has ever been applied. No workflow names it, because its
-`terraform.tfvars` still carries `REPLACE_ME` contract addresses.
+The workflow applies the prod platform root on every merge to `main`. The prod
+apps root has no CI job yet.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
@@ -452,12 +465,13 @@ kinds, and the split is what keeps a second region cheap:
   global and IAM is not regional, so a second region must not create these
   again.
 - `bootstrap/<account>/<region>/` holds the **ECR repository** for the provision
-  Lambda image and the **telemetry egress** to Grafana Cloud. One per account
-  _and_ region, described in [Setting up an AWS region](#setting-up-an-aws-region).
+  Lambda image and the **telemetry egress** to Grafana Cloud. In prod it also
+  holds the **KMS keys** of the Aurora cluster and of OpenBao's seal, which must
+  outlive the platform root. One per account _and_ region, described in
+  [Setting up an AWS region](#setting-up-an-aws-region).
 
-Both accounts this project uses already have an account root. Non-prod's has
-been applied; prod's is committed under `bootstrap/prod/` and has never been
-applied, so prod is the account that will walk through this section next.
+Both accounts this project uses already have an account root, and both have
+been applied.
 
 #### Copying the root for a new account
 
@@ -540,7 +554,9 @@ The regional root, `bootstrap/<account>/<region>/`, holds two things:
 - `forge-central/provision`, the **ECR repository** for the provision Lambda
   image. Lambda pulls an image only from ECR in the same region as the
   function. Stages sharing an account and region share the repository and pin
-  different digests.
+  different digests. Its repository policy is what lets Lambda pull the image;
+  without it, creating a stage's provision Lambda fails with
+  `AccessDeniedException`.
 - The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
   the stage list in `terraform/modules/shared/constants`, and one CloudWatch
   metric stream, which covers one account in one region.
@@ -680,13 +696,15 @@ before it can initialise it, inside a synchronous Lambda call that Lambda caps a
 15 minutes. If it times out there, re-run the job. The seed phase regenerates
 nothing that already exists, which is what protects funded wallets.
 
-Prod will differ from dev inside `main.tf` rather than by being a different
-shape: multi-AZ database, deletion protection on, a larger OpenBao connection
-budget, and a digest pinned in `terraform.tfvars`, copied from dev when a change
-is promoted rather than written by whatever was built last. It will also want a
-gated apply rather than dev's automatic one; see [Planned
-work](#planned-work). Staging's choices on the same points are recorded in
-[the staging environment decision](docs/decisions/2026-09-staging-environment.md).
+Prod differs from dev inside `main.tf` rather than by being a different
+shape: an Aurora cluster with a writer and a reader in its own subnets,
+deletion protection on, KMS keys for the cluster and for OpenBao's seal from
+the regional bootstrap, a larger OpenBao connection budget, a zone per public
+hostname, and a provision digest pinned in `terraform.tfvars`. It lives in its
+own account and deploys on every merge, like staging. Its choices are recorded
+in [the first prod stack decision](docs/decisions/2026-10-prod-first-stack.md),
+and staging's in [the staging environment
+decision](docs/decisions/2026-09-staging-environment.md).
 
 ### A personal sandbox stage
 
@@ -803,9 +821,18 @@ machine is applied nowhere.
 Dev and staging share an ECR repository. Promote the Lambda to staging by
 copying dev's digest into
 `terraform/envs/staging/platform/image.auto.tfvars`. The image is already in
-ECR, so the promotion needs no build or push. A production promotion will
-likewise copy the digest into
-`terraform/envs/prod/platform/terraform.tfvars` when the change is ready.
+ECR, so the promotion needs no build or push.
+
+Prod is a separate account with its own ECR repository, so a dev digest means
+nothing there. Promote the Lambda to prod by publishing into the prod account:
+
+```bash
+make publish STAGE=prod
+```
+
+For prod the command writes nothing. It prints the `provision_image_digest`
+line to paste into `terraform/envs/prod/platform/terraform.tfvars`, where prod
+pins its digest. Commit that file and merge it.
 
 ### Deploying a service
 
@@ -1015,7 +1042,9 @@ head's decision.
 
 See the following Linear tickets:
 
-- [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the Forge Central prod stage with a gated apply, and decide whether RDS gets dedicated subnets
+- [FIL-1147](https://linear.app/filecoin-foundation/issue/FIL-1147) Stand up the first, disposable Forge Central prod stack
+- [FIL-1394](https://linear.app/filecoin-foundation/issue/FIL-1394) Hold prod applies for a human approval
+- [FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396) Reset production after the test run
 - [FIL-1156](https://linear.app/filecoin-foundation/issue/FIL-1156) Narrow the apply role's IAM policy
 - [FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) Tooling for removing an appliance node from the network
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node

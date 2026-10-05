@@ -1,13 +1,13 @@
 # Prod platform.
 #
-# Differs from dev in three ways that matter: the database is multi-AZ and
-# protected from deletion, OpenBao gets a larger connection budget, and the
-# provision image digest is pinned in terraform.tfvars, copied from dev when a
-# change is promoted rather than written by whatever was built last.
+# Differs from dev in the ways that matter: the database is an Aurora cluster
+# with a writer and a reader, protected from deletion, OpenBao gets a larger
+# connection budget, every public hostname is a Route53 zone of its own, and the
+# provision image digest is pinned in terraform.tfvars, published to this
+# account's repository by hand.
 #
-# Not deployed, and no workflow applies it. dev is applied on every push to main;
-# prod will want a gated job, and its tfvars still carry REPLACE_ME contract
-# addresses, so a plan here fails by design.
+# .github/workflows/check-and-deploy.yml applies this root on every push to main,
+# the same as staging.
 
 provider "aws" {
   region = var.region
@@ -31,11 +31,6 @@ module "constants" {
 variable "region" {
   type    = string
   default = "us-east-2"
-}
-
-variable "zone_name" {
-  description = "Route53 hosted zone this stage writes records into. fil.one is served by Cloudflare, so this must be the delegated subdomain that actually exists in Route53."
-  type        = string
 }
 
 variable "hostname_suffix" {
@@ -79,11 +74,26 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+# Created by the regional bootstrap, which outlives this root.
+data "aws_kms_alias" "aurora" {
+  name = module.constants.prod_aurora_key_alias
+}
+
+data "aws_kms_alias" "openbao_seal" {
+  name = module.constants.prod_openbao_seal_key_alias
+}
+
 module "platform" {
   source = "../../../modules/platform"
 
-  stage                 = "prod"
-  zone_name             = var.zone_name
+  stage = "prod"
+
+  # fil-forge.com is served by Cloudflare and the service names sit directly
+  # beneath it, so each one is delegated to a Route53 zone of its own, created
+  # by terraform/envs/bootstrap/prod/account. A null zone_name selects that
+  # layout: records and certificate validation go into each hostname's zone.
+  zone_name = null
+
   hostname_suffix       = var.hostname_suffix
   ingot_hostname_suffix = var.ingot_hostname_suffix
 
@@ -108,18 +118,28 @@ module "platform" {
   az_count           = 3
   nat_gateway_per_az = true
 
-  db_instance_class        = "db.t4g.small"
-  db_allocated_storage     = 50
-  db_multi_az              = true
-  db_backup_retention_days = 30
+  # An Aurora cluster, sized for the launch rate of 12-22 PUT/s, about 150
+  # commits/s for as long as uploads run. A burstable class would spend its CPU
+  # credits within hours. The reader takes the writer's load after a failover,
+  # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
+  # arithmetic and the costs.
+  db_engine                = "aurora"
+  db_instance_class        = "db.r8g.large"
+  db_instance_count        = 2
+  db_backup_retention_days = 35
+  db_kms_key_arn           = data.aws_kms_alias.aurora.target_key_arn
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
   protect_stateful_resources = true
 
-  # A db.t4g.small allows roughly 225 connections, so 24 for OpenBao still
-  # leaves ample room for the application services.
+  # A db.r8g.large allows at most about 1,800 connections, and the stage needs
+  # about 80 of them with OpenBao's 24 included.
   openbao_max_parallel = 24
+
+  # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
+  # outlives this root, so the key it seals with has to as well.
+  openbao_kms_key_arn = data.aws_kms_alias.openbao_seal.target_key_arn
 
   container_insights = true
 

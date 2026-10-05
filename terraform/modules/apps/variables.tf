@@ -29,7 +29,20 @@ variable "listener_arn" {
 }
 
 variable "route53_zone_id" {
-  type = string
+  description = "The zone every public hostname shares. Null where each hostname has a zone of its own; see route53_zone_ids."
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_ids" {
+  description = "Zone each public hostname's record goes into, keyed by hostname, for a stage whose hostnames each have a zone of their own."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = (var.route53_zone_id == null) != (length(var.route53_zone_ids) == 0)
+    error_message = "Set exactly one of route53_zone_id, for a zone the hostnames share, and route53_zone_ids, for a zone per hostname."
+  }
 }
 
 variable "alb_dns_name" {
@@ -141,6 +154,12 @@ variable "sizes" {
     signing_service = { cpu = 256, memory = 512 }
     plc             = { cpu = 256, memory = 512 }
   }
+}
+
+variable "sprue_postgres_max_conns" {
+  description = "Size of sprue's Postgres connection pool. Null keeps sprue's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
+  type        = number
+  default     = null
 }
 
 variable "log_forwarding" {

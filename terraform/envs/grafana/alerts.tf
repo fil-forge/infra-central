@@ -34,7 +34,7 @@
 # FIL-1164 settles on, and every rule added here after that is routed already.
 
 variable "alert_stages" {
-  description = "Stages the rules alert on, as they appear in the appliance label's <stage>-<region> prefix and in Central's fc-<stage> cluster and target group names. Every ticket says production only; terraform.tfvars holds staging until production exists (FIL-1147, FIL-808), because that is what the hand-built rules these replace were watching."
+  description = "Stages the rules alert on, as they appear in the appliance label's <stage>-<region> prefix and in Central's fc-<stage> cluster and target group names. Every ticket says production only; terraform.tfvars adds staging, which is what the hand-built rules these replace were watching."
   type        = list(string)
   default     = ["prod"]
 }
