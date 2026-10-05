@@ -30,7 +30,7 @@ env:
 jobs:
   bump:
     name: Bump ${{ github.event.client_payload.service || inputs.service }} in dev
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -41,7 +41,8 @@ jobs:
         id: bot
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.FORGE_BOT_APP_ID }}
+          # GitHub accepts the numeric App ID wherever it asks for the client ID.
+          client-id: ${{ vars.FORGE_BOT_APP_ID }}
           private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
       # client_payload is untrusted input: every field reaches the shell through

@@ -38,7 +38,7 @@ permissions:
 jobs:
   auto-merge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       # For fetch-metadata, which reads the pull request with the default token.
@@ -91,7 +91,8 @@ jobs:
         id: bot
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.FORGE_BOT_APP_ID }}
+          # GitHub accepts the numeric App ID wherever it asks for the client ID.
+          client-id: ${{ vars.FORGE_BOT_APP_ID }}
           private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
       # Arming a merge is not performing one: the required checks still gate it,
