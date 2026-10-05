@@ -60,7 +60,7 @@ jobs:
   # everything in `make check` runs offline against no deployed stage, which is
   # what lets it gate the jobs that do have credentials.
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -130,7 +130,7 @@ jobs:
     name: plan-${{ matrix.name }}
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       # Required to request the OIDC token the role is assumed with. Without it
@@ -204,7 +204,7 @@ jobs:
   apply-dev-platform:
     if: github.event_name == 'push'
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -242,7 +242,7 @@ jobs:
   apply-dev-apps:
     if: github.event_name == 'push'
     needs: apply-dev-platform
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -308,7 +308,7 @@ jobs:
   apply-staging-platform:
     if: github.event_name == 'push'
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -343,7 +343,7 @@ jobs:
   apply-staging-apps:
     if: github.event_name == 'push'
     needs: apply-staging-platform
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -385,7 +385,7 @@ jobs:
   apply-prod-platform:
     if: github.event_name == 'push'
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -444,7 +444,7 @@ jobs:
   apply-grafana:
     if: github.event_name == 'push' && vars.GRAFANA_APPLY_ENABLED == 'true'
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -498,7 +498,7 @@ jobs:
   smoke-dev:
     if: github.event_name == 'push'
     needs: apply-dev-apps
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -525,7 +525,7 @@ jobs:
   smoke-staging:
     if: github.event_name == 'push'
     needs: apply-staging-apps
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -562,7 +562,7 @@ jobs:
   diagnose:
     if: failure() && github.event_name == 'push'
     needs: [apply-dev-apps, smoke-dev]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -584,7 +584,7 @@ jobs:
   diagnose-staging:
     if: failure() && github.event_name == 'push'
     needs: [apply-staging-apps, smoke-staging]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -620,7 +620,7 @@ jobs:
       - smoke-staging
       - apply-prod-platform
       - apply-grafana
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       # Only for the commit subject below. github.event.head_commit.message
       # would save the checkout, but it is the whole message, newlines included.

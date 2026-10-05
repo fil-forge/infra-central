@@ -38,7 +38,7 @@ permissions:
 jobs:
   auto-merge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       # For fetch-metadata, which reads the pull request with the default token.

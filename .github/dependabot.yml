@@ -11,7 +11,7 @@
 # Four versioned things are deliberately absent, because no ecosystem reaches
 # them: the OpenBao image digest defaulted in modules/platform/openbao, the
 # per-service image digests in terraform/envs/dev/apps/terraform.tfvars,
-# TOFU_VERSION in the two workflows, and the ubuntu-24.04 runner image every job
+# TOFU_VERSION in the two workflows, and the ubuntu-26.04 runner image every job
 # names. The service digests have their own mechanism in bump-deployed-image.yml.
 # The other three are bumped by hand.
 version: 2
