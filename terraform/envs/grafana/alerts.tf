@@ -88,6 +88,11 @@ locals {
   # appliance matcher narrows it to the alerting stages.
   piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
+  # Ingot's OTLP metrics. Alloy names them appliance-<stage>-<region>-ingot
+  # from Ingot's service.name and stamps appliance, region and node on them,
+  # the same as Piri's (infra-nodes docs/observability.md).
+  ingot_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-ingot\""
+
   # Postgres's container log stream, same scheme. Anchored, so this is the
   # postgres service and not postgres-init.
   postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
@@ -931,6 +936,169 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0.05] }
+        }]
+      })
+    }
+  }
+
+  # Ingot's local blob storage stays over its own budget. The threshold is the
+  # budget itself, local_blob_max_bytes, which each node sets; this rule chooses
+  # no number. Ingot's sweeper evicts cached bodies every 30s to stay under it,
+  # so usage that stays over means what is left is bodies it may not evict:
+  # uploads in flight, or uploads that failed (fil-forge/ingot's README, "Local
+  # disk").
+  #
+  # A node with no budget publishes 0, which `> 0` drops, so it produces no
+  # series and no_data_state = OK keeps it quiet. for = 15m is chosen: a burst
+  # of uploads can hold the spool over budget for minutes without anything
+  # being wrong. An instant query, so no reduce stage.
+  rule {
+    name           = "Ingot local disk over budget"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
+      description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "17"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node) (ingot_local_blobs_usage_bytes{${local.ingot_matcher}})
+          /
+          max by (appliance, region, node) (ingot_local_blobs_budget_bytes{${local.ingot_matcher}} > 0)
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1] }
+        }]
+      })
+    }
+  }
+
+  # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
+  # upload has stalled -- intents still spooled or uploading an hour after their
+  # last state change -- and nothing reclaims them yet, so the figure only falls
+  # when someone removes them by hand. Firing on any stalled byte would
+  # therefore fire for good after one failure. Growth is the signal instead:
+  # more stalled bytes now than an hour ago means uploads are still failing.
+  #
+  # The hour is Ingot's own cutoff, not a choice here; the window matches it so
+  # one failure shows as growth for about an hour and then resolves. for = 0m
+  # because the gauge has already waited that hour. no_data_state is OK: an
+  # Ingot without the metric, or without metrics at all, is the container
+  # rule's business, not this one's.
+  rule {
+    name           = "Ingot uploads are stalling"
+    condition      = "B"
+    for            = "0m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
+      description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "18"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 7200
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node) (
+            delta(ingot_local_blobs_stalled_bytes{${local.ingot_matcher}}[1h])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }
