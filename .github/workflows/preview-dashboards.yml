@@ -1,0 +1,194 @@
+name: Preview dashboards
+
+# A dashboard change is reviewed as a JSON diff, which says very little about
+# whether the panel reads correctly. This deploys the changed dashboard under its
+# own uid into the Dashboard PR previews folder, so a reviewer can open the thing
+# itself against live data, and deletes it when the pull request closes.
+#
+# Why this is not Terraform, unlike everything else in terraform/envs/grafana:
+# per-pull-request state would need somewhere to live, which means AWS
+# credentials on a pull_request trigger and another state-key prefix. That is the
+# boundary apply-grafana's design keeps closed. A preview's correct end state is
+# also "gone", which a DELETE expresses exactly and a Terraform resource does not.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - terraform/envs/grafana/dashboards/**
+      - .github/workflows/preview-dashboards.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GRAFANA_URL: https://filecoinfoundation.grafana.net
+  PREVIEW_FOLDER_UID: forge-previews
+  DASHBOARD_DIR: terraform/envs/grafana/dashboards
+
+jobs:
+  # GitHub withholds secrets from a pull_request run that originated in a fork,
+  # so a fork's preview would fail at the first call rather than be skipped. The
+  # same guard the plan job in check-and-deploy.yml uses makes it a skip instead.
+  deploy:
+    if: >-
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The diff below is against base.sha, which is an ancestor of the
+          # pull_request merge ref but is not fetched at the default depth.
+          # origin/<base ref> would be the obvious thing to diff against and
+          # actions/checkout leaves no local ref for it.
+          fetch-depth: 0
+
+      - name: which dashboards changed
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          files=$(git diff --name-only "$BASE_SHA"...HEAD -- "$DASHBOARD_DIR" \
+            | grep '\.json$' || true)
+          if [ -z "$files" ]; then
+            echo "no dashboard changed; nothing to preview"
+          fi
+          {
+            echo 'files<<EOF'
+            printf '%s\n' "$files"
+            echo 'EOF'
+          } >>"$GITHUB_OUTPUT"
+
+      # The token is on this step alone, so the checkout above never carries it.
+      # It belongs to forge-previews, which holds Admin on the previews folder and
+      # nothing else: the worst a pull request can do with it is trash a preview.
+      - name: deploy previews
+        if: steps.changed.outputs.files != ''
+        id: deploy
+        env:
+          TOKEN: ${{ secrets.GRAFANA_PREVIEWS_TOKEN }}
+          FILES: ${{ steps.changed.outputs.files }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Until GRAFANA_PREVIEWS_TOKEN exists this is a skip, not a 401. The
+          # workflow lands before the token does, and a red check on every
+          # dashboard pull request in between would teach people to ignore it.
+          if [ -z "${TOKEN:-}" ]; then
+            echo '::notice::GRAFANA_PREVIEWS_TOKEN is not set; skipping previews'
+            exit 0
+          fi
+          links=''
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            # The script fails rather than truncating if the uid would exceed the
+            # 40 characters Grafana allows, because a truncated uid collides
+            # across pull requests.
+            scripts/preview-dashboard.sh "$file" "pr-${PR}" "PR #${PR}" >preview.json
+            uid=$(jq -r '.metadata.name' preview.json)
+
+            # v2 documents are written through the legacy endpoint: the whole
+            # Kubernetes-style document goes in `dashboard`, minus any top-level
+            # id, which is Grafana's own numeric key and not ours to send.
+            jq -n \
+              --slurpfile d preview.json \
+              --arg folder "$PREVIEW_FOLDER_UID" \
+              --arg msg "Preview of PR #${PR} at ${SHA}" \
+              '{dashboard: ($d[0] | del(.id)), folderUid: $folder,
+                overwrite: true, message: $msg}' >payload.json
+
+            curl -sS --fail-with-body -X POST "${GRAFANA_URL}/api/dashboards/db" \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data @payload.json >/dev/null
+
+            # Both links, because comparing against what is deployed is the
+            # point. The title and uid come from the source file rather than the
+            # preview: the preview's title carries the pull request number, and
+            # its uid is the one that does not exist outside this pull request.
+            base_uid=$(jq -r '.metadata.name' "$file")
+            base_title=$(jq -r '.spec.title' "$file")
+            links="${links}- **${base_title}** — [preview](${GRAFANA_URL}/d/${uid})"
+            links="${links} · [current](${GRAFANA_URL}/d/${base_uid})"$'\n'
+            echo "deployed ${uid}"
+          done <<<"$FILES"
+          {
+            echo 'links<<EOF'
+            printf '%s' "$links"
+            echo 'EOF'
+          } >>"$GITHUB_OUTPUT"
+          rm -f preview.json payload.json
+
+      # One comment per pull request, edited in place. A new comment on every
+      # push would bury the review it is meant to help.
+      - name: comment
+        if: steps.deploy.outputs.links != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          LINKS: ${{ steps.deploy.outputs.links }}
+        run: |
+          set -euo pipefail
+          marker='<!-- dashboard-previews -->'
+          # printf rather than a quoted multi-line string: the indentation this
+          # step is written at would otherwise land in the comment body, and ten
+          # leading spaces is a Markdown code block.
+          body=$(printf '%s\n%s\n\n%s\n' \
+            "$marker" \
+            '**Previews for this pull request** — in `Dashboard PR previews`, deleted when it closes. Read-only, and tagged `preview`.' \
+            "$LINKS")
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq "map(select(.body | startswith(\"${marker}\"))) | .[0].id // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+              -f body="$body" >/dev/null
+          fi
+
+  # Closing or merging is the only thing that expires a preview, which is what
+  # makes a sweeper unnecessary (docs/decisions/2026-09-dashboards-in-git.md).
+  # Every dashboard in the directory is tried rather than only the changed ones:
+  # the set of changed files can differ from what was deployed earlier in the
+  # pull request's life, and deleting a uid that is not there is a no-op.
+  delete:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: delete previews
+        env:
+          TOKEN: ${{ secrets.GRAFANA_PREVIEWS_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Until GRAFANA_PREVIEWS_TOKEN exists this is a skip, not a 401. The
+          # workflow lands before the token does, and a red check on every
+          # dashboard pull request in between would teach people to ignore it.
+          if [ -z "${TOKEN:-}" ]; then
+            echo '::notice::GRAFANA_PREVIEWS_TOKEN is not set; skipping previews'
+            exit 0
+          fi
+          for file in "$DASHBOARD_DIR"/*.json; do
+            uid="$(jq -r '.metadata.name' "$file")-pr-${PR}"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -X DELETE "${GRAFANA_URL}/api/dashboards/uid/${uid}" \
+              -H "Authorization: Bearer ${TOKEN}")
+            case "$code" in
+              200|404) echo "${uid}: ${code}" ;;
+              *) echo "${uid}: unexpected ${code}" >&2; exit 1 ;;
+            esac
+          done
