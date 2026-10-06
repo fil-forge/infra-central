@@ -1069,7 +1069,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          sum by (appliance, region, node) (
             delta(ingot_local_blobs_stalled_bytes{${local.ingot_matcher}}[1h])
           )
         PROMQL
