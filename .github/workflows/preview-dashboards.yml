@@ -111,8 +111,14 @@ jobs:
               -H 'Content-Type: application/json' \
               --data @payload.json >/dev/null
 
-            title=$(jq -r '.spec.title' preview.json)
-            links="${links}- [${title}](${GRAFANA_URL}/d/${uid})"$'\n'
+            # Both links, because comparing against what is deployed is the
+            # point. The title and uid come from the source file rather than the
+            # preview: the preview's title carries the pull request number, and
+            # its uid is the one that does not exist outside this pull request.
+            base_uid=$(jq -r '.metadata.name' "$file")
+            base_title=$(jq -r '.spec.title' "$file")
+            links="${links}- **${base_title}** — [preview](${GRAFANA_URL}/d/${uid})"
+            links="${links} · [current](${GRAFANA_URL}/d/${base_uid})"$'\n'
             echo "deployed ${uid}"
           done <<<"$FILES"
           {
