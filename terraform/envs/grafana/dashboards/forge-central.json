@@ -669,8 +669,8 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "aws_rds_database_connections_average{dimension_DBInstanceIdentifier=\"fc-$stage\"}",
-                        "legendFormat": "connections",
+                        "expr": "aws_rds_database_connections_average{dimension_DBInstanceIdentifier=~\"fc-$stage(-[0-9]+)?\"}",
+                        "legendFormat": "{{dimension_DBInstanceIdentifier}}",
                         "range": true
                       }
                     },

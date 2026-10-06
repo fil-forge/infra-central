@@ -3,8 +3,9 @@ variable "stage" {
 }
 
 variable "zone_name" {
-  description = "Existing Route53 hosted zone, e.g. fil.one."
+  description = "Existing Route53 hosted zone every public record goes into, e.g. staging.fil-forge.com. Null means each public hostname is a delegated zone of its own, which is how prod is laid out; see the ingress module."
   type        = string
+  default     = null
 }
 
 variable "hostname_suffix" {
@@ -46,19 +47,61 @@ variable "chain" {
   })
 }
 
+variable "db_engine" {
+  description = <<-EOT
+    "rds" for a single RDS PostgreSQL instance in the private subnets, "aurora"
+    for an Aurora PostgreSQL cluster in subnets of its own. Fixed when the
+    stage is created: switching replaces the database, and with it OpenBao's
+    storage.
+  EOT
+  type        = string
+  default     = "rds"
+
+  validation {
+    condition     = contains(["rds", "aurora"], var.db_engine)
+    error_message = "db_engine must be \"rds\" or \"aurora\"."
+  }
+}
+
+variable "db_kms_key_arn" {
+  description = "Customer-managed key for the Aurora cluster. Required with db_engine = \"aurora\"; the RDS instance uses the account's default RDS key."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.db_engine != "aurora" || var.db_kms_key_arn != null
+    error_message = "db_engine = \"aurora\" needs db_kms_key_arn."
+  }
+}
+
+variable "openbao_kms_key_arn" {
+  description = "Customer-managed key OpenBao seals with, for a stage whose key must outlive this module. When null, the module creates one that is destroyed with the stage."
+  type        = string
+  default     = null
+}
+
 variable "db_instance_class" {
-  type    = string
-  default = "db.t4g.micro"
+  description = "The RDS instance's class, or the class of every Aurora instance. The aurora module rejects burstable classes."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_instance_count" {
+  description = "Aurora only: the writer plus its readers."
+  type        = number
+  default     = 2
 }
 
 variable "db_allocated_storage" {
-  type    = number
-  default = 20
+  description = "RDS only. Aurora storage grows on its own."
+  type        = number
+  default     = 20
 }
 
 variable "db_multi_az" {
-  type    = bool
-  default = true
+  description = "RDS only. An Aurora cluster's high availability comes from db_instance_count."
+  type        = bool
+  default     = true
 }
 
 variable "db_backup_retention_days" {
@@ -67,7 +110,7 @@ variable "db_backup_retention_days" {
 }
 
 variable "protect_stateful_resources" {
-  description = "Deletion protection on RDS, the ALB and the delegator's DynamoDB tables, point-in-time recovery on those tables, and a final snapshot on destroy. Losing the database means losing OpenBao's storage and with it every appliance's ability to unseal."
+  description = "Deletion protection on the database, the ALB and the delegator's DynamoDB tables, point-in-time recovery on those tables, and a final snapshot on destroy. Losing the database means losing OpenBao's storage and with it every appliance's ability to unseal."
   type        = bool
   default     = true
 }
@@ -103,7 +146,7 @@ variable "openbao_image" {
 }
 
 variable "openbao_max_parallel" {
-  description = "Postgres connections OpenBao may open. Budget against the instance's max_connections alongside the application services."
+  description = "Postgres connections OpenBao may open. Budget against the RDS instance's or the Aurora writer's max_connections alongside the application services."
   type        = number
   default     = 16
 }

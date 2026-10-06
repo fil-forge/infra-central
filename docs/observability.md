@@ -44,12 +44,48 @@ folder. Both are parameterised by stage, and the second by region as well:
 | [Forge Central](https://filecoinfoundation.grafana.net/d/forge-central)     | Central services |
 | [Forge Regions](https://filecoinfoundation.grafana.net/d/forge-regions)     | Appliances       |
 
+The root was first applied by hand in September 2026; `apply-grafana` in
+`check-and-deploy.yml` has done it since.
+
 They are committed, not edited in place: the JSON is in
 `terraform/envs/grafana/dashboards/` and applied from that root. A panel changes
 by pull request, and an export taken from the UI goes through
 `scripts/normalise-dashboard.sh` first. Why it is arranged that way, and what
 else in the stack the root is deliberately not allowed to touch, is in
 [decisions/2026-09-dashboards-in-git.md](decisions/2026-09-dashboards-in-git.md).
+
+Alert rules live in the same root, in a separate folder — `Alerts (managed in
+git)` — which grants Editor and Viewer `View` only. That is what stops a rule
+being *created* there by hand: Grafana's folder roles are coarse, and the `Edit`
+the dashboards need would carry rule creation with it, so the two cannot share a
+folder. `folders.tf` sets out the three ownership models and what each buys.
+
+The dashboards folder grants `Edit`, so a panel can be changed in the UI and
+then exported into the repository. Whether Grafana actually resolves that in
+`Edit`'s favour over the `View` the parent folder gives by inheritance has not
+been tested; if it does not, the export route is the only one.
+
+Each rule carries `team_name = "forge"`, and a route in the notification policy
+tree — which is maintained in the UI, not here — is what turns that label into a
+channel. Adding that one route is a manual step nobody has done yet, so **the
+rules below evaluate but reach no one** until it exists.
+
+The rules watch staging and prod, the stages listed in `alert_stages` in
+`terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
+`fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
+appliance label.
+
+| Rule                                | Group                     | Source            | Ticket   |
+| ----------------------------------- | ------------------------- | ----------------- | -------- |
+| Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
+| Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
+| Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
+| Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
+| Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
+| Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
+| Postgres is refusing connections    | Forge Regions             | Postgres's logs, Loki | FIL-1163 |
+| Appliance 5xx rate too high         | Forge Regions             | Caddy             | FIL-1163 |
+| Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
 
 ## Logs
 
@@ -121,10 +157,12 @@ CPU across a stage's services:
 aws_ecs_cpuutilization_average{dimension_ClusterName="fc-dev"}
 ```
 
-Postgres connections on the stage's instance:
+Postgres connections on each of the stage's database instances. Dev and staging run one RDS
+instance named `fc-<stage>`; prod runs an Aurora cluster whose instances are `fc-prod-1` and
+`fc-prod-2`:
 
 ```promql
-aws_rds_database_connections_average{dimension_DBInstanceIdentifier="fc-dev"}
+aws_rds_database_connections_average{dimension_DBInstanceIdentifier=~"fc-dev(-[0-9]+)?"}
 ```
 
 Server errors returned by the stage's services, per target group:
@@ -171,7 +209,7 @@ list, `aws_ecs_.*` for example.
 | -------------------- | --------------------------------------------------------------------- |
 | `AWS/ECS`            | `dimension_ClusterName="fc-<stage>"`, `dimension_ServiceName`         |
 | `AWS/ApplicationELB` | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
-| `AWS/RDS`            | `dimension_DBInstanceIdentifier="fc-<stage>"`                         |
+| `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
 | `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |

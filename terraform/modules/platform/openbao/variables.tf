@@ -42,8 +42,9 @@ variable "max_parallel" {
     fine for a dedicated database and rude to one shared with four application
     services.
 
-    Budget against the instance's real max_connections (roughly
-    DBInstanceClassMemory/9531392, about 112 on a db.t4g.micro) alongside
+    Budget against the RDS instance's or the Aurora writer's real
+    max_connections (roughly DBInstanceClassMemory/9531392, about 112 on a
+    db.t4g.micro and at most about 1,800 on a db.r8g.large) alongside
     sprue, hilt and swarf, which each default to max_conns = 10. RDS Proxy is
     the escape hatch if the budget gets tight.
   EOT

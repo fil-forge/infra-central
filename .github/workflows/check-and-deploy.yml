@@ -36,6 +36,11 @@ env:
   # what the plan jobs run. See modules/github-actions-iam.
   PLAN_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-plan
   APPLY_ROLE: arn:aws:iam::654654381893:role/forge-central-ci-apply
+  # The same two roles in the prod account, created by
+  # terraform/envs/bootstrap/prod/account. Each account's roles reach only that
+  # account's state bucket, so a prod root cannot run on the non-prod pair.
+  PROD_PLAN_ROLE: arn:aws:iam::811430801166:role/forge-central-ci-plan
+  PROD_APPLY_ROLE: arn:aws:iam::811430801166:role/forge-central-ci-apply
   # Where `tofu init` keeps downloaded providers, saved between runs by
   # actions/cache in every job that runs it. The registry serves providers
   # straight from GitHub Releases, and GitHub throttles unauthenticated downloads
@@ -117,8 +122,8 @@ jobs:
   # access, who writes the workflow file their own pull request runs. See
   # modules/github-actions-iam.
   plan:
-    # Set explicitly, so the four instances report as `plan-dev-platform`,
-    # `plan-dev-apps`, `plan-staging-platform` and `plan-staging-apps` rather than
+    # Set explicitly, so the instances report as `plan-dev-platform`,
+    # `plan-dev-apps`, `plan-staging-platform` and so on rather than
     # GitHub's default `plan (dev/platform)`. A branch protection rule has to
     # name its required checks literally, and the flat names are the ones worth
     # typing.
@@ -146,6 +151,10 @@ jobs:
             root: staging/platform
           - name: staging-apps
             root: staging/apps
+          - name: prod-platform
+            root: prod/platform
+          - name: prod-apps
+            root: prod/apps
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.root }}
@@ -157,9 +166,11 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
+      # A matrix value cannot read the env context, so the prod entries pick
+      # their account's role here, by root.
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.PLAN_ROLE }}
+          role-to-assume: ${{ startsWith(matrix.root, 'prod/') && env.PROD_PLAN_ROLE || env.PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-${{ github.run_id }}
 
@@ -227,8 +238,7 @@ jobs:
 
       # -auto-approve, and the log is the audit trail: apply prints the whole plan
       # to stdout before it changes anything, so the run shows exactly what it
-      # did. dev deploys on merge, which is the point; a gated apply is what prod
-      # will want instead.
+      # did. dev deploys on merge, which is the point.
       - run: tofu apply -auto-approve -input=false -lock-timeout=5m
 
   apply-dev-apps:
@@ -372,6 +382,83 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
+  # Prod deploys on every merge, the same as staging, with its own account's
+  # roles. FIL-1394 adds an approval step before production data arrives.
+  apply-prod-platform:
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/prod/platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-prod-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/prod/platform/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+  apply-prod-apps:
+    if: github.event_name == 'push'
+    needs: apply-prod-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/prod/apps
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-apply-prod-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/prod/apps/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      - run: tofu apply -auto-approve -input=false -lock-timeout=5m
+
+      - name: wait for every service to reach steady state
+        timeout-minutes: 25
+        run: |
+          "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
+
   # The Grafana root: the dashboards, the alert rules and the three folders they
   # live in. Not a stage, and not in the plan matrix above — it describes every
   # stage at once through a $stage template variable, so there is no stage deploy
@@ -416,7 +503,7 @@ jobs:
 
       # For the S3 backend only. Nothing in this root is an AWS resource; the
       # role is here to read and write grafana/forge.tfstate.
-      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.APPLY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -498,6 +585,27 @@ jobs:
           echo "the staging stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
+  smoke-prod:
+    if: github.event_name == 'push'
+    needs: apply-prod-apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: make smoke STAGE=prod
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "=== attempt $attempt of 5, after 60s ==="
+              sleep 60
+            fi
+            if make smoke STAGE=prod; then
+              exit 0
+            fi
+          done
+          echo "the prod stage did not come up: 5 attempts over 4 minutes" >&2
+          exit 1
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
@@ -554,6 +662,24 @@ jobs:
 
       - run: scripts/tail-logs.sh staging --since 45m --lines 50
 
+  diagnose-prod:
+    if: failure() && github.event_name == 'push'
+    needs: [apply-prod-apps, smoke-prod]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PROD_APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-diagnose-prod-${{ github.run_id }}
+
+      - run: scripts/tail-logs.sh prod --since 45m --lines 50
+
   # One job for the whole workflow rather than a notification step in each: a
   # failed apply and a failed smoke test want the same message, and `failure()`
   # is true here when anything above it failed. A job skipped because the run is
@@ -573,6 +699,9 @@ jobs:
       - apply-staging-platform
       - apply-staging-apps
       - smoke-staging
+      - apply-prod-platform
+      - apply-prod-apps
+      - smoke-prod
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
@@ -582,6 +711,33 @@ jobs:
 
       - id: commit
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      # Names what failed, so the alert says whether prod is broken without a
+      # click. The stage comes from the job name: apply-<stage>-<root> and
+      # smoke-<stage> give the stage, apply-grafana gives grafana, and any other
+      # job stands for itself. Only "failure" counts; the jobs downstream of a
+      # failure are "skipped" and would bury the one that broke.
+      #
+      # Best-effort like the source lookup below: if this step breaks, the alert
+      # still goes out without the stage and the job line.
+      - id: failed
+        continue-on-error: true
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed=$(jq -c 'to_entries | map(select(.value.result == "failure") | .key)' <<<"$NEEDS")
+          if [ "$failed" = "[]" ]; then
+            echo "::warning::no job in needs has the result failure"
+            exit 0
+          fi
+
+          stages=$(jq -r '
+            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; ""))
+            | unique | join(", ")' <<<"$failed")
+          jobs=$(jq -r 'map("`\(.)`") | join(", ")' <<<"$failed")
+          echo "stages=$stages" >> "$GITHUB_OUTPUT"
+          echo "line=Failed jobs: $jobs" >> "$GITHUB_OUTPUT"
 
       # A bump commit says which service image changed and nothing about what
       # changed inside it, so the alert names a digest nobody recognises. Bump
@@ -647,15 +803,16 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deploy of `{0}` failed. Commit: {1} by @{2}. {3}Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deploy of `{0}` failed{1}. {2}Commit: {3} by @{4}. {5}Details: {6}/{7}/actions/runs/{8}', github.event.repository.name, steps.failed.outputs.stages && format(' in {0}', steps.failed.outputs.stages) || '', steps.failed.outputs.line && format('{0}. ', steps.failed.outputs.line) || '', steps.commit.outputs.subject, github.actor, steps.source.outputs.line && format('{0}. ', steps.source.outputs.line) || '', github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deploy of `{0}` failed{1}* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, steps.failed.outputs.stages && format(' in {0}', steps.failed.outputs.stages) || '', github.server_url, github.repository, github.run_id)) }}
                   }
                 },
+                ${{ steps.failed.outputs.line && format('{{"type":"section","text":{{"type":"mrkdwn","text":{0}}}}},', toJSON(steps.failed.outputs.line)) || '' }}
                 {
                   "type": "section",
                   "text": {

@@ -10,6 +10,11 @@ output "private_subnet_ids" {
   value = [for subnet in aws_subnet.private : subnet.id]
 }
 
+output "database_subnet_ids" {
+  description = "Empty unless database_subnets is on."
+  value       = [for subnet in aws_subnet.database : subnet.id]
+}
+
 output "public_subnet_cidrs" {
   description = "Where the ALB's own interfaces live, which is the address a request through it arrives from. OpenBao trusts a forwarded-for header only from these."
   value       = [for subnet in aws_subnet.public : subnet.cidr_block]

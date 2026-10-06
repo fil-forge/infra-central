@@ -15,10 +15,21 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+module "constants" {
+  source = "../shared/constants"
+}
+
 locals {
   name       = "fc-${var.stage}"
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
+
+  # Every public hostname in the stage, OpenBao's and the apps root's alike,
+  # because the ingress module certifies all of them.
+  public_hostnames = {
+    for service, label in module.constants.public_hostname_labels :
+    service => "${label}.${var.hostname_suffix}"
+  }
 }
 
 module "network" {
@@ -28,17 +39,29 @@ module "network" {
   vpc_cidr           = var.vpc_cidr
   az_count           = var.az_count
   nat_gateway_per_az = var.nat_gateway_per_az
+  database_subnets   = var.db_engine == "aurora"
 }
 
+# Created only for a stage that brings no seal key of its own.
 module "kms" {
   source = "./kms"
+  count  = var.openbao_kms_key_arn == null ? 1 : 0
 
   stage                   = var.stage
   deletion_window_in_days = var.protect_stateful_resources ? 30 : 7
 }
 
+moved {
+  from = module.kms
+  to   = module.kms[0]
+}
+
+# One of the two database modules exists, chosen by db_engine. Both export the
+# same four outputs, so everything below reads local.database and neither knows
+# which engine it is talking to.
 module "database" {
   source = "./database"
+  count  = var.db_engine == "rds" ? 1 : 0
 
   stage             = var.stage
   subnet_ids        = module.network.private_subnet_ids
@@ -50,6 +73,33 @@ module "database" {
   backup_retention_days = var.db_backup_retention_days
   deletion_protection   = var.protect_stateful_resources
   skip_final_snapshot   = !var.protect_stateful_resources
+}
+
+# The database module had no count before db_engine existed. This keeps the
+# instance in dev and staging where it is instead of replacing it.
+moved {
+  from = module.database
+  to   = module.database[0]
+}
+
+module "aurora" {
+  source = "./aurora"
+  count  = var.db_engine == "aurora" ? 1 : 0
+
+  stage             = var.stage
+  subnet_ids        = module.network.database_subnet_ids
+  security_group_id = module.network.database_security_group_id
+  kms_key_arn       = var.db_kms_key_arn
+
+  instance_class        = var.db_instance_class
+  instance_count        = var.db_instance_count
+  backup_retention_days = var.db_backup_retention_days
+  deletion_protection   = var.protect_stateful_resources
+  skip_final_snapshot   = !var.protect_stateful_resources
+}
+
+locals {
+  database = one(concat(module.database, module.aurora))
 }
 
 module "storage" {
@@ -67,6 +117,7 @@ module "ingress" {
   stage                     = var.stage
   zone_name                 = var.zone_name
   hostname_suffix           = var.hostname_suffix
+  hostnames                 = values(local.public_hostnames)
   public_subnet_ids         = module.network.public_subnet_ids
   security_group_id         = module.network.alb_security_group_id
   deletion_protection       = var.protect_stateful_resources
@@ -119,10 +170,10 @@ module "provision" {
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.lambda_security_group_id
 
-  db_host                      = module.database.address
-  db_port                      = module.database.port
-  db_master_secret_arn         = module.database.master_secret_arn
-  db_master_secret_kms_key_arn = module.database.master_secret_kms_key_arn
+  db_host                      = local.database.address
+  db_port                      = local.database.port
+  db_master_secret_arn         = local.database.master_secret_arn
+  db_master_secret_kms_key_arn = local.database.master_secret_kms_key_arn
 
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
@@ -142,7 +193,9 @@ resource "aws_lambda_invocation" "seed" {
     trigger = var.seed_trigger
   })
 
-  depends_on = [module.database]
+  # Static references only: depends_on cannot read local.database, and only one
+  # of the two modules exists.
+  depends_on = [module.database, module.aurora]
 }
 
 module "openbao" {
@@ -154,7 +207,7 @@ module "openbao" {
 
   image        = var.openbao_image
   max_parallel = var.openbao_max_parallel
-  hostname     = "ssm.${var.hostname_suffix}"
+  hostname     = local.public_hostnames.openbao
 
   cluster_arn       = aws_ecs_cluster.this.arn
   vpc_id            = module.network.vpc_id
@@ -162,13 +215,15 @@ module "openbao" {
   security_group_id = module.network.service_security_group_id
   alb_cidrs         = module.network.public_subnet_cidrs
 
-  kms_key_id  = module.kms.key_id
-  kms_key_arn = module.kms.key_arn
+  # KMS accepts an ARN wherever it takes a key id, and the seal stanza is the
+  # only place OpenBao uses the id.
+  kms_key_id  = coalesce(var.openbao_kms_key_arn, one(module.kms[*].key_id))
+  kms_key_arn = coalesce(var.openbao_kms_key_arn, one(module.kms[*].key_arn))
   ssm_prefix  = "/forge-central/${var.stage}/openbao"
 
   listener_arn      = module.ingress.listener_arn
   listener_priority = 100
-  route53_zone_id   = module.ingress.route53_zone_id
+  route53_zone_id   = module.ingress.route53_zone_ids[local.public_hostnames.openbao]
   alb_dns_name      = module.ingress.public_dns_name
   alb_zone_id       = module.ingress.public_zone_id
 

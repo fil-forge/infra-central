@@ -17,18 +17,21 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+module "constants" {
+  source = "../shared/constants"
+}
+
 locals {
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
 
   ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge-central/${var.stage}"
 
+  # The services other services address by did:web. plc is public too, but it
+  # has no did:web, so its hostname is set apart below.
   hostname_label = {
-    sprue           = "upload"
-    hilt            = "auth"
-    swarf           = "revoke"
-    delegator       = "delegator"
-    signing-service = "signer"
+    for service in ["sprue", "hilt", "swarf", "delegator", "signing-service"] :
+    service => module.constants.public_hostname_labels[service]
   }
 
   host = { for service, label in local.hostname_label :
@@ -46,7 +49,15 @@ locals {
   # call off the NAT gateway and the public internet. Ingot on an appliance node
   # is outside the VPC, so it needs the ALB.
   plc_directory = "http://plc.${var.namespace_name}:3000"
-  plc_host      = "plc.${var.hostname_suffix}"
+  plc_host      = "${module.constants.public_hostname_labels.plc}.${var.hostname_suffix}"
+
+  # Dev and staging write every record into one shared zone. Each of prod's
+  # hostnames has a zone of its own.
+  zone_id = {
+    for hostname in concat(values(local.host), [local.plc_host]) : hostname => (
+      var.route53_zone_id != null ? var.route53_zone_id : var.route53_zone_ids[hostname]
+    )
+  }
 
   # Where the entrypoint wrapper drops file-borne secrets.
   keys = "/tmp/forge"
@@ -72,7 +83,7 @@ module "sprue" {
 
   log_forwarding = var.log_forwarding
 
-  environment = {
+  environment = merge({
     SPRUE_SERVER_HOST          = "0.0.0.0"
     SPRUE_SERVER_PORT          = "8080"
     SPRUE_SERVER_PUBLIC_URL    = local.url.sprue
@@ -104,7 +115,12 @@ module "sprue" {
 
     SPRUE_MAILER_TYPE = "nop"
     SPRUE_LOG_LEVEL   = var.log_level
-  }
+    },
+    # Set only where a stage sizes it, so the other stages' task definitions
+    # stay as they are and sprue keeps its own default of 10.
+    var.sprue_postgres_max_conns == null ? {} : {
+      SPRUE_STORAGE_POSTGRES_MAX_CONNS = tostring(var.sprue_postgres_max_conns)
+  })
 
   secrets = {
     SPRUE_STORAGE_POSTGRES_DSN = "${local.ssm}/sprue/postgres-dsn"
@@ -120,7 +136,7 @@ module "sprue" {
   hostname          = local.host.sprue
   listener_arn      = var.listener_arn
   listener_priority = 110
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.host.sprue]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
@@ -206,7 +222,7 @@ module "hilt" {
   hostname          = local.host.hilt
   listener_arn      = var.listener_arn
   listener_priority = 120
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.host.hilt]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
@@ -260,7 +276,7 @@ module "swarf" {
   hostname          = local.host.swarf
   listener_arn      = var.listener_arn
   listener_priority = 130
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.host.swarf]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
@@ -339,7 +355,7 @@ module "delegator" {
   hostname          = local.host.delegator
   listener_arn      = var.listener_arn
   listener_priority = 140
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.host.delegator]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
@@ -411,7 +427,7 @@ module "signing_service" {
   hostname          = local.host["signing-service"]
   listener_arn      = var.listener_arn
   listener_priority = 150
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.host["signing-service"]]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
@@ -461,7 +477,7 @@ module "plc" {
   hostname          = local.plc_host
   listener_arn      = var.listener_arn
   listener_priority = 160
-  route53_zone_id   = var.route53_zone_id
+  route53_zone_id   = local.zone_id[local.plc_host]
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 

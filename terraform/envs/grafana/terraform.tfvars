@@ -24,3 +24,20 @@ sync_service_account_id = "84"
 # action a pull request brings with it. Scoped this way the worst case is a
 # trashed preview.
 previews_service_account_id = "85"
+
+# The grafanacloud-prom data source's uid happens to equal its name, read off an
+# alert rule exported from the stack. Alert rules address a data source by uid
+# where a dashboard can use its name. Not a secret.
+prometheus_datasource_uid = "grafanacloud-prom"
+
+# The logs data source's uid, by the same convention: Grafana Cloud gives its
+# provisioned data sources the uids grafanacloud-prom and grafanacloud-logs
+# whatever their names. It is the last segment of the data source's settings
+# page URL. Not a secret.
+loki_datasource_uid = "grafanacloud-logs"
+
+# Staging as well as the variable's production-only default. Staging is what the
+# hand-built rules these replace were watching, and it keeps the rules whose
+# no_data_state is NoData quiet while a prod reset leaves prod with nothing to
+# report.
+alert_stages = ["staging", "prod"]

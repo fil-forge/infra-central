@@ -4,7 +4,7 @@ variable "stage" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block for the VPC. Must leave room for two /20 subnets per availability zone, one public and one private."
+  description = "CIDR block for the VPC. Must leave room for two /20 subnets per availability zone, one public and one private, and a third for the database when database_subnets is on."
   type        = string
   default     = "10.20.0.0/16"
 }
@@ -47,4 +47,15 @@ variable "flow_log_retention_days" {
   description = "How long VPC flow logs are kept. They are the only record of traffic a security group dropped, which is worth having for longer than a debugging session but is not an audit artifact."
   type        = number
   default     = 30
+}
+
+variable "database_subnets" {
+  description = <<-EOT
+    Give the database its own subnets, one per availability zone, routed only
+    within the VPC. Off for a stage whose RDS instance already lives in the
+    private subnets: a live instance or cluster cannot move to another subnet
+    group, so turning this on replaces the database.
+  EOT
+  type        = bool
+  default     = false
 }
