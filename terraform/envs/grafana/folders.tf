@@ -32,6 +32,12 @@
 #                          else expires one, so there is no sweeper to write and
 #                          no preview outliving what it previews.
 #
+#                          That holds for what the workflow writes. A dashboard
+#                          made in this folder by hand carries no pull request
+#                          number in its uid, so the delete step never names it
+#                          and nothing else will. The permissions below do not
+#                          prevent one being made.
+#
 # Nesting is only safe in this direction. Grafana inherits folder permissions
 # downward and has no deny: "if the parent is accessible then the subfolders are
 # accessible as well (due to inheritance)" (grafana, folderimpl/folder.go). Put
@@ -182,14 +188,28 @@ resource "grafana_folder_permission" "alerts" {
 
 resource "grafana_folder" "previews" {
   uid               = "forge-previews"
-  title             = "Previews (disposable)"
+  title             = "Dashboard PR previews"
   parent_folder_uid = var.parent_folder_uid
 }
 
 # Read-only for people by inheritance, on top of the spec.editable = false that
-# scripts/preview-dashboard.sh sets on every preview it writes. Two mechanisms
-# because they fail differently: the permission stops a save, the flag stops the
-# UI offering one.
+# scripts/preview-dashboard.sh sets on every preview it writes. Neither is a
+# lock, and the two together look stronger than they are:
+#
+#   - The inherited View binds Viewer and Editor. It does not bind an org admin,
+#     who writes anywhere whatever a folder's permission set says. The decision
+#     record puts it the same way about the alerts folder: "a guardrail and not a
+#     lock: Grafana org admins bypass folder permissions."
+#   - spec.editable = false is a property of the dashboard, not a permission.
+#     Grafana renders the dashboard read-only and then offers "Make editable" to
+#     anyone who could have edited it anyway.
+#
+# Both gave way for an org admin on 2026-10-06: a dashboard was created here by
+# hand, and a preview offered to become editable. Neither costs much -- the workflow
+# overwrites a preview on the next push and deletes it on close, and the account
+# it runs as can do nothing worse than trash a preview. The cost is the one noted
+# at the head of this file: a dashboard made here by hand is what nothing cleans
+# up.
 resource "grafana_folder_permission" "previews" {
   folder_uid = grafana_folder.previews.uid
 

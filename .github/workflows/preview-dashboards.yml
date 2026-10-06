@@ -2,7 +2,7 @@ name: Preview dashboards
 
 # A dashboard change is reviewed as a JSON diff, which says very little about
 # whether the panel reads correctly. This deploys the changed dashboard under its
-# own uid into the Previews (disposable) folder, so a reviewer can open the thing
+# own uid into the Dashboard PR previews folder, so a reviewer can open the thing
 # itself against live data, and deletes it when the pull request closes.
 #
 # Why this is not Terraform, unlike everything else in terraform/envs/grafana:
@@ -138,7 +138,7 @@ jobs:
           # leading spaces is a Markdown code block.
           body=$(printf '%s\n%s\n\n%s\n' \
             "$marker" \
-            '**Dashboard previews** — deployed to `Previews (disposable)`, deleted when this pull request closes. Read-only, and tagged `preview`.' \
+            '**Previews for this pull request** — in `Dashboard PR previews`, deleted when it closes. Read-only, and tagged `preview`.' \
             "$LINKS")
           existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
             --jq "map(select(.body | startswith(\"${marker}\"))) | .[0].id // empty")
