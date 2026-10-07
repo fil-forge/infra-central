@@ -1096,10 +1096,11 @@ resource "grafana_rule_group" "appliance" {
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
   # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims them yet, so the figure only falls
-  # when someone removes them by hand. Firing on any stalled byte would
-  # therefore fire for good after one failure. Growth is the signal instead:
-  # more stalled bytes now than an hour ago means uploads are still failing.
+  # last state change -- and nothing reclaims them yet, nor may they be deleted
+  # by hand (Ingot's README), so the figure does not fall. Firing on any
+  # stalled byte would therefore fire for good after one failure. Growth is the
+  # signal instead: more stalled bytes now than an hour ago means uploads are
+  # still failing.
   #
   # The hour is Ingot's own cutoff, not a choice here; the window matches it so
   # one failure shows as growth for about an hour and then resolves. for = 0m
