@@ -3514,7 +3514,7 @@
           "label": "Regions",
           "hide": "hideVariable",
           "refresh": "onTimeRangeChanged",
-          "skipUrlSync": true,
+          "skipUrlSync": false,
           "query": {
             "kind": "DataQuery",
             "group": "prometheus",
