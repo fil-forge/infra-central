@@ -1098,10 +1098,9 @@ resource "grafana_rule_group" "appliance" {
   # upload has stalled -- intents still spooled or uploading an hour after their
   # last state change -- and nothing reclaims a failed PUT's yet (a multipart
   # part's goes with its session), nor may they be deleted by hand (Ingot's
-  # README), so the figure rarely falls. Firing on any
-  # stalled byte would therefore fire for good after one failure. Growth is the
-  # signal instead: more stalled bytes now than an hour ago means uploads are
-  # still failing.
+  # README), so the figure rarely falls. Firing on any stalled byte would
+  # therefore fire for good after one failure. Growth is the signal instead:
+  # more stalled bytes now than an hour ago means uploads are still failing.
   #
   # The hour is Ingot's own cutoff, not a choice here; the window matches it so
   # one failure shows as growth for about an hour and then resolves. for = 0m
