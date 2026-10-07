@@ -50,6 +50,18 @@ variable "loki_datasource_uid" {
   type        = string
 }
 
+variable "usage_datasource_uid" {
+  description = "UID of the grafanacloud-usage data source, where Grafana Cloud publishes the stack's own ingestion rates. It is the last segment of the data source's settings page URL, and it is not a secret. Null leaves the trace volume rule out."
+  type        = string
+  default     = null
+}
+
+variable "trace_spans_alert_threshold" {
+  description = "Spans per second, averaged over six hours, above which the trace volume rule fires. A multiple of the rate Explore shows today is a reasonable start. Null leaves the trace volume rule out."
+  type        = number
+  default     = null
+}
+
 locals {
   stages = join("|", var.alert_stages)
 
@@ -1247,23 +1259,13 @@ resource "grafana_rule_group" "appliance_containers" {
   }
 }
 
-variable "usage_datasource_uid" {
-  description = "UID of the grafanacloud-usage data source, where Grafana Cloud publishes the stack's own ingestion rates. It is the last segment of the data source's settings page URL, and it is not a secret. Null leaves the trace volume rule out."
-  type        = string
-  default     = null
-}
-
-variable "trace_spans_alert_threshold" {
-  description = "Spans per second, averaged over six hours, above which the trace volume rule fires. Take it from what the plan's traces allowance comes to per second, or from a multiple of the rate Explore shows today. Null leaves the trace volume rule out."
-  type        = number
-  default     = null
-}
-
-# Trace volume, as a nudge rather than an alarm. Spans cost money by volume and
-# nothing else here would say that a change -- a new span on a frequent code
-# path, say -- has raised it, so this watches the rate Grafana Cloud reports
-# receiving for the whole stack. It cannot say which service sent them; the
-# span names in Tempo can.
+# Trace volume, as a nudge rather than an alarm. Nothing else here would say
+# that a change -- a new span on a frequent code path, say -- has raised it, so
+# this watches the rate of spans Grafana Cloud reports receiving. That rate is
+# a proxy for volume: spans that grow larger without growing more numerous do
+# not move it. It covers the whole stack, and the stack is shared (main.tf), so
+# FilOne's spans count too; it cannot say whose they are, but span names in
+# Tempo can.
 #
 # Everything about it is set to stay quiet:
 #
@@ -1273,12 +1275,17 @@ variable "trace_spans_alert_threshold" {
 #   - severity is info, so a route in the policy tree can send it somewhere
 #     quieter than the warnings; until one does, it goes wherever the forge
 #     route sends everything else.
-#   - no_data_state and exec_err_state are both OK. A gap in the usage data is
-#     not something to be told about at this level of concern.
 #
-# It exists only once both variables above are set, so this merges as nothing.
-# Before setting them, forge-terraform needs datasources:query on
-# grafanacloud-usage, for the reason the header of this file gives.
+# What it does not stay quiet about is being broken. no_data_state is NoData
+# and exec_err_state is Error, because a rule on the wrong data source, or on a
+# metric Grafana has renamed, would otherwise look exactly like one with
+# nothing to report. Before setting the variables, run the expression below in
+# Explore against that data source and check it returns one series.
+#
+# It exists only once usage_datasource_uid and trace_spans_alert_threshold are
+# both set, so this merges as nothing. Before setting them, forge-terraform
+# also needs datasources:query on grafanacloud-usage, for the reason the header
+# of this file gives.
 #
 # Grafana Cloud's own usage alerts, set in the Cost management pages rather than
 # here, are the backstop for the monthly total. This rule is for noticing a
@@ -1294,11 +1301,11 @@ resource "grafana_rule_group" "usage" {
     name           = "Trace volume is above its threshold"
     condition      = "B"
     for            = "1h"
-    no_data_state  = "OK"
-    exec_err_state = "OK"
+    no_data_state  = "NoData"
+    exec_err_state = "Error"
 
     annotations = {
-      summary     = "The stack has received more than ${var.trace_spans_alert_threshold} spans per second on average over six hours"
+      summary     = "The stack has received {{ humanize $values.A.Value }} spans per second on average over six hours, above the threshold of ${var.trace_spans_alert_threshold}"
       description = "Trace ingestion has risen. In Explore, sum(grafanacloud_traces_instance_spans_received_total:rate5m) on grafanacloud-usage shows when; in Tempo, grouping recent spans by name shows which. Raise the threshold if the new rate is expected."
     }
 
@@ -1322,7 +1329,7 @@ resource "grafana_rule_group" "usage" {
         instant = true
         range   = false
         expr    = <<-PROMQL
-          sum(avg_over_time(grafanacloud_traces_instance_spans_received_total:rate5m[6h]))
+          avg_over_time(sum(grafanacloud_traces_instance_spans_received_total:rate5m)[6h:5m])
         PROMQL
       }))
     }
