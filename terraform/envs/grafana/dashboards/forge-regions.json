@@ -3485,38 +3485,33 @@
     "title": "Forge Regions",
     "variables": [
       {
-        "kind": "QueryVariable",
+        "kind": "CustomVariable",
         "spec": {
           "name": "stage",
           "current": {
-            "text": "dev",
-            "value": "dev"
+            "text": "prod",
+            "value": "prod"
           },
           "label": "Stage",
           "hide": "dontHide",
-          "refresh": "onDashboardLoad",
           "skipUrlSync": false,
-          "query": {
-            "kind": "DataQuery",
-            "group": "prometheus",
-            "version": "v0",
-            "datasource": {
-              "name": "grafanacloud-prom"
+          "query": "dev,staging,prod",
+          "options": [
+            {
+              "text": "dev",
+              "value": "dev"
             },
-            "spec": {
-              "qryType": 1,
-              "query": "label_values(dimension_ClusterName)",
-              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            {
+              "text": "staging",
+              "value": "staging"
+            },
+            {
+              "text": "prod",
+              "value": "prod"
             }
-          },
-          "regex": "/^fc-(.+)$/",
-          "regexApplyTo": "value",
-          "sort": "disabled",
-          "definition": "label_values(dimension_ClusterName)",
-          "options": [],
+          ],
           "multi": false,
-          "includeAll": false,
-          "allowCustomValue": true
+          "includeAll": false
         }
       },
       {
