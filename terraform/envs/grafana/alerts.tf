@@ -168,6 +168,28 @@ locals {
   scrape_matcher   = "service_name=~\"appliance-(${local.stages})-.*\""
   cadvisor_matcher = "job=\"cadvisor\", appliance=~\"(${local.stages})-.*\""
 
+  # A dashboard link that carries the stage, and for the appliance the region.
+  #
+  # Grafana builds the notification's dashboardURL and panelURL from
+  # __dashboardUid__ and __panelId__, and both come out as a bare /d/<uid> with
+  # no variables on it. The dashboards then open on whatever stage they default
+  # to, which is prod, while the only appliance is on staging -- so an alert's
+  # own link showed the on-call an empty dashboard for a stage that had not
+  # fired, which is the failure these rules exist to prevent, one level up.
+  #
+  # A URL Grafana does not build can carry them. Central's rules already derive
+  # a stage label in their queries; the appliance's do not, and the appliance
+  # label is <stage>-<region>, so reReplaceAll cuts it at the first hyphen.
+  #
+  # The __ pair stays. It is what ties a rule to its panel inside Grafana's own
+  # UI, and removing it would empty panelURL in the payload again. This is the
+  # link to follow from a page; that one is for the rule's own page.
+  #
+  # The host repeats the provider's url in main.tf. There is one stack, and no
+  # variable for it to share yet.
+  central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
+  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -199,6 +221,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
     }
@@ -293,6 +316,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning more than 1 server error a minute"
       description      = "More than one 5xx per minute, averaged over five, for ten minutes."
+      dashboard_url    = "${local.central_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-central"
       __panelId__      = "3"
     }
@@ -515,6 +539,7 @@ resource "grafana_rule_group" "appliance" {
       summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
       description      = "The reconcile stamp is more than fifteen minutes old, or the node has stopped reporting altogether. The timer runs every five, so either the node has stopped reconciling or its telemetry has stopped arriving."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "13"
     }
@@ -635,6 +660,7 @@ resource "grafana_rule_group" "appliance" {
       summary          = "{{ $labels.appliance }} has less than 40% free on {{ $labels.mountpoint }}"
       description      = "{{ $labels.node }} is below 40% free on {{ $labels.mountpoint }}. Volumes and their sizes are in infra-nodes' terraform/modules/node."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "8"
     }
@@ -910,6 +936,7 @@ resource "grafana_rule_group" "appliance" {
       summary          = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
       description      = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=14"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "14"
     }
@@ -1006,6 +1033,7 @@ resource "grafana_rule_group" "appliance" {
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
       description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=17"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "17"
     }
@@ -1088,6 +1116,7 @@ resource "grafana_rule_group" "appliance" {
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
       description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
     }
@@ -1179,6 +1208,7 @@ resource "grafana_rule_group" "appliance" {
       summary          = "{{ $labels.service_name }} is not answering Alloy on {{ $labels.node }}"
       description      = "Alloy reached this exporter and got nothing back, so every panel built on it reads no data rather than zero. The host scrape carries CPU, memory, disk and the reconcile age; the Caddy scrape carries the request and error panels, and Caddy failing to answer here may mean the public surface is down with it."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "3"
     }
@@ -1375,6 +1405,7 @@ resource "grafana_rule_group" "appliance_containers" {
       summary          = "{{ $labels.service_name }} is not running on {{ $labels.node }}"
       description      = "cAdvisor reported this container within the last day and not within the last five minutes, so it has stopped. Container logs: {service_name=\"{{ $labels.service_name }}\"}."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=21"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "21"
     }
@@ -1537,6 +1568,7 @@ resource "grafana_rule_group" "appliance_containers" {
       summary          = "cAdvisor has stopped reporting on {{ $labels.appliance }}"
       description      = "No container metrics are arriving from this appliance, so nothing is watching its containers: \"Appliance container is not running\" gates itself off while cAdvisor is dark and will not fire however many containers stop. Treat this as the containers being unwatched rather than as a missing graph."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=21"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "21"
     }
