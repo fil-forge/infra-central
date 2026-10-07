@@ -1598,6 +1598,121 @@
           }
         }
       },
+      "panel-21": {
+        "kind": "Panel",
+        "spec": {
+          "id": 21,
+          "title": "Containers",
+          "description": "Every container the node runs, read from cAdvisor's own series rather than from a scrape target: a container that has stopped publishing is down. The Status panel above cannot show this, because the only scrape targets here are the host exporter and Caddy, and both stay up while a container is gone. This is the query `Appliance container is not running` alerts on, so the panel and the alert cannot disagree. A container absent for more than a day leaves the panel rather than reading down forever, which is how a service dropped from a Compose project removes itself with no edit here.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "label_replace(\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[5m])\n  )\n  or\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[24h])\n  ) * 0,\n  \"container\", \"$1\", \"service_name\", \"appliance-.*-(.*)\"\n)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{container}} @ {{node}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "state-timeline",
+            "version": "13.3.0-35049663052",
+            "spec": {
+              "options": {
+                "alignValue": "center",
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": false
+                },
+                "mergeValues": true,
+                "rowHeight": 0.9,
+                "showValue": "always",
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "mappings": [
+                    {
+                      "type": "value",
+                      "options": {
+                        "0": {
+                          "text": "down",
+                          "color": "dark-red",
+                          "index": 0
+                        },
+                        "1": {
+                          "text": "up",
+                          "color": "green",
+                          "index": 1
+                        }
+                      }
+                    }
+                  ],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 80,
+                        "color": "red"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "continuous-GrYlRd"
+                  },
+                  "custom": {
+                    "axisPlacement": "auto",
+                    "fillOpacity": 70,
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineWidth": 0,
+                    "spanNulls": false
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
       "panel-3": {
         "kind": "Panel",
         "spec": {
@@ -3102,6 +3217,19 @@
                       "spec": {
                         "x": 0,
                         "y": 3,
+                        "width": 24,
+                        "height": 5,
+                        "element": {
+                          "kind": "ElementReference",
+                          "name": "panel-21"
+                        }
+                      }
+                    },
+                    {
+                      "kind": "GridLayoutItem",
+                      "spec": {
+                        "x": 0,
+                        "y": 8,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3114,7 +3242,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 3,
+                        "y": 8,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3127,7 +3255,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 11,
+                        "y": 16,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3140,7 +3268,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 11,
+                        "y": 16,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3153,7 +3281,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 19,
+                        "y": 24,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3166,7 +3294,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 19,
+                        "y": 24,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3179,7 +3307,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 27,
+                        "y": 32,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3192,7 +3320,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 27,
+                        "y": 32,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3205,7 +3333,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 35,
+                        "y": 40,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3218,7 +3346,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 35,
+                        "y": 40,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3231,7 +3359,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 43,
+                        "y": 48,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3244,7 +3372,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 43,
+                        "y": 48,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3257,7 +3385,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 51,
+                        "y": 56,
                         "width": 24,
                         "height": 6,
                         "element": {
@@ -3270,7 +3398,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 57,
+                        "y": 62,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3283,7 +3411,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 57,
+                        "y": 62,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3296,7 +3424,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 0,
-                        "y": 65,
+                        "y": 70,
                         "width": 12,
                         "height": 8,
                         "element": {
@@ -3309,7 +3437,7 @@
                       "kind": "GridLayoutItem",
                       "spec": {
                         "x": 12,
-                        "y": 65,
+                        "y": 70,
                         "width": 12,
                         "height": 8,
                         "element": {

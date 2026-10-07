@@ -1155,7 +1155,7 @@ resource "grafana_rule_group" "appliance_containers" {
       description      = "cAdvisor reported this container within the last day and not within the last five minutes, so it has stopped. Container logs: {service_name=\"{{ $labels.service_name }}\"}."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       __dashboardUid__ = "forge-regions"
-      __panelId__      = "1"
+      __panelId__      = "21"
     }
 
     labels = {
