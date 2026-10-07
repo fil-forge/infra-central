@@ -470,6 +470,12 @@ resource "grafana_rule_group" "appliance" {
   #
   # Either branch produces a value greater than zero -- an age in seconds, or 1
   # -- so the threshold stage stays `gt 0` and does not care which fired.
+  #
+  # Recovery is a no-data event, not a falling value. A fresh stamp fails the
+  # `> 900` filter and the node is present again, so both branches return
+  # nothing and there is no series left to go below a threshold.
+  # no_data_state = OK is what turns that into Normal; Alerting or NoData here
+  # would leave the rule firing after the node had recovered.
   rule {
     name           = "Appliance has stopped reporting"
     condition      = "C"
@@ -865,9 +871,11 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
-      description = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      summary          = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
+      description      = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "14"
     }
 
     labels = {
@@ -1119,6 +1127,11 @@ resource "grafana_rule_group" "appliance_containers" {
   # the container goes away, so there is no value to compare against a
   # threshold; the expression tests for a series that was there and is not. The
   # clauses are annotated inline below.
+  #
+  # That shape makes recovery a no-data event too: a container that comes back
+  # satisfies both present_over_time clauses, the `unless` cancels them, and the
+  # rule has nothing left to evaluate. So no_data_state = OK is what lets the
+  # rule clear, as well as what keeps it quiet where cAdvisor does not run.
   #
   # Only staging is watched, because only staging runs cAdvisor -- the dev EC2
   # node's Alloy container has no cgroup mount
