@@ -155,8 +155,12 @@ locals {
   # Scoping matters here. The appliance's Alloy also ships telemetry for
   # workloads that are not ours and for remote targets, and every one of those
   # series carries the appliance label too, so a rule matching on that alone
-  # would page us about somebody else's exporter. service_name and job are what
-  # keep each selector to our own scrapes.
+  # would page us about somebody else's exporter. service_name is what keeps the
+  # first selector to our own scrapes. `job` does less than that for the second:
+  # the appliance runs one cAdvisor and it reports the host's other containers
+  # too, as the container rule's own gate comment says. So that selector names a
+  # shared scrape we depend on rather than one we own, which is still worth
+  # knowing about when it goes dark.
   #
   # service_name is deliberately not narrowed to host and caddy: a scrape added
   # later is then watched from the day it ships, which is the same trade
@@ -606,11 +610,19 @@ resource "grafana_rule_group" "appliance" {
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
+  #
+  # no_data_state was NoData, which meant a dark host exporter raised a
+  # DatasourceNoData instance here carrying this rule's own labels, and so a
+  # notification about disk space when the subject was the scrape. It is OK now
+  # that "Appliance metrics scrape is failing" says that directly and sooner.
+  # The two are a pair: this rule is deliberately silent about absent data
+  # because another one is not, so do not delete that rule without putting this
+  # back.
   rule {
     name           = "Appliance free disk space below 40%"
     condition      = "B"
     for            = "15m"
-    no_data_state  = "NoData"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
@@ -1138,12 +1150,19 @@ resource "grafana_rule_group" "appliance" {
   # for a good one, which also means recovery is a value falling rather than a
   # series vanishing.
   #
-  # No absence branch and no gate. A node that has gone away stops producing
-  # `up` at all, so this rule falls silent and "Appliance has stopped reporting"
-  # is the one that fires; adding absence here would page twice for one outage.
+  # No absence branch: a node that has gone away stops producing `up` at all, so
+  # this rule falls silent and "Appliance has stopped reporting" is the one that
+  # fires. That deduplicates node death and nothing else, and the common case is
+  # worth being plain about rather than claiming more. The deploy stamp is a
+  # textfile-collector gauge on this same host exporter, so a wedged exporter on
+  # a live box *is* the stamp going stale: this fires at about eight minutes
+  # naming the exporter, the node rule follows at about twenty-five under a
+  # summary that reads as though the box were gone, and the disk rule's
+  # no_data_state = "NoData" adds a third notification. Earlier and specific is
+  # worth that; a quieter rule here would only mean learning it later and worse.
   rule {
     name           = "Appliance metrics scrape is failing"
-    condition      = "C"
+    condition      = "B"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Alerting"
@@ -1173,8 +1192,8 @@ resource "grafana_rule_group" "appliance" {
 
       model = jsonencode(merge(local.query_defaults, {
         refId        = "A"
-        instant      = false
-        range        = true
+        instant      = true
+        range        = false
         legendFormat = "{{service_name}}"
         expr         = <<-PROMQL
           max by (appliance, node, region, service_name) (
@@ -1196,17 +1215,91 @@ resource "grafana_rule_group" "appliance" {
 
       model = jsonencode({
         refId         = "B"
-        type          = "reduce"
+        type          = "threshold"
         expression    = "A"
-        reducer       = "last"
         datasource    = { type = "__expr__", uid = "__expr__" }
         intervalMs    = 1000
         maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
       })
+    }
+  }
+
+  # The labelling convention, alerted on rather than written down.
+  #
+  # Every per-box rule in this file needs `node`, because `appliance` is
+  # <stage>-<region> and cannot tell two boxes in one region apart. The host and
+  # Caddy scrapes carry node because each is routed through a relabel component
+  # that sets it on every series; the cAdvisor scrape is routed through rules
+  # that read a container's Compose labels, which `up` does not have, so its
+  # `up` arrives without one. That is a convention living in a config outside
+  # these repositories, and conventions in prose get dropped when the config is
+  # re-implemented -- which it will be, at the next box and again if the
+  # appliance ever runs its own Alloy.
+  #
+  # So this fires while the convention is broken, and goes quiet when it is
+  # kept. Prometheus reads an absent label as empty, so node="" selects exactly
+  # the series missing one. `count` rather than the value, because `up` is 1 for
+  # a healthy scrape and the signal here is that the series exists at all.
+  #
+  # What it cannot see: a scrape that drops `node` *and* has neither
+  # job="cadvisor" nor an appliance service_name is indistinguishable from the
+  # host's other workloads, and nothing can catch that.
+  #
+  # No dashboard link, because no panel shows label health. The fix is in the
+  # staging section of infra-nodes docs/RUNBOOK.md, which specifies the labels
+  # each scrape has to set.
+  rule {
+    name           = "Appliance telemetry is missing its node label"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "{{ $labels.appliance }} is shipping telemetry with no node label"
+      description = "A scrape on this appliance is arriving without the node label every per-box rule needs. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
     }
 
     data {
-      ref_id         = "C"
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}} {{job}}{{service_name}}"
+        expr         = <<-PROMQL
+          count by (appliance, job, service_name) (
+            up{appliance=~"(${local.stages})-.*", node="", job="cadvisor"}
+            or
+            up{appliance=~"(${local.stages})-.*", node="", ${local.scrape_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
       query_type     = "expression"
       datasource_uid = "__expr__"
 
@@ -1216,16 +1309,16 @@ resource "grafana_rule_group" "appliance" {
       }
 
       model = jsonencode({
-        refId         = "C"
+        refId         = "B"
         type          = "threshold"
-        expression    = "B"
+        expression    = "A"
         datasource    = { type = "__expr__", uid = "__expr__" }
         intervalMs    = 1000
         maxDataPoints = 43200
         conditions = [{
           type      = "query"
           operator  = { type = "and" }
-          query     = { params = ["C"] }
+          query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
         }]
@@ -1391,6 +1484,35 @@ resource "grafana_rule_group" "appliance_containers" {
   # last five minutes means the box is gone, which is "Appliance has stopped
   # reporting"'s to tell. `and` binds tighter than `or`, hence the parentheses
   # around the pair.
+  #
+  # The branches are not equally quick, and it is better not to imply they are.
+  # A failing static target is true at the next scrape, so roughly five minutes
+  # once `for` has run; a vanished discovered one needs the 5m window to empty
+  # first, so roughly ten.
+  #
+  # `for = 5m` is load-bearing rather than debounce. On node death the absence
+  # branch and the gate are driven by the same five-minute window on the same
+  # stream, and `for` is what absorbs the skew between them so they lapse
+  # together instead of racing into a page. The rule beside this one runs
+  # `for = 0m`; harmonising the two would turn every node death into a second
+  # page.
+  #
+  # Grouped by node as well as appliance, although cAdvisor's `up` carries no
+  # node label today. `appliance` is <stage>-<region>, set through external
+  # labels on remote_write, so it can never tell two boxes in one region apart,
+  # and grouping by it alone would let a healthy sibling mask a dead cAdvisor
+  # through the `unless` above. Prometheus reads an absent label as empty, so
+  # this groups exactly as `by (appliance)` would until the host's Alloy sets
+  # node on the cAdvisor scrape, and becomes per box by itself on the day it
+  # does. No second edit, and nothing to remember.
+  #
+  # The gate cannot move early the same way. The host scrape already carries
+  # node, so joining on it now would match an empty string against a real one,
+  # find nothing, and leave this rule silently Normal for ever -- the same class
+  # of fault the rule exists to catch. It stays region-wide, which with two
+  # boxes means a live sibling holds it open; that is a far smaller gap than a
+  # masked detection, and the case it softens is a box entirely dead, which the
+  # node rule already covers.
   rule {
     name           = "Appliance container telemetry has stopped"
     condition      = "C"
@@ -1403,7 +1525,7 @@ resource "grafana_rule_group" "appliance_containers" {
       description      = "No container metrics are arriving from this appliance, so nothing is watching its containers: \"Appliance container is not running\" gates itself off while cAdvisor is dark and will not fire however many containers stop. Treat this as the containers being unwatched rather than as a missing graph."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       __dashboardUid__ = "forge-regions"
-      __panelId__      = "1"
+      __panelId__      = "21"
     }
 
     labels = {
@@ -1417,7 +1539,7 @@ resource "grafana_rule_group" "appliance_containers" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 86400
+        from = 600
         to   = 0
       }
 
@@ -1428,16 +1550,16 @@ resource "grafana_rule_group" "appliance_containers" {
         legendFormat = "{{appliance}}"
         expr         = <<-PROMQL
           (
-            max by (appliance) (
+            max by (appliance, node) (
               up{${local.cadvisor_matcher}} == bool 0
             )
             or
             (
-              max by (appliance) (
+              max by (appliance, node) (
                 present_over_time(up{${local.cadvisor_matcher}}[24h])
               )
               unless
-              max by (appliance) (
+              max by (appliance, node) (
                 present_over_time(up{${local.cadvisor_matcher}}[5m])
               )
             )
