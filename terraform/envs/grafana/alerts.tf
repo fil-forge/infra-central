@@ -190,6 +190,15 @@ locals {
   #
   # The host repeats the provider's url in main.tf. There is one stack, and no
   # variable for it to share yet.
+  # The stage as a label of its own, for routing. Production critical alerts
+  # page where staging's notify, and a route can only tell them apart by a label
+  # the alert carries. Central's rules take one from their queries. The
+  # appliance's take it from the appliance label, <stage>-<region> by
+  # construction, cut at its first hyphen as the dashboard link below does.
+  # Adding it changed every appliance alert instance's identity once, when it
+  # landed.
+  appliance_stage_label = "{{ reReplaceAll \"-.*\" \"\" $labels.appliance }}"
+
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
   regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
 
@@ -438,6 +447,7 @@ resource "grafana_rule_group" "central" {
     labels = {
       team_name = "forge"
       component = "central"
+      stage     = "{{ reReplaceAll \"^fc-(.*)-provision$\" \"$1\" $labels.dimension_FunctionName }}"
       severity  = "warning"
     }
 
@@ -550,6 +560,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -671,6 +682,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -764,6 +776,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -857,6 +870,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -947,6 +961,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1044,6 +1059,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1127,6 +1143,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1219,6 +1236,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1312,6 +1330,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1416,6 +1435,7 @@ resource "grafana_rule_group" "appliance_containers" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1579,6 +1599,7 @@ resource "grafana_rule_group" "appliance_containers" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1726,6 +1747,7 @@ resource "grafana_rule_group" "appliance_outages" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1819,6 +1841,7 @@ resource "grafana_rule_group" "appliance_outages" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
