@@ -3496,20 +3496,7 @@
           "hide": "dontHide",
           "skipUrlSync": false,
           "query": "dev,staging,prod",
-          "options": [
-            {
-              "text": "dev",
-              "value": "dev"
-            },
-            {
-              "text": "staging",
-              "value": "staging"
-            },
-            {
-              "text": "prod",
-              "value": "prod"
-            }
-          ],
+          "options": [],
           "multi": false,
           "includeAll": false
         }
