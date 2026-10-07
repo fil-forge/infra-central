@@ -176,6 +176,10 @@ check:
 # so a raw UI export with its server-side metadata and whoever-last-saved variable
 # selections cannot land. Reads files only: no Grafana credentials, no network.
 	scripts/normalise-dashboard.sh --check terraform/envs/grafana/dashboards/*.json
+# The stage picker is alert_stages with dev in front. They live in two files
+# because the dashboards carry Grafana's own ${...} interpolation and so cannot
+# be generated, so CI compares them rather than trusting anyone to edit both.
+	scripts/check-stage-picker.sh
 
 .PHONY: fmt
 fmt:
