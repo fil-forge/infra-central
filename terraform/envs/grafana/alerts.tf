@@ -1246,3 +1246,112 @@ resource "grafana_rule_group" "appliance_containers" {
     }
   }
 }
+
+variable "usage_datasource_uid" {
+  description = "UID of the grafanacloud-usage data source, where Grafana Cloud publishes the stack's own ingestion rates. It is the last segment of the data source's settings page URL, and it is not a secret. Null leaves the trace volume rule out."
+  type        = string
+  default     = null
+}
+
+variable "trace_spans_alert_threshold" {
+  description = "Spans per second, averaged over six hours, above which the trace volume rule fires. Take it from what the plan's traces allowance comes to per second, or from a multiple of the rate Explore shows today. Null leaves the trace volume rule out."
+  type        = number
+  default     = null
+}
+
+# Trace volume, as a nudge rather than an alarm. Spans cost money by volume and
+# nothing else here would say that a change -- a new span on a frequent code
+# path, say -- has raised it, so this watches the rate Grafana Cloud reports
+# receiving for the whole stack. It cannot say which service sent them; the
+# span names in Tempo can.
+#
+# Everything about it is set to stay quiet:
+#
+#   - It averages the rate over six hours and needs that average over the
+#     threshold for an hour more, so a burst never fires it, and it evaluates
+#     every fifteen minutes because nothing about it is urgent.
+#   - severity is info, so a route in the policy tree can send it somewhere
+#     quieter than the warnings; until one does, it goes wherever the forge
+#     route sends everything else.
+#   - no_data_state and exec_err_state are both OK. A gap in the usage data is
+#     not something to be told about at this level of concern.
+#
+# It exists only once both variables above are set, so this merges as nothing.
+# Before setting them, forge-terraform needs datasources:query on
+# grafanacloud-usage, for the reason the header of this file gives.
+#
+# Grafana Cloud's own usage alerts, set in the Cost management pages rather than
+# here, are the backstop for the monthly total. This rule is for noticing a
+# change in rate before a month of it has accrued.
+resource "grafana_rule_group" "usage" {
+  count = var.usage_datasource_uid != null && var.trace_spans_alert_threshold != null ? 1 : 0
+
+  name             = "Forge Usage"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 900
+
+  rule {
+    name           = "Trace volume is above its threshold"
+    condition      = "B"
+    for            = "1h"
+    no_data_state  = "OK"
+    exec_err_state = "OK"
+
+    annotations = {
+      summary     = "The stack has received more than ${var.trace_spans_alert_threshold} spans per second on average over six hours"
+      description = "Trace ingestion has risen. In Explore, sum(grafanacloud_traces_instance_spans_received_total:rate5m) on grafanacloud-usage shows when; in Tempo, grouping recent spans by name shows which. Raise the threshold if the new rate is expected."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "usage"
+      severity  = "info"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.usage_datasource_uid
+
+      relative_time_range {
+        from = 21600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId   = "A"
+        instant = true
+        range   = false
+        expr    = <<-PROMQL
+          sum(avg_over_time(grafanacloud_traces_instance_spans_received_total:rate5m[6h]))
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [var.trace_spans_alert_threshold] }
+        }]
+      })
+    }
+  }
+}
