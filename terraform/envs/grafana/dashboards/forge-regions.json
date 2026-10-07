@@ -1717,8 +1717,8 @@
         "kind": "Panel",
         "spec": {
           "id": 3,
-          "title": "Status",
-          "description": "Both scrapes for this region, split by node. Two boxes in one stage and region share service_name and are told apart by node.",
+          "title": "Scrapes",
+          "description": "Whether Alloy's scrapes for this region answered: the host exporter, and Caddy. This says whether to believe the rest of the tab rather than whether the appliance is healthy -- the host panels and the reconcile age are built on the first scrape, the request and error panels on the second, and when one goes dark its panels read no data rather than zero. Containers have no scrape of their own and are in the panel below. A scrape that is attempted and fails reads down; if Alloy itself stops, no up series is produced at all and the row goes blank rather than red, which is why the rule for a node that has gone away tests for absence instead. Two boxes in one stage and region share service_name and are told apart by node.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
