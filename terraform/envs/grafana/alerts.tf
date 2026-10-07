@@ -140,6 +140,30 @@ locals {
   # else added with that policy needs excluding here too.
   container_matcher = "service_name=~\"appliance-(${local.stages})-.*\", service_name!~\".*-postgres-init\""
 
+  # Alloy's own scrapes, selected by the labels each one actually arrives with.
+  #
+  # `up` is one series per target, not per container, so the two selectors
+  # cannot be the same. The host exporter and Caddy are each routed through a
+  # prometheus.relabel component that sets service_name on every series, so
+  # their `up` carries it (infra-nodes docs/RUNBOOK.md, staging section). The
+  # cAdvisor scrape is routed through the rules that read a container's Compose
+  # labels, which `up` does not have, so its `up` arrives carrying only the
+  # appliance label that remote_write puts on everything from the box, plus job
+  # and instance. Observed 2026-10-07: up{appliance="staging-eu-central-3",
+  # instance="ff", job="cadvisor"}.
+  #
+  # Scoping matters here. The appliance's Alloy also ships telemetry for
+  # workloads that are not ours and for remote targets, and every one of those
+  # series carries the appliance label too, so a rule matching on that alone
+  # would page us about somebody else's exporter. service_name and job are what
+  # keep each selector to our own scrapes.
+  #
+  # service_name is deliberately not narrowed to host and caddy: a scrape added
+  # later is then watched from the day it ships, which is the same trade
+  # container_matcher makes above.
+  scrape_matcher   = "service_name=~\"appliance-(${local.stages})-.*\""
+  cadvisor_matcher = "job=\"cadvisor\", appliance=~\"(${local.stages})-.*\""
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -1104,6 +1128,110 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
+  # Alloy tried to scrape an exporter and failed. Worth its own rule because the
+  # panels built on each scrape read *no data* rather than zero when it is dark,
+  # and a panel reading no errors looks much like one reading none.
+  #
+  # == bool 0 rather than == 0, which would keep the series and leave its value
+  # at 0 -- the threshold stage below is `gt 0`, so the filter form would never
+  # fire. The bool form scores every target instead, 1 for a failed scrape and 0
+  # for a good one, which also means recovery is a value falling rather than a
+  # series vanishing.
+  #
+  # No absence branch and no gate. A node that has gone away stops producing
+  # `up` at all, so this rule falls silent and "Appliance has stopped reporting"
+  # is the one that fires; adding absence here would page twice for one outage.
+  rule {
+    name           = "Appliance metrics scrape is failing"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "{{ $labels.service_name }} is not answering Alloy on {{ $labels.node }}"
+      description      = "Alloy reached this exporter and got nothing back, so every panel built on it reads no data rather than zero. The host scrape carries CPU, memory, disk and the reconcile age; the Caddy scrape carries the request and error panels, and Caddy failing to answer here may mean the public surface is down with it."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "3"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = false
+        range        = true
+        legendFormat = "{{service_name}}"
+        expr         = <<-PROMQL
+          max by (appliance, node, region, service_name) (
+            up{${local.scrape_matcher}} == bool 0
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "reduce"
+        expression    = "A"
+        reducer       = "last"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+      })
+    }
+
+    data {
+      ref_id         = "C"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "B"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
@@ -1192,6 +1320,131 @@ resource "grafana_rule_group" "appliance_containers" {
           and on (node)
           max by (node) (
             present_over_time(container_cpu_usage_seconds_total{job="cadvisor"}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "reduce"
+        expression    = "A"
+        reducer       = "last"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+      })
+    }
+
+    data {
+      ref_id         = "C"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "B"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The blind spot the rule above names, closed.
+  #
+  # "Appliance container is not running" holds itself silent while cAdvisor is
+  # dark, because the alternative is every watched container paging at once. So
+  # a dead cAdvisor is not a quiet dashboard, it is nothing watching the
+  # containers at all, and only a rule on the scrape itself can say so.
+  #
+  # Two shapes, because how cAdvisor's target fails depends on how the host's
+  # Alloy declares it, and that config lives outside these repositories. A
+  # static target stays and its scrape fails, giving up == 0; a discovered one
+  # disappears with the container and gives no series at all. The first branch
+  # catches the former and the second the latter, so this holds either way.
+  #
+  # The gate is what keeps a dead node from paging twice: no host scrape in the
+  # last five minutes means the box is gone, which is "Appliance has stopped
+  # reporting"'s to tell. `and` binds tighter than `or`, hence the parentheses
+  # around the pair.
+  rule {
+    name           = "Appliance container telemetry has stopped"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "cAdvisor has stopped reporting on {{ $labels.appliance }}"
+      description      = "No container metrics are arriving from this appliance, so nothing is watching its containers: \"Appliance container is not running\" gates itself off while cAdvisor is dark and will not fire however many containers stop. Treat this as the containers being unwatched rather than as a missing graph."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "1"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = false
+        range        = true
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          (
+            max by (appliance) (
+              up{${local.cadvisor_matcher}} == bool 0
+            )
+            or
+            (
+              max by (appliance) (
+                present_over_time(up{${local.cadvisor_matcher}}[24h])
+              )
+              unless
+              max by (appliance) (
+                present_over_time(up{${local.cadvisor_matcher}}[5m])
+              )
+            )
+          )
+          and on (appliance)
+          max by (appliance) (
+            present_over_time(up{${local.appliance_matcher}}[5m])
           )
         PROMQL
       }))
