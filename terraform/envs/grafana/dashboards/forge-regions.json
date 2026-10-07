@@ -2823,7 +2823,7 @@
         "spec": {
           "id": 18,
           "title": "Ingot stalled uploads",
-          "description": "Bytes of bodies whose upload has stalled, one line per state: intents still spooled (the body never left the node) or uploading (it may have reached its provider) an hour after their last state change. Nothing reclaims them yet, and they count against the budget. Anything above zero is an upload that did not finish; a rising line means it keeps happening.",
+          "description": "Bytes of bodies whose upload has stalled, one line per state: intents still spooled (the body never left the node) or uploading (it may have reached its provider) an hour after their last state change. Nothing reclaims a failed PUT's yet (a multipart part's goes with its session), and they count against the budget. Anything above zero is an upload that did not finish; a rising line means it keeps happening.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
