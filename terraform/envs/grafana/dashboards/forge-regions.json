@@ -1603,7 +1603,7 @@
         "spec": {
           "id": 21,
           "title": "Containers",
-          "description": "Every container the node runs, read from cAdvisor's own series rather than from a scrape target: a container that has stopped publishing is down. The Status panel above cannot show this, because the only scrape targets here are the host exporter and Caddy, and both stay up while a container is gone. This is the query `Appliance container is not running` alerts on, so the panel and the alert cannot disagree. A container absent for more than a day leaves the panel rather than reading down forever, which is how a service dropped from a Compose project removes itself with no edit here.",
+          "description": "Each appliance container Alloy has labelled, read from cAdvisor's series rather than from a scrape target of its own -- containers have none, which is why the Scrapes panel above cannot show them. Not quite every container on the box: the deny-list drops the one that exits by design, and the host's own containers carry no appliance service_name, so they never appear. Empty on a stage that runs no cAdvisor, which today is dev, and indistinguishable there from a stage whose containers have all been removed. These are the windows `Appliance container is not running` alerts on, but without that rule's cAdvisor-liveness gate, so the two agree except in one case: if cAdvisor itself dies, every row here goes down within five minutes while the alert stays deliberately quiet, because the alternative is every container paging at once. A separate rule on the scrape's own health is what covers that. A row reads up if any sample landed in the last five minutes, so a container that stops reads up for up to five minutes more, and one that restarts faster than that never reads down at all.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -1622,10 +1622,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "label_replace(\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[5m])\n  )\n  or\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[24h])\n  ) * 0,\n  \"container\", \"$1\", \"service_name\", \"appliance-.*-(.*)\"\n)",
+                        "expr": "label_replace(\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[5m])\n  )\n  or\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[24h])\n  ) * 0,\n  \"container\", \"$1\", \"service_name\", \"appliance-$stage-$region-(.+)\"\n)",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{container}}",
+                        "legendFormat": "{{container}} @ {{node}}",
                         "range": true
                       }
                     },
@@ -1718,7 +1718,7 @@
         "spec": {
           "id": 3,
           "title": "Scrapes",
-          "description": "Whether Alloy's scrapes for this region answered: the host exporter, and Caddy. This says whether to believe the rest of the tab rather than whether the appliance is healthy -- the host panels and the reconcile age are built on the first scrape, the request and error panels on the second, and when one goes dark its panels read no data rather than zero. Containers have no scrape of their own and are in the panel below. A scrape that is attempted and fails reads down; if Alloy itself stops, no up series is produced at all and the row goes blank rather than red, which is why the rule for a node that has gone away tests for absence instead. Two boxes in one stage and region share service_name and are told apart by node.",
+          "description": "Whether Alloy's scrapes for this region answered: the host exporter, and Caddy. It says whether to believe the panels built on those two -- the host metrics and the reconcile age come from the first, the request and error panels from the second -- and when one goes dark its panels read no data rather than zero, which looks much like zero at a glance. It does not cover the whole tab: Ingot's own metrics arrive by a route with no up of its own, so those panels can go blank with both rows here still green. Containers have no scrape either and are in the panel below. A scrape that is attempted and fails reads down; if Alloy itself stops, no up series is produced at all and the row goes blank rather than red, which is why the rule for a node that has gone away tests for absence instead. Two boxes in one stage and region share service_name and are told apart by node.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
