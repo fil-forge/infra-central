@@ -1625,7 +1625,7 @@
                         "expr": "label_replace(\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[5m])\n  )\n  or\n  max by (node, service_name) (\n    present_over_time(container_cpu_usage_seconds_total{service_name=~\"appliance-$stage-.*\", service_name!~\".*-postgres-init\", region=~\"($region)\"}[24h])\n  ) * 0,\n  \"container\", \"$1\", \"service_name\", \"appliance-.*-(.*)\"\n)",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{container}} @ {{node}}",
+                        "legendFormat": "{{container}}",
                         "range": true
                       }
                     },
