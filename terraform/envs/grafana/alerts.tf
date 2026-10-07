@@ -1116,7 +1116,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
