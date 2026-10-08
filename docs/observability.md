@@ -65,10 +65,19 @@ then exported into the repository. Whether Grafana actually resolves that in
 `Edit`'s favour over the `View` the parent folder gives by inheritance has not
 been tested; if it does not, the export route is the only one.
 
-Each rule carries `team_name = "forge"`, and a route in the notification policy
-tree — which is maintained in the UI, not here — is what turns that label into a
-channel. Adding that one route is a manual step nobody has done yet, so **the
-rules below evaluate but reach no one** until it exists.
+Each rule carries `team_name = "forge"` and a `severity` (`critical`, `warning`
+or `info`), and each rule that watches a stage carries `stage` as well; the
+stack-wide trace volume rule has none. Routing is maintained in the UI, not
+here: a route in the notification policy tree matches `team_name = "forge"`, and
+IRM picks the escalation from `stage` and `severity`, so that a production
+critical alert pages and everything else notifies. The policy has to group by
+`stage` and `severity` for IRM to see them on the group it is sent.
+
+An alert raised because a rule's query failed (`DatasourceError`) or returned
+nothing where a rule treats that as a fault (`DatasourceNoData`) carries none of
+the query's labels, so it has no `stage`. It cannot be told apart from
+production, so IRM should page on a critical alert with no `stage` as well as on
+`stage = "prod"`.
 
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
@@ -86,6 +95,8 @@ appliance label.
 | Postgres is refusing connections    | Forge Regions             | Postgres's logs, Loki | FIL-1163 |
 | Appliance 5xx rate too high         | Forge Regions             | Caddy             | FIL-1163 |
 | Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
+| OpenBao cannot unseal               | Forge Regions outages     | OpenBao's logs, Loki | FIL-1164 |
+| Appliance site is failing most requests | Forge Regions outages | Caddy             | FIL-1164 |
 
 ## Logs
 
