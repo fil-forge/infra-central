@@ -65,12 +65,13 @@ then exported into the repository. Whether Grafana actually resolves that in
 `Edit`'s favour over the `View` the parent folder gives by inheritance has not
 been tested; if it does not, the export route is the only one.
 
-Each rule carries `team_name = "forge"`, `severity` (`critical` or `warning`)
-and `stage`. Routing is maintained in the UI, not here: a route in the
-notification policy tree matches `team_name = "forge"`, and IRM picks the
-escalation from `stage` and `severity`, so that a production critical alert
-pages and everything else notifies. The policy has to group by `stage` and
-`severity` for IRM to see them on the group it is sent.
+Each rule carries `team_name = "forge"` and a `severity` (`critical`, `warning`
+or `info`), and each rule that watches a stage carries `stage` as well; the
+stack-wide trace volume rule has none. Routing is maintained in the UI, not
+here: a route in the notification policy tree matches `team_name = "forge"`, and
+IRM picks the escalation from `stage` and `severity`, so that a production
+critical alert pages and everything else notifies. The policy has to group by
+`stage` and `severity` for IRM to see them on the group it is sent.
 
 An alert raised because a rule's query failed (`DatasourceError`) or returned
 nothing where a rule treats that as a fault (`DatasourceNoData`) carries none of
