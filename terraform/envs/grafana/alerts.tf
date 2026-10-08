@@ -434,6 +434,124 @@ resource "grafana_rule_group" "central" {
     }
   }
 
+  # A service failing most of what it serves: the outage tier of "Service 5xx
+  # errors", which stays as the warning, as "Appliance site is failing most
+  # requests" is to the appliance's. Split by stage and service for the same
+  # reason, so one service's outage is not averaged away by the others.
+  #
+  # Half of requests is chosen, not derived, like the appliance's. The gate is a
+  # count of failed requests, at least five in the window, for the reason the
+  # appliance rule gives: a rate floor hides a quiet service that fails
+  # everything. CloudWatch publishes each count only in minutes that had one, so
+  # sum_over_time adds the minutes present, and a service with no 5xx has no
+  # numerator series; no_data_state is OK because an empty result is healthy.
+  # `for` is 5m, as on the healthy-hosts rule, because these samples arrive late
+  # and occasionally not at all.
+  #
+  # What this does not see: 5xx the load balancer generates itself, such as a
+  # 502 when a target resets the connection or a 504 when it times out.
+  # CloudWatch publishes those per load balancer, not per target group, so they
+  # cannot be put on a service. A service with no healthy targets is
+  # "Service has no healthy hosts".
+  rule {
+    name           = "Service is failing most requests"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
+      description      = "The service's targets have answered more than half of its requests with a 5xx for five minutes. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana."
+      dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
+      __dashboardUid__ = "forge-central"
+      __panelId__      = "13"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            sum by (stage, service) (
+              label_replace(
+                label_replace(
+                  sum_over_time(aws_applicationelb_httpcode_target_5_xx_count_sum{${local.elb_matcher}}[5m]),
+                  "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+                ),
+                "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+              )
+            )
+            /
+            sum by (stage, service) (
+              label_replace(
+                label_replace(
+                  sum_over_time(aws_applicationelb_request_count_sum{${local.elb_matcher}}[5m]),
+                  "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+                ),
+                "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+              )
+            )
+          )
+          and
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_httpcode_target_5_xx_count_sum{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          ) >= 5
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.5] }
+        }]
+      })
+    }
+  }
+
   # Any error out of the provision Lambda. The threshold is gt 0 because a
   # provisioning error is always worth a look.
   #
