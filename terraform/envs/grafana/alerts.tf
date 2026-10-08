@@ -50,6 +50,18 @@ variable "loki_datasource_uid" {
   type        = string
 }
 
+variable "usage_datasource_uid" {
+  description = "UID of the grafanacloud-usage data source, where Grafana Cloud publishes the stack's own ingestion rates. It is the last segment of the data source's settings page URL, and it is not a secret. Null leaves the trace volume rule out."
+  type        = string
+  default     = null
+}
+
+variable "trace_spans_alert_threshold" {
+  description = "Spans per second, averaged over six hours, above which the trace volume rule fires. A multiple of the rate Explore shows today is a reasonable start. Null leaves the trace volume rule out."
+  type        = number
+  default     = null
+}
+
 locals {
   stages = join("|", var.alert_stages)
 
@@ -105,6 +117,9 @@ locals {
   # Postgres's container log stream, same scheme. Anchored, so this is the
   # postgres service and not postgres-init.
   postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
+
+  # OpenBao's container log stream, same scheme.
+  openbao_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-openbao\""
 
   # Caddy's request metrics, narrowed to traffic the appliance's own sites
   # answered. caddy_http_request_duration_seconds_count is the series to read:
@@ -176,6 +191,20 @@ locals {
   # container_matcher makes above.
   scrape_matcher   = "service_name=~\"appliance-(${local.stages})-.*\""
   cadvisor_matcher = "job=\"cadvisor\", appliance=~\"(${local.stages})-.*\""
+
+  # The stage as a label of its own, for routing. Production critical alerts
+  # page where staging's notify, and a route can only tell them apart by a label
+  # the alert carries. Central's rules take one from their queries. The
+  # appliance's take it from the appliance label, <stage>-<region> by
+  # construction, cut at its first hyphen as the dashboard link below does.
+  # Adding it changed every appliance alert instance's identity once, when it
+  # landed.
+  #
+  # An instance raised because the query failed or came back empty carries
+  # none of the query's labels, so it has no stage, and a route that matches
+  # stage = "prod" will not see it. Routing has to treat a critical alert
+  # without a stage as possibly production; docs/observability.md says how.
+  appliance_stage_label = "{{ reReplaceAll \"-.*\" \"\" $labels.appliance }}"
 
   # A dashboard link that carries the stage, and for the appliance the region.
   #
@@ -444,6 +473,7 @@ resource "grafana_rule_group" "central" {
     labels = {
       team_name = "forge"
       component = "central"
+      stage     = "{{ reReplaceAll \"^fc-(.*)-provision$\" \"$1\" $labels.dimension_FunctionName }}"
       severity  = "warning"
     }
 
@@ -556,6 +586,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -677,6 +708,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -775,6 +807,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -868,6 +901,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -958,6 +992,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1055,6 +1090,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1110,8 +1146,9 @@ resource "grafana_rule_group" "appliance" {
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
   # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims them yet, so the figure only falls
-  # when someone removes them by hand. Firing on any stalled byte would
+  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
+  # part's goes with its session), nor may they be deleted by hand (Ingot's
+  # README), so the figure rarely falls. Firing on any stalled byte would
   # therefore fire for good after one failure. Growth is the signal instead:
   # more stalled bytes now than an hour ago means uploads are still failing.
   #
@@ -1129,7 +1166,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
@@ -1138,6 +1175,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1230,6 +1268,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1323,6 +1362,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1412,6 +1452,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1503,6 +1544,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1605,6 +1647,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1697,6 +1740,7 @@ resource "grafana_rule_group" "appliance" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "warning"
     }
 
@@ -1807,6 +1851,7 @@ resource "grafana_rule_group" "appliance_containers" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -1970,6 +2015,7 @@ resource "grafana_rule_group" "appliance_containers" {
     labels = {
       team_name = "forge"
       component = "appliance"
+      stage     = local.appliance_stage_label
       severity  = "critical"
     }
 
@@ -2055,6 +2101,338 @@ resource "grafana_rule_group" "appliance_containers" {
           query     = { params = ["C"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+}
+
+# The appliance failures that mean an outage rather than a degradation, in their
+# own group at 60s for the reason the containers group gives: at the 300s the
+# other appliance rules run at, evaluation alone can use up a five-minute budget.
+# Every rule here is severity = "critical", which is what production routing
+# keys on to page rather than notify.
+resource "grafana_rule_group" "appliance_outages" {
+  name             = "Forge Regions outages"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 60
+
+  # OpenBao cannot unseal, so nothing on the node can read its secrets. The
+  # node auto-unseals through the transit key at Central, which it reaches with
+  # the seal token, so an expired or revoked token, a missing transit key or an
+  # unreachable Central all end here (infra-nodes
+  # docs/runbook/recover-expired-unseal-token.md).
+  #
+  # The signal is OpenBao's own retry loop. When unsealing with stored keys
+  # fails it logs at WARN
+  #
+  #   failed to unseal core: error=...
+  #
+  # and tries again five seconds later, for as long as the failure lasts
+  # (openbao command/server.go, runUnseal, at v2.6.2, the version the nodes
+  # pin), so a sealed node writes a line every five seconds. The same loop
+  # treats only a failed declarative self-init as fatal, and the nodes
+  # initialise with `bao operator init` instead, so the WARN line is the one to
+  # match.
+  #
+  # An OpenBao that was started but never initialised fails the same way, with
+  # "is the server initialized?" in the error, so a region whose provisioning
+  # stops between starting OpenBao and initialising it fires this too. It is
+  # sealed all the same, and nothing on the node works until it is fixed.
+  #
+  # A one-minute window and `for` = 2m keep a single failed attempt during a
+  # restart from firing: it falls out of the window before two minutes of
+  # pending can accrue, while the five-second loop keeps every window full.
+  # Detection is about three minutes from the first failure, inside the five
+  # FIL-1164 asks for.
+  #
+  # What this does not see: a node sealed by hand with `bao operator seal`,
+  # which logs "vault is sealed" once and does not retry. Every restart logs
+  # that same line on the way down, so it cannot tell the two apart.
+  #
+  # no_data_state is OK for the reason the other log rules give: count_over_time
+  # returns a series only for a node that logged the line. An instant query, so
+  # no reduce stage.
+  rule {
+    name           = "OpenBao cannot unseal"
+    condition      = "B"
+    for            = "2m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OpenBao on {{ $labels.node }} ({{ $labels.region }}) is sealed and failing to unseal"
+      description = "OpenBao has been logging \"failed to unseal core\" for two minutes. It unseals through the transit key at Central, so the seal token has expired or been revoked, the transit key is missing, or Central is unreachable from the node; if the error asks whether the server is initialized, provisioning stopped before `bao operator init`. Nothing on the node can read its secrets until it unseals. Read the error in `docker logs filone-openbao`, then follow the expired unseal token runbook."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/runbook/recover-expired-unseal-token.md"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 60
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node) (
+            count_over_time(
+              {${local.openbao_log_matcher}}
+                |= "failed to unseal core"
+              [1m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # A site failing most of what it answers: the outage tier of "Appliance 5xx
+  # rate too high", which stays as the warning. Split by host for the same
+  # reason, so Ingot's site and Piri's are judged apart; Ingot exports no HTTP
+  # metrics of its own, so Caddy's view of its site is its error rate. A 502 here
+  # is Caddy failing to reach the upstream.
+  #
+  # Half of requests is chosen, not derived, like the warning's 5%: high enough
+  # that a deploy's restart cannot reach it, and low enough that a site serving
+  # only errors to one client and successes to another still trips it. The
+  # window is three minutes rather than five because Caddy is scraped every
+  # minute and rate() needs two samples, and `for` = 2m keeps detection near
+  # five minutes.
+  #
+  # The gate is a count of failed requests, at least five in the window, not
+  # the warning rule's rate floor. A floor in requests per second hides a quiet
+  # site that is failing everything, and a busy one whose clients back off once
+  # it fails; five errors in three minutes is still enough to keep a single
+  # failed request on an idle site from paging. A site whose clients stop
+  # sending altogether produces no errors to count, and nothing here sees it.
+  #
+  # no_data_state is OK: a site with no 5xx produces no series on the
+  # numerator's side, so an empty result is the healthy state. An instant query,
+  # so no reduce stage.
+  rule {
+    name           = "Appliance site is failing most requests"
+    condition      = "B"
+    for            = "2m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than half of its requests"
+      description      = "Caddy has answered more than half of this site's requests with a 5xx for two minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[3m]))."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=14"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "14"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            sum by (appliance, region, node, host) (
+              rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}, code=~"5.."}[3m])
+            )
+            /
+            sum by (appliance, region, node, host) (
+              rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}}[3m])
+            )
+          )
+          and
+          sum by (appliance, region, node, host) (
+            increase(caddy_http_request_duration_seconds_count{${local.caddy_matcher}, code=~"5.."}[3m])
+          ) >= 5
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.5] }
+        }]
+      })
+    }
+  }
+}
+
+# Trace volume, as a nudge rather than an alarm. Nothing else here would say
+# that a change -- a new span on a frequent code path, say -- has raised it, so
+# this watches the rate of spans Grafana Cloud reports receiving. That rate is
+# a proxy for volume: spans that grow larger without growing more numerous do
+# not move it. It covers the whole stack, and the stack is shared (main.tf), so
+# FilOne's spans count too; it cannot say whose they are, but span names in
+# Tempo can.
+#
+# Everything about it is set to stay quiet:
+#
+#   - It averages the rate over six hours and needs that average over the
+#     threshold for an hour more, so a burst never fires it, and it evaluates
+#     every fifteen minutes because nothing about it is urgent.
+#   - severity is info, so a route in the policy tree can send it somewhere
+#     quieter than the warnings; until one does, it goes wherever the forge
+#     route sends everything else.
+#
+# What it does not stay quiet about is being broken. no_data_state is NoData
+# and exec_err_state is Error, because a rule on the wrong data source, or on a
+# metric Grafana has renamed, would otherwise look exactly like one with
+# nothing to report. Before setting the variables, run the expression below in
+# Explore against that data source and check it returns one series.
+#
+# It exists only once usage_datasource_uid and trace_spans_alert_threshold are
+# both set, so this merges as nothing. Before setting them, forge-terraform
+# also needs datasources:query on grafanacloud-usage, for the reason the header
+# of this file gives.
+#
+# Grafana Cloud's own usage alerts, set in the Cost management pages rather than
+# here, are the backstop for the monthly total. This rule is for noticing a
+# change in rate before a month of it has accrued.
+resource "grafana_rule_group" "usage" {
+  count = var.usage_datasource_uid != null && var.trace_spans_alert_threshold != null ? 1 : 0
+
+  name             = "Forge Usage"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 900
+
+  rule {
+    name           = "Trace volume is above its threshold"
+    condition      = "B"
+    for            = "1h"
+    no_data_state  = "NoData"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "The stack has received {{ humanize $values.A.Value }} spans per second on average over six hours, above the threshold of ${var.trace_spans_alert_threshold}"
+      description = "Trace ingestion has risen. In Explore, sum(grafanacloud_traces_instance_spans_received_total:rate5m) on grafanacloud-usage shows when; in Tempo, grouping recent spans by name shows which. Raise the threshold if the new rate is expected."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "usage"
+      severity  = "info"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.usage_datasource_uid
+
+      relative_time_range {
+        from = 21600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId   = "A"
+        instant = true
+        range   = false
+        expr    = <<-PROMQL
+          avg_over_time(sum(grafanacloud_traces_instance_spans_received_total:rate5m)[6h:5m])
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [var.trace_spans_alert_threshold] }
         }]
       })
     }
