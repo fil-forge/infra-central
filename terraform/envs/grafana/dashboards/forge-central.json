@@ -1647,38 +1647,20 @@
     "title": "Forge Central",
     "variables": [
       {
-        "kind": "QueryVariable",
+        "kind": "CustomVariable",
         "spec": {
           "name": "stage",
           "current": {
-            "text": "dev",
-            "value": "dev"
+            "text": "prod",
+            "value": "prod"
           },
           "label": "Stage",
           "hide": "dontHide",
-          "refresh": "onDashboardLoad",
           "skipUrlSync": false,
-          "query": {
-            "kind": "DataQuery",
-            "group": "prometheus",
-            "version": "v0",
-            "datasource": {
-              "name": "grafanacloud-prom"
-            },
-            "spec": {
-              "qryType": 1,
-              "query": "label_values(dimension_ClusterName)",
-              "refId": "PrometheusVariableQueryEditor-VariableQuery"
-            }
-          },
-          "regex": "/^fc-(.+)$/",
-          "regexApplyTo": "value",
-          "sort": "disabled",
-          "definition": "label_values(dimension_ClusterName)",
+          "query": "dev,staging,prod",
           "options": [],
           "multi": false,
-          "includeAll": false,
-          "allowCustomValue": true
+          "includeAll": false
         }
       },
       {

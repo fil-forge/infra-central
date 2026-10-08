@@ -152,6 +152,56 @@ locals {
   # else added with that policy needs excluding here too.
   container_matcher = "service_name=~\"appliance-(${local.stages})-.*\", service_name!~\".*-postgres-init\""
 
+  # Alloy's own scrapes, selected by the labels each one actually arrives with.
+  #
+  # `up` is one series per target, not per container, so the two selectors
+  # cannot be the same. The host exporter and Caddy are each routed through a
+  # prometheus.relabel component that sets service_name on every series, so
+  # their `up` carries it (infra-nodes docs/RUNBOOK.md, staging section). The
+  # cAdvisor scrape is routed through the rules that read a container's Compose
+  # labels, which `up` does not have, so its `up` arrives carrying only the
+  # appliance label that remote_write puts on everything from the box, plus job
+  # and instance. Observed 2026-10-07: up{appliance="staging-eu-central-3",
+  # instance="ff", job="cadvisor"}.
+  #
+  # Scoping matters here. The appliance's Alloy also ships telemetry for
+  # workloads that are not ours and for remote targets, and every one of those
+  # series carries the appliance label too, so a rule matching on that alone
+  # would page us about somebody else's exporter. service_name is what keeps the
+  # first selector to our own scrapes. `job` does less than that for the second:
+  # the appliance runs one cAdvisor and it reports the host's other containers
+  # too, as the container rule's own gate comment says. So that selector names a
+  # shared scrape we depend on rather than one we own, which is still worth
+  # knowing about when it goes dark.
+  #
+  # service_name is deliberately not narrowed to host and caddy: a scrape added
+  # later is then watched from the day it ships, which is the same trade
+  # container_matcher makes above.
+  scrape_matcher   = "service_name=~\"appliance-(${local.stages})-.*\""
+  cadvisor_matcher = "job=\"cadvisor\", appliance=~\"(${local.stages})-.*\""
+
+  # A dashboard link that carries the stage, and for the appliance the region.
+  #
+  # Grafana builds the notification's dashboardURL and panelURL from
+  # __dashboardUid__ and __panelId__, and both come out as a bare /d/<uid> with
+  # no variables on it. The dashboards then open on whatever stage they default
+  # to, which is prod, while the only appliance is on staging -- so an alert's
+  # own link showed the on-call an empty dashboard for a stage that had not
+  # fired, which is the failure these rules exist to prevent, one level up.
+  #
+  # A URL Grafana does not build can carry them. Central's rules already derive
+  # a stage label in their queries; the appliance's do not, and the appliance
+  # label is <stage>-<region>, so reReplaceAll cuts it at the first hyphen.
+  #
+  # The __ pair stays. It is what ties a rule to its panel inside Grafana's own
+  # UI, and removing it would empty panelURL in the payload again. This is the
+  # link to follow from a page; that one is for the rule's own page.
+  #
+  # The host repeats the provider's url in main.tf. There is one stack, and no
+  # variable for it to share yet.
+  central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
+  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -183,6 +233,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
     }
@@ -277,6 +328,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning more than 1 server error a minute"
       description      = "More than one 5xx per minute, averaged over five, for ten minutes."
+      dashboard_url    = "${local.central_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-central"
       __panelId__      = "3"
     }
@@ -482,6 +534,12 @@ resource "grafana_rule_group" "appliance" {
   #
   # Either branch produces a value greater than zero -- an age in seconds, or 1
   # -- so the threshold stage stays `gt 0` and does not care which fired.
+  #
+  # Recovery is a no-data event, not a falling value. A fresh stamp fails the
+  # `> 900` filter and the node is present again, so both branches return
+  # nothing and there is no series left to go below a threshold.
+  # no_data_state = OK is what turns that into Normal; Alerting or NoData here
+  # would leave the rule firing after the node had recovered.
   rule {
     name           = "Appliance has stopped reporting"
     condition      = "C"
@@ -493,6 +551,7 @@ resource "grafana_rule_group" "appliance" {
       summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
       description      = "The reconcile stamp is more than fifteen minutes old, or the node has stopped reporting altogether. The timer runs every five, so either the node has stopped reconciling or its telemetry has stopped arriving."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "13"
     }
@@ -594,17 +653,26 @@ resource "grafana_rule_group" "appliance" {
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
+  #
+  # no_data_state was NoData, which meant a dark host exporter raised a
+  # DatasourceNoData instance here carrying this rule's own labels, and so a
+  # notification about disk space when the subject was the scrape. It is OK now
+  # that "Appliance metrics scrape is failing" says that directly and sooner.
+  # The two are a pair: this rule is deliberately silent about absent data
+  # because another one is not, so do not delete that rule without putting this
+  # back.
   rule {
     name           = "Appliance free disk space below 40%"
     condition      = "B"
     for            = "15m"
-    no_data_state  = "NoData"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
       summary          = "{{ $labels.appliance }} has less than 40% free on {{ $labels.mountpoint }}"
       description      = "{{ $labels.node }} is below 40% free on {{ $labels.mountpoint }}. Volumes and their sizes are in infra-nodes' terraform/modules/node."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "8"
     }
@@ -877,9 +945,12 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
-      description = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      summary          = "{{ $labels.host }} on {{ $labels.node }} is returning 5xx for more than 5% of requests"
+      description      = "Caddy has answered more than one request in twenty with a 5xx for ten minutes. A 502 is Caddy failing to reach the upstream, so check the container is running and healthy; a 500 came from Piri or Ingot itself, so read its log. Split by code and handler: sum by (code, handler) (rate(caddy_http_request_duration_seconds_count{host=\"{{ $labels.host }}\", code=~\"5..\"}[5m]))."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=14"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "14"
     }
 
     labels = {
@@ -974,6 +1045,7 @@ resource "grafana_rule_group" "appliance" {
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
       description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=17"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "17"
     }
@@ -1036,8 +1108,9 @@ resource "grafana_rule_group" "appliance" {
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
   # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims them yet, so the figure only falls
-  # when someone removes them by hand. Firing on any stalled byte would
+  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
+  # part's goes with its session), nor may they be deleted by hand (Ingot's
+  # README), so the figure rarely falls. Firing on any stalled byte would
   # therefore fire for good after one failure. Growth is the signal instead:
   # more stalled bytes now than an hour ago means uploads are still failing.
   #
@@ -1055,7 +1128,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
     }
@@ -1116,6 +1190,192 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
+  # Alloy tried to scrape an exporter and failed. Worth its own rule because the
+  # panels built on each scrape read *no data* rather than zero when it is dark,
+  # and a panel reading no errors looks much like one reading none.
+  #
+  # == bool 0 rather than == 0, which would keep the series and leave its value
+  # at 0 -- the threshold stage below is `gt 0`, so the filter form would never
+  # fire. The bool form scores every target instead, 1 for a failed scrape and 0
+  # for a good one, which also means recovery is a value falling rather than a
+  # series vanishing.
+  #
+  # No absence branch: a node that has gone away stops producing `up` at all, so
+  # this rule falls silent and "Appliance has stopped reporting" is the one that
+  # fires. That deduplicates node death and nothing else, and the common case is
+  # worth being plain about rather than claiming more. The deploy stamp is a
+  # textfile-collector gauge on this same host exporter, so a wedged exporter on
+  # a live box *is* the stamp going stale: this fires at about eight minutes
+  # naming the exporter, the node rule follows at about twenty-five under a
+  # summary that reads as though the box were gone, and the disk rule's
+  # no_data_state = "NoData" adds a third notification. Earlier and specific is
+  # worth that; a quieter rule here would only mean learning it later and worse.
+  rule {
+    name           = "Appliance metrics scrape is failing"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "{{ $labels.service_name }} is not answering Alloy on {{ $labels.node }}"
+      description      = "Alloy reached this exporter and got nothing back, so every panel built on it reads no data rather than zero. The host scrape carries CPU, memory, disk and the reconcile age; the Caddy scrape carries the request and error panels, and Caddy failing to answer here may mean the public surface is down with it."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=3"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "3"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{service_name}}"
+        expr         = <<-PROMQL
+          max by (appliance, node, region, service_name) (
+            up{${local.scrape_matcher}} == bool 0
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The labelling convention, alerted on rather than written down.
+  #
+  # Every per-box rule in this file needs `node`, because `appliance` is
+  # <stage>-<region> and cannot tell two boxes in one region apart. The host and
+  # Caddy scrapes carry node because each is routed through a relabel component
+  # that sets it on every series; the cAdvisor scrape is routed through rules
+  # that read a container's Compose labels, which `up` does not have, so its
+  # `up` arrives without one. That is a convention living in a config outside
+  # these repositories, and conventions in prose get dropped when the config is
+  # re-implemented -- which it will be, at the next box and again if the
+  # appliance ever runs its own Alloy.
+  #
+  # So this fires while the convention is broken, and goes quiet when it is
+  # kept. Prometheus reads an absent label as empty, so node="" selects exactly
+  # the series missing one. `count` rather than the value, because `up` is 1 for
+  # a healthy scrape and the signal here is that the series exists at all.
+  #
+  # What it cannot see: a scrape that drops `node` *and* has neither
+  # job="cadvisor" nor an appliance service_name is indistinguishable from the
+  # host's other workloads, and nothing can catch that.
+  #
+  # No dashboard link, because no panel shows label health. The fix is in the
+  # staging section of infra-nodes docs/RUNBOOK.md, which specifies the labels
+  # each scrape has to set.
+  rule {
+    name           = "Appliance telemetry is missing its node label"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "{{ $labels.appliance }} is shipping telemetry with no node label"
+      description = "A scrape on this appliance is arriving without the node label every per-box rule needs. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}} {{job}}{{service_name}}"
+        expr         = <<-PROMQL
+          count by (appliance, job, service_name) (
+            up{appliance=~"(${local.stages})-.*", node="", job="cadvisor"}
+            or
+            up{appliance=~"(${local.stages})-.*", node="", ${local.scrape_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
@@ -1131,6 +1391,11 @@ resource "grafana_rule_group" "appliance_containers" {
   # the container goes away, so there is no value to compare against a
   # threshold; the expression tests for a series that was there and is not. The
   # clauses are annotated inline below.
+  #
+  # That shape makes recovery a no-data event too: a container that comes back
+  # satisfies both present_over_time clauses, the `unless` cancels them, and the
+  # rule has nothing left to evaluate. So no_data_state = OK is what lets the
+  # rule clear, as well as what keeps it quiet where cAdvisor does not run.
   #
   # Only staging is watched, because only staging runs cAdvisor -- the dev EC2
   # node's Alloy container has no cgroup mount
@@ -1153,8 +1418,9 @@ resource "grafana_rule_group" "appliance_containers" {
       summary          = "{{ $labels.service_name }} is not running on {{ $labels.node }}"
       description      = "cAdvisor reported this container within the last day and not within the last five minutes, so it has stopped. Container logs: {service_name=\"{{ $labels.service_name }}\"}."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=21"
       __dashboardUid__ = "forge-regions"
-      __panelId__      = "1"
+      __panelId__      = "21"
     }
 
     labels = {
@@ -1204,6 +1470,161 @@ resource "grafana_rule_group" "appliance_containers" {
           and on (node)
           max by (node) (
             present_over_time(container_cpu_usage_seconds_total{job="cadvisor"}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "reduce"
+        expression    = "A"
+        reducer       = "last"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+      })
+    }
+
+    data {
+      ref_id         = "C"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "B"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The blind spot the rule above names, closed.
+  #
+  # "Appliance container is not running" holds itself silent while cAdvisor is
+  # dark, because the alternative is every watched container paging at once. So
+  # a dead cAdvisor is not a quiet dashboard, it is nothing watching the
+  # containers at all, and only a rule on the scrape itself can say so.
+  #
+  # Two shapes, because how cAdvisor's target fails depends on how the host's
+  # Alloy declares it, and that config lives outside these repositories. A
+  # static target stays and its scrape fails, giving up == 0; a discovered one
+  # disappears with the container and gives no series at all. The first branch
+  # catches the former and the second the latter, so this holds either way.
+  #
+  # The gate is what keeps a dead node from paging twice: no host scrape in the
+  # last five minutes means the box is gone, which is "Appliance has stopped
+  # reporting"'s to tell. `and` binds tighter than `or`, hence the parentheses
+  # around the pair.
+  #
+  # The branches are not equally quick, and it is better not to imply they are.
+  # A failing static target is true at the next scrape, so roughly five minutes
+  # once `for` has run; a vanished discovered one needs the 5m window to empty
+  # first, so roughly ten.
+  #
+  # `for = 5m` is load-bearing rather than debounce. On node death the absence
+  # branch and the gate are driven by the same five-minute window on the same
+  # stream, and `for` is what absorbs the skew between them so they lapse
+  # together instead of racing into a page. The rule beside this one runs
+  # `for = 0m`; harmonising the two would turn every node death into a second
+  # page.
+  #
+  # Grouped by node as well as appliance, although cAdvisor's `up` carries no
+  # node label today. `appliance` is <stage>-<region>, set through external
+  # labels on remote_write, so it can never tell two boxes in one region apart,
+  # and grouping by it alone would let a healthy sibling mask a dead cAdvisor
+  # through the `unless` above. Prometheus reads an absent label as empty, so
+  # this groups exactly as `by (appliance)` would until the host's Alloy sets
+  # node on the cAdvisor scrape, and becomes per box by itself on the day it
+  # does. No second edit, and nothing to remember.
+  #
+  # The gate cannot move early the same way. The host scrape already carries
+  # node, so joining on it now would match an empty string against a real one,
+  # find nothing, and leave this rule silently Normal for ever -- the same class
+  # of fault the rule exists to catch. It stays region-wide, which with two
+  # boxes means a live sibling holds it open; that is a far smaller gap than a
+  # masked detection, and the case it softens is a box entirely dead, which the
+  # node rule already covers.
+  rule {
+    name           = "Appliance container telemetry has stopped"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "cAdvisor has stopped reporting on {{ $labels.appliance }}"
+      description      = "No container metrics are arriving from this appliance, so nothing is watching its containers: \"Appliance container is not running\" gates itself off while cAdvisor is dark and will not fire however many containers stop. Treat this as the containers being unwatched rather than as a missing graph."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=21"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "21"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = false
+        range        = true
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          (
+            max by (appliance, node) (
+              up{${local.cadvisor_matcher}} == bool 0
+            )
+            or
+            (
+              max by (appliance, node) (
+                present_over_time(up{${local.cadvisor_matcher}}[24h])
+              )
+              unless
+              max by (appliance, node) (
+                present_over_time(up{${local.cadvisor_matcher}}[5m])
+              )
+            )
+          )
+          and on (appliance)
+          max by (appliance) (
+            present_over_time(up{${local.appliance_matcher}}[5m])
           )
         PROMQL
       }))

@@ -40,4 +40,11 @@ loki_datasource_uid = "grafanacloud-logs"
 # hand-built rules these replace were watching, and it keeps the rules whose
 # no_data_state is NoData quiet while a prod reset leaves prod with nothing to
 # report.
+#
+# The dashboards' stage picker is this list with dev in front: dev exists and is
+# worth looking at, but nothing alerts on it, so it is the standing exception
+# rather than a second list. Adding a stage here means adding it to both
+# dashboards' stage variable too -- scripts/check-stage-picker.sh fails the
+# build if they drift, which is what keeps alerts firing for a stage no
+# dashboard offers from going unnoticed.
 alert_stages = ["staging", "prod"]
