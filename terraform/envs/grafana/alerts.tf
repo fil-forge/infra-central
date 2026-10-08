@@ -1115,8 +1115,9 @@ resource "grafana_rule_group" "appliance" {
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
   # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims them yet, so the figure only falls
-  # when someone removes them by hand. Firing on any stalled byte would
+  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
+  # part's goes with its session), nor may they be deleted by hand (Ingot's
+  # README), so the figure rarely falls. Firing on any stalled byte would
   # therefore fire for good after one failure. Growth is the signal instead:
   # more stalled bytes now than an hour ago means uploads are still failing.
   #
@@ -1134,7 +1135,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload failed are piling up in Ingot's spool. They count against the local disk budget and nothing reclaims them yet; Ingot's logs say why the uploads failed."
+      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
