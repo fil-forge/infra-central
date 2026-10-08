@@ -171,6 +171,20 @@ locals {
   scrape_matcher   = "service_name=~\"appliance-(${local.stages})-.*\""
   cadvisor_matcher = "job=\"cadvisor\", appliance=~\"(${local.stages})-.*\""
 
+  # The stage as a label of its own, for routing. Production critical alerts
+  # page where staging's notify, and a route can only tell them apart by a label
+  # the alert carries. Central's rules take one from their queries. The
+  # appliance's take it from the appliance label, <stage>-<region> by
+  # construction, cut at its first hyphen as the dashboard link below does.
+  # Adding it changed every appliance alert instance's identity once, when it
+  # landed.
+  #
+  # An instance raised because the query failed or came back empty carries
+  # none of the query's labels, so it has no stage, and a route that matches
+  # stage = "prod" will not see it. Routing has to treat a critical alert
+  # without a stage as possibly production; docs/observability.md says how.
+  appliance_stage_label = "{{ reReplaceAll \"-.*\" \"\" $labels.appliance }}"
+
   # A dashboard link that carries the stage, and for the appliance the region.
   #
   # Grafana builds the notification's dashboardURL and panelURL from
@@ -190,15 +204,6 @@ locals {
   #
   # The host repeats the provider's url in main.tf. There is one stack, and no
   # variable for it to share yet.
-  # The stage as a label of its own, for routing. Production critical alerts
-  # page where staging's notify, and a route can only tell them apart by a label
-  # the alert carries. Central's rules take one from their queries. The
-  # appliance's take it from the appliance label, <stage>-<region> by
-  # construction, cut at its first hyphen as the dashboard link below does.
-  # Adding it changed every appliance alert instance's identity once, when it
-  # landed.
-  appliance_stage_label = "{{ reReplaceAll \"-.*\" \"\" $labels.appliance }}"
-
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
   regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
 
@@ -1713,11 +1718,17 @@ resource "grafana_rule_group" "appliance_outages" {
   #
   #   failed to unseal core: error=...
   #
-  # and tries again five seconds later, for as long as the failure lasts; a
-  # failure it cannot recover from logs "error unsealing core" at ERROR and
-  # exits, and the container's restart policy brings it back to fail again
+  # and tries again five seconds later, for as long as the failure lasts
   # (openbao command/server.go, runUnseal, at v2.6.2, the version the nodes
-  # pin). Either way a sealed node writes a line every few seconds.
+  # pin), so a sealed node writes a line every five seconds. The same loop
+  # treats only a failed declarative self-init as fatal, and the nodes
+  # initialise with `bao operator init` instead, so the WARN line is the one to
+  # match.
+  #
+  # An OpenBao that was started but never initialised fails the same way, with
+  # "is the server initialized?" in the error, so a region whose provisioning
+  # stops between starting OpenBao and initialising it fires this too. It is
+  # sealed all the same, and nothing on the node works until it is fixed.
   #
   # A one-minute window and `for` = 2m keep a single failed attempt during a
   # restart from firing: it falls out of the window before two minutes of
@@ -1741,7 +1752,7 @@ resource "grafana_rule_group" "appliance_outages" {
 
     annotations = {
       summary     = "OpenBao on {{ $labels.node }} ({{ $labels.region }}) is sealed and failing to unseal"
-      description = "OpenBao has been logging \"failed to unseal core\" for two minutes. It unseals through the transit key at Central, so the seal token has expired or been revoked, the transit key is missing, or Central is unreachable from the node. Nothing on the node can read its secrets until it unseals. Read the error in `docker logs filone-openbao`, then follow the expired unseal token runbook."
+      description = "OpenBao has been logging \"failed to unseal core\" for two minutes. It unseals through the transit key at Central, so the seal token has expired or been revoked, the transit key is missing, or Central is unreachable from the node; if the error asks whether the server is initialized, provisioning stopped before `bao operator init`. Nothing on the node can read its secrets until it unseals. Read the error in `docker logs filone-openbao`, then follow the expired unseal token runbook."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/runbook/recover-expired-unseal-token.md"
     }
 
@@ -1771,7 +1782,7 @@ resource "grafana_rule_group" "appliance_outages" {
           sum by (appliance, region, node) (
             count_over_time(
               {${local.openbao_log_matcher}}
-                |~ "failed to unseal core|error unsealing core"
+                |= "failed to unseal core"
               [1m]
             )
           )
@@ -1818,7 +1829,14 @@ resource "grafana_rule_group" "appliance_outages" {
   # only errors to one client and successes to another still trips it. The
   # window is three minutes rather than five because Caddy is scraped every
   # minute and rate() needs two samples, and `for` = 2m keeps detection near
-  # five minutes. The traffic gate is the warning rule's.
+  # five minutes.
+  #
+  # The gate is a count of failed requests, at least five in the window, not
+  # the warning rule's rate floor. A floor in requests per second hides a quiet
+  # site that is failing everything, and a busy one whose clients back off once
+  # it fails; five errors in three minutes is still enough to keep a single
+  # failed request on an idle site from paging. A site whose clients stop
+  # sending altogether produces no errors to count, and nothing here sees it.
   #
   # no_data_state is OK: a site with no 5xx produces no series on the
   # numerator's side, so an empty result is the healthy state. An instant query,
@@ -1872,8 +1890,8 @@ resource "grafana_rule_group" "appliance_outages" {
           )
           and
           sum by (appliance, region, node, host) (
-            rate(caddy_http_request_duration_seconds_count{${local.caddy_matcher}}[3m])
-          ) > 0.1
+            increase(caddy_http_request_duration_seconds_count{${local.caddy_matcher}, code=~"5.."}[3m])
+          ) >= 5
         PROMQL
       }))
     }
