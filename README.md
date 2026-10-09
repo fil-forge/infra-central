@@ -217,6 +217,7 @@ terraform/modules/
     main.tf                the wiring, calling the eight below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
     aurora/                prod's database, in place of database/
+    compat-vpn/            the compatibility server's site-to-site VPN
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root
@@ -224,7 +225,6 @@ terraform/modules/
     constants/             every root, bootstrap included
   ecr/                     regional bootstrap only: the image registry
   telemetry/               regional bootstrap only: the Firehoses and metric stream to Grafana
-  compat-vpn/              regional bootstrap only: the compatibility server's site-to-site VPN
   tfstate/                 account bootstrap only: the state bucket
   github-actions-iam/      account bootstrap only: the two CI roles
 ```
@@ -468,9 +468,7 @@ kinds, and the split is what keeps a second region cheap:
 - `bootstrap/<account>/<region>/` holds the **ECR repository** for the provision
   Lambda image and the **telemetry egress** to Grafana Cloud. In prod it also
   holds the **KMS keys** of the Aurora cluster and of OpenBao's seal, which must
-  outlive the platform root, and the compatibility server's **site-to-site
-  VPN** ([docs/compat-server-vpn.md](docs/compat-server-vpn.md)). One per
-  account _and_ region, described in
+  outlive the platform root. One per account _and_ region, described in
   [Setting up an AWS region](#setting-up-an-aws-region).
 
 Both accounts this project uses already have an account root, and both have

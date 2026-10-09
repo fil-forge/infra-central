@@ -1,13 +1,12 @@
 # The AWS side of the site-to-site VPN between a stage's compatibility server
 # appliances and that stage's pandora database cluster: one virtual private
-# gateway per stage, and per appliance site a customer gateway and a VPN
-# connection with two tunnels.
+# gateway per stage, attached to the stage's VPC, and per appliance site a
+# customer gateway and a VPN connection with two tunnels.
 #
-# It lives in the regional bootstrap rather than the platform root because a
-# VPC cannot be deleted while a gateway is attached to it. The platform root
-# attaches this gateway and propagates its routes into the cluster's route
-# table, so a destroy of that root detaches the gateway and leaves the tunnels'
-# addresses and keys here.
+# The VPN does not depend on the cluster, so dropping or replacing the cluster
+# leaves the tunnels, their addresses and their keys as they are. A destroy of
+# the whole platform root deletes them with the VPC, and each site's appliance
+# then needs the new addresses and keys.
 #
 # See docs/decisions/2026-10-compat-server-database.md and
 # docs/compat-server-vpn.md.
@@ -28,8 +27,12 @@ locals {
   dh_group_numbers      = [20, 21]
 }
 
+# Setting vpc_id attaches the gateway as part of creating it, and detaches it
+# before deleting it, so the VPC can always be destroyed.
 resource "aws_vpn_gateway" "this" {
   count = local.enabled ? 1 : 0
+
+  vpc_id = var.vpc_id
 
   tags = { Name = local.name }
 }

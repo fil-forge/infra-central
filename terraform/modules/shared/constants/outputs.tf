@@ -59,13 +59,11 @@ output "prod_openbao_seal_key_alias" {
 }
 
 # The SpiderOak compatibility server's appliances, per stage and then per
-# region label. Read by both roots that build the path to the stage's pandora
-# database: the regional bootstrap creates a customer gateway and a VPN
-# connection per site, and the platform root admits each private_ip to the
-# cluster. A stage can have sites without the cluster, which is the state
-# between bringing the VPN up and creating the cluster, and after dropping the
-# cluster; a stage with the cluster needs sites. See docs/compat-server-vpn.md
-# for adding one.
+# region label. The platform root creates a customer gateway and a VPN
+# connection per site, and admits each private_ip to the stage's pandora
+# database cluster. A stage can have sites without the cluster, which keeps the
+# tunnels up while the cluster is dropped; a stage with the cluster needs sites.
+# See docs/compat-server-vpn.md for adding one.
 #
 # public_ip is the appliance's static IPv4. It is public anyway, behind
 # s3.<region>.filonecontent.com. private_ip is the /32 the appliance
