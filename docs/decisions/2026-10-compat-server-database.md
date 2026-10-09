@@ -67,11 +67,12 @@ different zones.
 | Routing | The gateway propagates the site's route into the new database route table only. Central's database route table is unchanged. |
 | Security group | 5432 from the appliance's private address and from the provision Lambda's security group. No other source can reach the database. |
 | Appliance side | strongSwan on the host with both tunnels up, route-based, with one xfrm interface per tunnel. A health check moves the database route between tunnels, reverse-path filtering is loose because AWS answers on the tunnel it prefers, and TCP MSS is clamped. |
-| Appliance addressing | Each site gets a private /32 on a dummy interface, and the server's database traffic is source-NATed to it. The VPN's static route and the security group name that address, and the appliance routes only `10.20.192.0/18` into the tunnel. |
+| Appliance addressing | Each site gets a private /32 from `10.21.0.0/24`, outside the VPC, on a dummy interface, and the server's database traffic is source-NATed to it. The VPN's static route and the security group name that address, and the appliance routes only `10.20.192.0/18` into the tunnel. |
 | Encryption in transit | IPsec on the tunnel, and TLS to Postgres with `rds.force_ssl=1` and clients on `sslmode=verify-full`. |
 | DNS | None needed. The cluster endpoint is a public DNS name that resolves to the cluster's private addresses. |
+| Tunnel options | Pinned on both tunnels: IKEv2 only, AES256-GCM-16 with SHA2-384 in both phases, DH groups 20 and 21. strongSwan in Debian 12 and 13 and Ubuntu 24.04 supports all of them, and AWS's defaults would also accept AES-128, SHA-1 and DH group 2. |
 | Keys | Pre-shared keys stored in Secrets Manager (`preshared_key_storage = "SecretsManager"`), out of Terraform state. |
-| Monitoring | A CloudWatch alarm on the connection's `TunnelState` (dimension `VpnId`) below 1. It fires when either tunnel is down, including during AWS's tunnel maintenance. |
+| Monitoring | A Grafana alert rule on the connection's `TunnelState` (dimension `VpnId`) below 1, fed by adding `AWS/VPN` to the metric stream. It fires when either tunnel is down, including during AWS's tunnel maintenance. Nothing in the account routes CloudWatch alarms to on-call, and every other alert is a Grafana rule. |
 
 The VPN costs about $44 a month per site: $36.50 for the connection and $7.30 for the two tunnel
 addresses. The virtual private gateway is free. Data leaving AWS costs $0.09/GB, the same as on any
@@ -106,6 +107,12 @@ The cluster's subnets take /20 indexes 12–14 of the VPC (`10.20.192.0/20` to `
 Indexes 9–11 cannot be covered by one route without including central's third database subnet.
 Indexes 12–15 sit inside one free /18.
 
+Sites are listed per stage in the shared constants module, as `compat_server_sites`, keyed by stage
+and then by the appliance's region label, with each site's public and private address. Both roots
+read the one list. Staging appliances run on different hosts from prod ones, so each stage has its
+own sites, and a stage whose list is empty gets no gateway. A stage with sites must also have the
+cluster.
+
 A VPC cannot be deleted while a gateway is attached to it, so the pieces split across roots. The
 customer gateway, the virtual private gateway and the VPN connection live in the regional bootstrap
 root, which survives the post-test reset
@@ -113,15 +120,23 @@ root, which survives the post-test reset
 and keys stable. That root is applied by hand, so adding a site is an operator step. The gateway
 attachment, the route propagation and the cluster live in the platform root, so a reset that
 destroys the platform root also deletes the cluster. Whether a VPN connection on a detached gateway
-keeps its tunnel addresses when the gateway is attached again is tested once before the reset. If it
-does not, the connection can move to a new gateway, which AWS documents as keeping its tunnel
-addresses and options.
+keeps its tunnel addresses when the gateway is attached again is tested once before the reset, as a
+runbook step. If it does not, the connection can move to a new gateway, which AWS documents as
+keeping its tunnel addresses and options.
+
+Dropping the cluster outside a reset, as at the end of the test cycle, also empties the stage's
+site list, because a stage with sites must have the cluster. The hand-applied bootstrap then
+deletes the gateway and the VPN connections, and the next cycle's tunnels get new addresses and
+keys.
 
 ## Work this leaves for the server and the appliance
 
 - The server connects as more than one login role. The provision Lambda creates one login role per
-  database today, so it needs a way to create several, and it needs the second cluster's master
-  secret.
+  database today. It needs the second cluster's master secret and a way to create three roles:
+  `pandora`, which owns the database and is used only by the loader; `pandora_storage_server` for
+  the server's daemons; and a read-only `ergo_proxy`. The two login roles get a 15-second
+  `statement_timeout`. Each role's DSN goes to SSM with `sslmode=verify-full`, and table grants
+  live in the server's own grants file.
 - Passwords minted in central's secret store have no path into an appliance's OpenBao yet.
 - The server's Postgres client must support SCRAM authentication.
 - Connections cross a WAN, so clients set TCP keepalives and `tcp_user_timeout`, and long-lived
