@@ -115,10 +115,14 @@ It prints `15s`. A connection from any other address times out.
 
 The Grafana rule "Pandora VPN tunnel down" is a warning after one tunnel has been down for 15
 minutes, and "Pandora VPN both tunnels down" is a critical after both have been down for five. Both
-also fire when no `TunnelState` data arrives for that long. The critical rule stays paused until the
-first production appliance runs strongSwan (FIL-1402); the pull request that brings that site live
-sets `is_paused = false` in `terraform/envs/grafana/alerts.tf`. An apply that changes a VPN
-connection's options or its customer gateway takes both tunnels down, so silence both rules for it.
+also fire when no `TunnelState` data arrives, about 20 and ten minutes after the last sample: the
+query keeps returning that sample for Mimir's five-minute lookback before the wait starts. With more
+than one site, the rules do not notice one VPN connection's data stopping while another's arrives.
+The critical rule stays paused until the first production appliance runs strongSwan (FIL-1402); the
+pull request that brings that site live replaces its `is_paused = true` in
+`terraform/envs/grafana/alerts.tf` with the warning rule's expression, which pauses a rule while
+prod has no site. An apply that changes a VPN connection's options or its customer gateway takes
+both tunnels down, so silence both rules for it.
 
 ## Dropping the cluster
 
@@ -127,7 +131,8 @@ stage's platform root and merge. CI deletes the cluster, with no final snapshot 
 off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
 
 Removing the VPN as well means deleting the stage's sites from `pandora_sites`, in the same
-pull request or a later one. New tunnels later get new addresses and keys.
+pull request or a later one. New tunnels later get new addresses and keys. Removing prod's last
+site also pauses the VPN rules, through the Grafana root's apply on the same merge.
 
 ## Destroying the platform root
 
