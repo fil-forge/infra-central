@@ -124,6 +124,51 @@ pull request that brings that site live replaces its `is_paused = true` in
 prod has no site. An apply that changes a VPN connection's options or its customer gateway takes
 both tunnels down, so silence both rules for it.
 
+### Checking a site before its appliance is configured
+
+Two scripts check a site's VPN connection without the appliance's own strongSwan. Both use the
+stage's real tunnels, so silence the Grafana rule "Pandora VPN tunnel down" for the run.
+
+The host check runs strongSwan and psql in containers on the site's appliance host, and leaves the
+host's network configuration alone. Start it from a laptop with credentials for the stage's account:
+
+```bash
+scripts/fetch-pandora-vpn-secrets.sh --stage prod --site provisional --host root@23.83.66.244
+```
+
+```bash
+ssh -t root@23.83.66.244 /run/pandora-vpn-check/check-pandora-vpn-host.sh
+```
+
+The first copies the check, the tunnel addresses, the keys, the `pandora_storage_server` DSN and the
+RDS CA bundle to `/run/pandora-vpn-check` on the host, a tmpfs. The second brings both tunnels up,
+queries the cluster through tunnel 1, then through tunnel 2 with tunnel 1 down. With both tunnels
+back up it prints the command that shows their status on the AWS side, waits for Enter, and removes
+its containers, images and `/run/pandora-vpn-check`. Nothing else on the host may initiate IKE
+while it runs, since two initiators from one address compete for the same tunnels.
+
+The laptop check confirms that AWS refuses IKE from any other address:
+
+```bash
+scripts/check-pandora-vpn-laptop.sh --stage prod --site provisional
+```
+
+It attempts IKE with both tunnels using the site's identity and real keys, and passes when neither
+tunnel establishes. The keys stay in a temporary directory removed on exit.
+
+A host run interrupted before its cleanup leaves its containers and secrets behind, and the next
+fetch refuses to overwrite them. Remove them on the host with:
+
+```bash
+docker compose -f /run/pandora-vpn-check/pandora-vpn-check/compose.yml down --rmi local --volumes
+```
+
+```bash
+rm -rf /run/pandora-vpn-check
+```
+
+A reboot also clears the secrets.
+
 ## Dropping the cluster
 
 To drop the Aurora cluster instead of performing a data reset, set `pandora_db = null` in the
