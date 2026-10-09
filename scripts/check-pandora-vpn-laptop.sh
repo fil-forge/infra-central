@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Check that AWS refuses IKE for a site's VPN connection from any address but
+# Check that a site's VPN connection establishes no tunnel with any address but
 # the site's own.
 #
 # Runs strongSwan in a container on this laptop with the site's real tunnel
 # addresses, its customer gateway identity and both real pre-shared keys, and
 # passes if neither tunnel establishes. AWS should not even answer the first
 # IKE message, because it comes from an address other than the customer
-# gateway's. The charon lines printed at the end show whether AWS answered at
-# all. The keys stay in a temporary directory that is deleted on exit.
+# gateway's. A firewall that drops UDP 500 or 4500 on this laptop's path looks
+# the same, so a run that AWS did not answer shows only that no tunnel
+# established; one that AWS answered and refused shows that AWS checked the
+# attempt. The charon lines printed at the end show which. The keys stay in a
+# temporary directory that is deleted on exit.
 #
 # It needs no database access: the cluster has no public address, so a psql
 # attempt from here would prove nothing.
@@ -29,7 +32,7 @@ IMAGE=pandora-vpn-check:laptop
 CONTAINER=pandora-vpn-check-laptop
 
 # With retransmit_tries = 2, charon gives up on an unanswered IKE_SA_INIT after
-# about 25 seconds.
+# about 25 seconds. A refusal from AWS ends the attempt at once.
 TIMEOUT_SECONDS=60
 
 STAGE=""
@@ -77,26 +80,36 @@ main() {
     --entrypoint strongswan-entrypoint.sh \
     "$IMAGE" >/dev/null
 
-  local deadline=$((SECONDS + TIMEOUT_SECONDS)) logs
+  # keyingtries = 1 for this role, so charon deletes an IKE SA when its attempt
+  # ends, whether retransmits ran out or AWS refused it, and does not retry.
+  # Both attempts are over once both have started and no SA is left. The logs
+  # are read first: an SA exists before its "initiating" line is logged.
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) logs sas
   while :; do
-    if docker exec "$CONTAINER" swanctl --list-sas 2>/dev/null | grep -q ESTABLISHED; then
+    logs="$(docker logs "$CONTAINER" 2>&1)"
+    sas="$(docker exec "$CONTAINER" swanctl --list-sas 2>/dev/null)" || sas=""
+    if grep -q ESTABLISHED <<<"$sas"; then
       print_ike_log
       fail "AWS established an IKE SA with ${public_ip}, which is not the site's address"
     fi
-    logs="$(docker logs "$CONTAINER" 2>&1)"
-    if [ "$(grep -c 'giving up after' <<<"$logs")" -ge 2 ]; then
+    if grep -q 'initiating IKE_SA tunnel1\[' <<<"$logs" \
+      && grep -q 'initiating IKE_SA tunnel2\[' <<<"$logs" \
+      && ! grep -q 'IKEv2' <<<"$sas"; then
       break
     fi
-    [ "$SECONDS" -lt "$deadline" ] || { print_ike_log; fail "charon neither established nor gave up within ${TIMEOUT_SECONDS} seconds"; }
+    [ "$SECONDS" -lt "$deadline" ] || { print_ike_log; fail "charon neither established nor ended both attempts within ${TIMEOUT_SECONDS} seconds"; }
     sleep 2
   done
 
+  logs="$(docker logs "$CONTAINER" 2>&1)"
   print_ike_log
   echo
   if grep -q 'received packet' <<<"$logs"; then
-    echo "PASSED: no tunnel established, but AWS answered; the lines above show how."
+    echo "PASSED: AWS answered and refused; the lines above show how."
   else
-    echo "PASSED: AWS did not answer either tunnel."
+    echo "PASSED, NO ANSWER: no tunnel established and AWS did not answer either tunnel."
+    echo "AWS ignores an unknown peer, and a firewall dropping UDP 500 or 4500 on this"
+    echo "laptop's path looks the same, so this run does not show that AWS saw the attempt."
   fi
 }
 
