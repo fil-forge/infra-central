@@ -442,11 +442,17 @@ resource "grafana_rule_group" "central" {
   # Half of requests is chosen, not derived, like the appliance's. The gate is a
   # count of failed requests, at least five in the window, for the reason the
   # appliance rule gives: a rate floor hides a quiet service that fails
-  # everything. CloudWatch publishes each count only in minutes that had one, so
+  # everything. It only narrows that gap: the metric stream delivers each minute
+  # a few minutes late, so the window holds fewer minutes than its length, and a
+  # service failing every one of a request or two a minute may never reach five.
+  # CloudWatch publishes each count only in minutes that had one, so
   # sum_over_time adds the minutes present, and a service with no 5xx has no
   # numerator series; no_data_state is OK because an empty result is healthy.
-  # `for` is 5m, as on the healthy-hosts rule, because these samples arrive late
-  # and occasionally not at all.
+  #
+  # `for` is 2m, as on the appliance's outage rules, to keep detection near
+  # five minutes once the stream's delay is added. The window already sums
+  # several minutes, so one late or missing sample lowers the counts rather
+  # than removing the series and resetting pending.
   #
   # What this does not see: 5xx the load balancer generates itself, such as a
   # 502 when a target resets the connection or a 504 when it times out.
@@ -456,13 +462,13 @@ resource "grafana_rule_group" "central" {
   rule {
     name           = "Service is failing most requests"
     condition      = "B"
-    for            = "5m"
+    for            = "2m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
-      description      = "The service's targets have answered more than half of its requests with a 5xx for five minutes. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana."
+      description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana."
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
       __dashboardUid__ = "forge-central"
       __panelId__      = "13"
