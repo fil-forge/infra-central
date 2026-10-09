@@ -217,7 +217,7 @@ terraform/modules/
     main.tf                the wiring, calling the eight below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
     aurora/                prod's database, in place of database/
-    compat-vpn/            the compatibility server's site-to-site VPN
+    pandora-vpn/           the compatibility server's site-to-site VPN
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root

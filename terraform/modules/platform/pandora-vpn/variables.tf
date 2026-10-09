@@ -7,7 +7,7 @@ variable "vpc_id" {
 }
 
 variable "sites" {
-  description = "The stage's compatibility server appliances, keyed by region label: each one's static public IPv4 and the private /32 its database traffic is source-NATed to. From the shared constants module's compat_server_sites."
+  description = "The stage's compatibility server appliances, keyed by region label: each one's static public IPv4 and the private /32 its database traffic is source-NATed to. From the shared constants module's pandora_sites."
   type = map(object({
     public_ip  = string
     private_ip = string
