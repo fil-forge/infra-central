@@ -94,12 +94,6 @@ locals {
   # a superset, and one that needs no per-node edit.
   filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
 
-  # Piri's container log stream. Alloy names it appliance-<stage>-<region>-piri
-  # from the Compose service and stamps appliance, region and node on it
-  # (infra-nodes nodes/dev/platform/config/alloy/config.alloy), so the same
-  # appliance matcher narrows it to the alerting stages.
-  piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
-
   # Ingot's OTLP metrics. Alloy names them appliance-<stage>-<region>-ingot
   # from Ingot's service.name and stamps appliance, region and node on them,
   # the same as Piri's (infra-nodes docs/observability.md).
@@ -763,109 +757,6 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # A stopgap for a Lotus whose head has stopped moving. Piri's chain scheduler
-  # (curio lib/chainsched) ticks every five minutes and, when no head change has
-  # arrived since the last tick, logs
-  #
-  #   no notifications received in 5m0s, resubscribing to ChainNotify
-  #
-  # and resubscribes. A stuck Lotus answers the new subscription with its current
-  # tipset and nothing after, so the line recurs roughly every ten minutes for as
-  # long as the head is stuck. Nothing else Piri exports says so: it stays up,
-  # answers its health check and keeps its metrics flowing, and only its proofs
-  # stop. A Lotus that is down outright fails the subscription instead, and logs
-  # something else.
-  #
-  # Any line in fifteen minutes is a match, since with a ten-minute cadence that
-  # window always holds one while the head is stuck. `for` is 15m so a single
-  # line does not fire on its own: fifteen minutes of pending needs a second line
-  # inside the window, which is about twenty minutes of a head that has not
-  # moved. Filecoin produces a tipset every thirty seconds, so that is well past
-  # anything a healthy chain does.
-  #
-  # no_data_state is OK for the reason the 5xx rule gives: count_over_time
-  # returns a series only for a node that logged the line, so an empty result is
-  # the healthy state. An instant query, so no reduce stage.
-  #
-  # Superseded by the rules below that read Piri's chain head and proving
-  # schedule directly, once the alerting stages run a Piri that exports those
-  # gauges. Kept until then, since a Piri without them leaves this rule the only
-  # one watching the chain; delete it after that rather than run both.
-  rule {
-    name           = "Piri has stopped receiving chain notifications"
-    condition      = "B"
-    for            = "15m"
-    no_data_state  = "OK"
-    exec_err_state = "Error"
-
-    annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped receiving chain head changes"
-      description = "Piri's chain scheduler has logged \"no notifications received ... resubscribing to ChainNotify\" repeatedly for fifteen minutes: the Lotus it reads the chain from is up but its head is not moving, so Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
-    }
-
-    labels = {
-      team_name = "forge"
-      component = "appliance"
-      stage     = local.appliance_stage_label
-      severity  = "critical"
-    }
-
-    data {
-      ref_id         = "A"
-      datasource_uid = var.loki_datasource_uid
-
-      relative_time_range {
-        from = 900
-        to   = 0
-      }
-
-      model = jsonencode({
-        refId         = "A"
-        editorMode    = "code"
-        queryType     = "instant"
-        intervalMs    = 1000
-        maxDataPoints = 43200
-        expr          = <<-LOGQL
-          sum by (appliance, region, node) (
-            count_over_time(
-              {${local.piri_log_matcher}}
-                |~ "no notifications received in .* resubscribing to ChainNotify"
-              [15m]
-            )
-          )
-        LOGQL
-      })
-    }
-
-    data {
-      ref_id         = "B"
-      query_type     = "expression"
-      datasource_uid = "__expr__"
-
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-
-      model = jsonencode({
-        refId         = "B"
-        type          = "threshold"
-        expression    = "A"
-        datasource    = { type = "__expr__", uid = "__expr__" }
-        intervalMs    = 1000
-        maxDataPoints = 43200
-        conditions = [{
-          type      = "query"
-          operator  = { type = "and" }
-          query     = { params = ["B"] }
-          reducer   = { type = "last", params = [] }
-          evaluator = { type = "gt", params = [0] }
-        }]
-      })
-    }
-  }
-
   # Postgres refusing connections. Seen for real in the 2026-09-24 load test:
   # staging Postgres refused 3,629 connections in 27 minutes, every multipart
   # object's CompleteMultipartUpload failed at least once, and nothing alerted.
@@ -1433,6 +1324,15 @@ resource "grafana_rule_group" "appliance" {
   #
   # The proving failures page (critical): a missed proof is a fault on chain,
   # which costs the provider, and waiting for someone to notice costs more.
+  #
+  # One cause can raise more than one of these over time: a head that stays
+  # stuck is first "chain head is stale", then "proving period has not
+  # advanced", then "Prove task has not run". Each names the failure as it has
+  # become by then.
+  #
+  # They replace the earlier Loki rule on Piri's "no notifications received"
+  # resubscribe line, which watched for a stuck head before Piri exported one.
+  # Running both would page twice for the same stuck Lotus.
 
   # The timestamp of the last tipset Piri's chain scheduler applied, against the
   # wall clock: Lotus stalled or unreachable, or Piri's subscription to it
@@ -1440,8 +1340,8 @@ resource "grafana_rule_group" "appliance" {
   #
   # Five minutes is ten tipsets, but a run of null rounds can leave that long
   # between tipsets, and a slow chain scheduler handler that runs before the
-  # head is recorded can delay it. `for` is 5m, the shortest pending period a
-  # group evaluated every five minutes can give, so the head must stay stale
+  # head is recorded can delay it. `for` is 5m, the shortest non-zero pending
+  # period a group evaluated every five minutes can give, so the head must stay stale
   # across two evaluations, about ten minutes in all, before it fires.
   #
   # no_data_state is OK: a Piri that has not seen a head since it started, or
@@ -1532,9 +1432,11 @@ resource "grafana_rule_group" "appliance" {
   # head means something.
   #
   # Five-minute windows are ten of Piri's thirty-second pushes. `for` is 10m, so
-  # a restart that takes a moment to reach Lotus does not fire. Warning, not
-  # critical: until the first head arrives Piri has not missed anything yet, and
-  # the proving rules below page if it goes on long enough to cost a proof.
+  # a restart that takes a moment to reach Lotus does not fire. Critical, as
+  # "chain head is stale" is for the same cause: none of the proving rules below
+  # can fire for a node with no head, since they compare against it or wait on a
+  # proving send that never happens, so the only later page would be "Prove task
+  # has not run", which comes after a proof has been missed.
   #
   # no_data_state is OK, and not NoData, even though "no head" is what the rule
   # is about: the `unless` is what finds the missing head, so the result is
@@ -1558,7 +1460,7 @@ resource "grafana_rule_group" "appliance" {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "warning"
+      severity  = "critical"
     }
 
     data {
@@ -1928,8 +1830,9 @@ resource "grafana_rule_group" "appliance" {
   # Per node, not per proof set: with several proof sets, proving one keeps it
   # quiet. The period is the longest seen over a day, which bridges a missed
   # collection. A node whose last proof set is disabled or unrecoverable loses
-  # the period series within the day, before the threshold, so this lapses
-  # rather than repeat the unrecoverable page.
+  # the period series within the day, which is before the threshold while 1.5
+  # proving periods is longer than a day, as with mainnet's 2880 epochs; then
+  # this lapses rather than repeat the unrecoverable page.
   #
   # Critical, as the piri docs recommend: a Prove task that does not run misses
   # every proof on the node. `for` is 10m. The threshold is the grace; this only
