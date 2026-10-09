@@ -8,6 +8,10 @@
 # the whole platform root deletes them with the VPC, and each site's appliance
 # then needs the new addresses and keys.
 #
+# The service-linked role that stores the pre-shared keys in Secrets Manager
+# comes from the prod account bootstrap (envs/bootstrap/prod/account). A
+# non-prod stage with sites needs the same resource in the non-prod one.
+#
 # See docs/decisions/2026-10-compat-server-database.md and
 # docs/compat-server-vpn.md.
 
