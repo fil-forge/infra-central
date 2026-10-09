@@ -149,14 +149,19 @@ back up it prints the command that shows their status on the AWS side, waits for
 its containers, images and `/run/pandora-vpn-check`. Nothing else on the host may initiate IKE
 while it runs, since two initiators from one address compete for the same tunnels.
 
-The laptop check confirms that AWS refuses IKE from any other address:
+The laptop check confirms that no tunnel establishes from any other address:
 
 ```bash
 scripts/check-pandora-vpn-laptop.sh --stage prod --site provisional
 ```
 
 It attempts IKE with both tunnels using the site's identity and real keys, and passes when neither
-tunnel establishes. The keys stay in a temporary directory removed on exit.
+tunnel establishes. AWS normally does not answer an unknown peer at all, and a firewall dropping UDP
+500 or 4500 on the laptop's path looks the same, so the script says whether AWS answered: only an
+answer shows that AWS saw the attempt. The keys stay in a temporary directory removed on exit.
+
+A host check that cannot remove its containers keeps `/run/pandora-vpn-check`, since the containers
+may still hold the keys and the DSN, and exits with an error.
 
 A host run interrupted before its cleanup leaves its containers and secrets behind, and the next
 fetch refuses to overwrite them. Remove them from the laptop with:
