@@ -520,6 +520,90 @@ resource "grafana_rule_group" "central" {
       })
     }
   }
+
+  # A tunnel of the compatibility server's site-to-site VPN is down. Each VPN
+  # connection has two, and the appliance moves its database route to the other
+  # one, so a single tunnel down leaves the database reachable without
+  # redundancy. AWS takes tunnels down one at a time for maintenance, which
+  # fires this too. Until an appliance has strongSwan configured, both of its
+  # tunnels are down and this fires from the moment the connection exists.
+  #
+  # TunnelState per VpnId is 1 with every tunnel up, 0 with none, and in between
+  # otherwise. The same metric is also published per tunnel address, which the
+  # empty TunnelIpAddress matcher leaves out. The VpnId series carry no stage, and the non-prod account holds
+  # two stages, so the rule watches the prod account only; prod is the one stage
+  # with sites (modules/shared/constants, compat_server_sites).
+  rule {
+    name           = "Compatibility server VPN tunnel down"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "VPN connection {{ $labels.dimension_VpnId }} has a tunnel down"
+      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} has been down for ten minutes; with both down, the appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/compat-server-vpn.md covers the appliance side."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        intervalMs   = 1000
+        legendFormat = "{{dimension_VpnId}}"
+        expr         = <<-PROMQL
+          min by (dimension_VpnId) (
+            min_over_time(
+              aws_vpn_tunnel_state_min{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}[5m]
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [1] }
+        }]
+      })
+    }
+  }
 }
 
 # 300s although the host exporter is scraped once a minute. Nothing in this

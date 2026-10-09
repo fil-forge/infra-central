@@ -101,6 +101,11 @@ provider "grafana" {
   auth = var.grafana_auth
 }
 
+# Account ids, for the rule that can tell stages apart only by account.
+module "constants" {
+  source = "../../modules/shared/constants"
+}
+
 # config_json is the whole Kubernetes-style document, apiVersion and kind and
 # metadata and spec together, which is what the provider documents for Grafana
 # v13 and later. The stack reports 13.3.x. Do not reduce these files to their
