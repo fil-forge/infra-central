@@ -23,16 +23,25 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Database is one service's Postgres tenancy. Role name and database name are
-// the same string, and the role owns the database.
+// Database is one service's Postgres tenancy. Its owner is a login role named
+// after the database, unless Owner names another; Password is the owner's.
 //
 // LoginRoles are for a database whose clients connect as roles other than its
 // owner. They get LOGIN, a password and their settings, and nothing else: no
 // membership, no grants. Table privileges belong to whoever owns the tables.
 type Database struct {
 	Name       string
+	Owner      string
 	Password   string
 	LoginRoles []Role
+}
+
+// OwnerRole is the role that owns the database.
+func (db Database) OwnerRole() string {
+	if db.Owner != "" {
+		return db.Owner
+	}
+	return db.Name
 }
 
 // Role is a login role that does not own a database.
@@ -99,7 +108,7 @@ func Ensure(ctx context.Context, conn *pgx.Conn, databases []Database) error {
 
 func validate(db Database) error {
 	if !hexOnly.MatchString(db.Password) {
-		return fmt.Errorf("password for %s is not hex-only; refusing to interpolate it into SQL", db.Name)
+		return fmt.Errorf("password for %s is not hex-only; refusing to interpolate it into SQL", db.OwnerRole())
 	}
 	for _, role := range db.LoginRoles {
 		if !hexOnly.MatchString(role.Password) {
@@ -120,8 +129,9 @@ func validate(db Database) error {
 
 func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 	quotedName := pgx.Identifier{db.Name}.Sanitize()
+	quotedOwner := pgx.Identifier{db.OwnerRole()}.Sanitize()
 
-	if err := ensureLoginRole(ctx, conn, db.Name, db.Password); err != nil {
+	if err := ensureLoginRole(ctx, conn, db.OwnerRole(), db.Password); err != nil {
 		return err
 	}
 
@@ -136,7 +146,7 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 		// create a database for it. The RDS master user is not a superuser,
 		// and creating the role gave it ADMIN OPTION but no membership.
 		// Re-granting an existing membership is a notice, not an error.
-		if _, err := conn.Exec(ctx, `GRANT `+quotedName+` TO CURRENT_USER`); err != nil {
+		if _, err := conn.Exec(ctx, `GRANT `+quotedOwner+` TO CURRENT_USER`); err != nil {
 			return fmt.Errorf("grant role to admin: %w", err)
 		}
 
@@ -144,7 +154,7 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 		// this package uses a plain connection rather than a pool with an
 		// implicit transaction.
 		if _, err := conn.Exec(ctx,
-			`CREATE DATABASE `+quotedName+` OWNER `+quotedName,
+			`CREATE DATABASE `+quotedName+` OWNER `+quotedOwner,
 		); err != nil && !isDuplicate(err) {
 			return fmt.Errorf("create database: %w", err)
 		}
