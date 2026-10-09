@@ -214,7 +214,7 @@ it depends on:
 ```
 terraform/modules/
   platform/                everything the platform root builds
-    main.tf                the wiring, calling the eight below
+    main.tf                the wiring, calling the ten below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
     aurora/                prod's database, in place of database/
     pandora-vpn/           the compatibility server's site-to-site VPN
