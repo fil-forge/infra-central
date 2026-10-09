@@ -105,46 +105,46 @@ locals {
 # The compatibility server's site-to-site VPN. It creates nothing for a stage
 # with no sites, and does not depend on the cluster below, so dropping or
 # replacing the cluster keeps the tunnels' addresses and keys.
-module "compat_vpn" {
-  source = "./compat-vpn"
+module "pandora_vpn" {
+  source = "./pandora-vpn"
 
   stage        = var.stage
   vpc_id       = module.network.vpc_id
-  sites        = local.compat_server_sites
-  private_cidr = module.constants.compat_server_private_cidr
+  sites        = local.pandora_sites
+  private_cidr = module.constants.pandora_sites_private_cidr
 }
 
 # The compatibility server's database, on a cluster of its own that the
 # server's appliances reach over the stage's site-to-site VPN.
-module "compat_database" {
-  source = "./compat-database"
-  count  = var.compat_database == null ? 0 : 1
+module "pandora_db" {
+  source = "./pandora-db"
+  count  = var.pandora_db == null ? 0 : 1
 
   stage                    = var.stage
   vpc_id                   = module.network.vpc_id
   vpc_cidr                 = var.vpc_cidr
   availability_zones       = module.network.azs
-  vpn_gateway_id           = module.compat_vpn.vpn_gateway_id
+  vpn_gateway_id           = module.pandora_vpn.vpn_gateway_id
   lambda_security_group_id = module.network.lambda_security_group_id
   kms_key_arn              = var.db_kms_key_arn
-  sites                    = local.compat_server_sites
+  sites                    = local.pandora_sites
 
-  instance_count        = var.compat_database.instance_count
-  backup_retention_days = var.compat_database.backup_retention_days
-  protect               = var.compat_database.protect
+  instance_count        = var.pandora_db.instance_count
+  backup_retention_days = var.pandora_db.backup_retention_days
+  protect               = var.pandora_db.protect
 }
 
 locals {
-  compat_server_sites = lookup(module.constants.compat_server_sites, var.stage, {})
+  pandora_sites = lookup(module.constants.pandora_sites, var.stage, {})
 }
 
 # Sites without the cluster are allowed, so the cluster can be dropped while
 # the tunnels stay. Left that way for long, though, the stage pays for a VPN
 # with nothing behind it.
-check "compat_server_sites_have_a_cluster" {
+check "pandora_sites_have_a_cluster" {
   assert {
-    condition     = var.compat_database != null || length(local.compat_server_sites) == 0
-    error_message = "Stage ${var.stage} has compatibility server sites (${join(", ", keys(local.compat_server_sites))}) but no compat_database, so their VPN connections cost about $44 a month each with no cluster to reach. Set compat_database, or remove the sites."
+    condition     = var.pandora_db != null || length(local.pandora_sites) == 0
+    error_message = "Stage ${var.stage} has compatibility server sites (${join(", ", keys(local.pandora_sites))}) but no pandora_db, so their VPN connections cost about $44 a month each with no cluster to reach. Set pandora_db, or remove the sites."
   }
 }
 
@@ -221,11 +221,11 @@ module "provision" {
   db_master_secret_arn         = local.database.master_secret_arn
   db_master_secret_kms_key_arn = local.database.master_secret_kms_key_arn
 
-  pandora_db = var.compat_database == null ? null : {
-    host                      = module.compat_database[0].address
-    port                      = module.compat_database[0].port
-    master_secret_arn         = module.compat_database[0].master_secret_arn
-    master_secret_kms_key_arn = module.compat_database[0].master_secret_kms_key_arn
+  pandora_db_connection = var.pandora_db == null ? null : {
+    host                      = module.pandora_db[0].address
+    port                      = module.pandora_db[0].port
+    master_secret_arn         = module.pandora_db[0].master_secret_arn
+    master_secret_kms_key_arn = module.pandora_db[0].master_secret_kms_key_arn
   }
 
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
@@ -246,12 +246,12 @@ resource "aws_lambda_invocation" "seed" {
   input = jsonencode({
     phase           = "seed"
     trigger         = var.seed_trigger
-    pandora_db_host = try(module.compat_database[0].address, null)
+    pandora_db_host = try(module.pandora_db[0].address, null)
   })
 
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
-  depends_on = [module.database, module.aurora, module.compat_database]
+  depends_on = [module.database, module.aurora, module.pandora_db]
 }
 
 module "openbao" {
