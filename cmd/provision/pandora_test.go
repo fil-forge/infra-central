@@ -73,6 +73,7 @@ func TestPandoraDSNs(t *testing.T) {
 	target := dbTarget{Host: "db.example", Port: 5432}
 	db := dbinit.Database{
 		Name:     "pandora",
+		Owner:    "pandora_admin",
 		Password: "aa",
 		LoginRoles: []dbinit.Role{
 			{Name: "pandora_storage_server", Password: "bb"},
@@ -82,7 +83,7 @@ func TestPandoraDSNs(t *testing.T) {
 
 	got := pandoraDSNs(target, db)
 	want := map[string]string{
-		"pandora":                "postgres://pandora:aa@db.example:5432/pandora?sslmode=verify-full",
+		"pandora-admin":          "postgres://pandora_admin:aa@db.example:5432/pandora?sslmode=verify-full",
 		"pandora-storage-server": "postgres://pandora_storage_server:bb@db.example:5432/pandora?sslmode=verify-full",
 		"ergo-proxy":             "postgres://ergo_proxy:cc@db.example:5432/pandora?sslmode=verify-full",
 	}

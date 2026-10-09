@@ -58,10 +58,13 @@ var databaseConsumers = []string{
 	"openbao",
 }
 
-// pandoraOwner owns the compatibility server's database and every table in it.
-// Only the estate loader connects as this role, so it gets no timeout: a
-// restore runs long.
-const pandoraOwner = "pandora"
+// pandoraDatabase is the compatibility server's database. The server's code
+// hardcodes the name.
+const pandoraDatabase = "pandora"
+
+// pandoraOwner owns that database and every table in it. Only the estate
+// loader connects as this role, so it gets no timeout: a restore runs long.
+const pandoraOwner = "pandora_admin"
 
 // pandoraTimeout matches the per-statement budget the compatibility server's
 // daemons are written for.
@@ -154,7 +157,7 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		if err := d.seedPandora(ctx, resp, *d.cfg.Pandora); err != nil {
 			return nil, err
 		}
-		resp.Databases = append(resp.Databases, pandoraOwner)
+		resp.Databases = append(resp.Databases, pandoraDatabase)
 	}
 
 	slog.Info("seed complete",
@@ -417,7 +420,7 @@ func (d *deps) seedPandora(ctx context.Context, resp *Response, target dbTarget)
 	if err != nil {
 		return err
 	}
-	db := dbinit.Database{Name: pandoraOwner, Password: ownerPassword}
+	db := dbinit.Database{Name: pandoraDatabase, Owner: pandoraOwner, Password: ownerPassword}
 	for _, spec := range pandoraLoginRoles {
 		rolePassword, err := password(spec.name)
 		if err != nil {
@@ -445,7 +448,7 @@ func (d *deps) seedPandora(ctx context.Context, resp *Response, target dbTarget)
 // the VPN; each client supplies the RDS root bundle itself.
 func pandoraDSNs(target dbTarget, db dbinit.Database) map[string]string {
 	dsns := map[string]string{
-		ssmService(db.Name): dbinit.DSN(target.Host, target.Port, db.Name, db.Name, db.Password, dbinit.SSLVerifyFull),
+		ssmService(db.OwnerRole()): dbinit.DSN(target.Host, target.Port, db.Name, db.OwnerRole(), db.Password, dbinit.SSLVerifyFull),
 	}
 	for _, role := range db.LoginRoles {
 		dsns[ssmService(role.Name)] = dbinit.DSN(target.Host, target.Port, db.Name, role.Name, role.Password, dbinit.SSLVerifyFull)
