@@ -10,15 +10,14 @@ The appliance's half (strongSwan, the private /32 and its source NAT) is in
 
 | Piece | Root | Applied |
 |---|---|---|
-| Site list | `terraform/modules/shared/constants`, `compat_server_sites` | read by both roots below |
-| VPN gateway, customer gateways, VPN connections | `terraform/envs/bootstrap/<account>/<region>` | by hand |
-| Gateway attachment, subnets, security group, cluster | `terraform/envs/<stage>/platform`, `compat_database` | by CI on merge |
+| Site list | `terraform/modules/shared/constants`, `compat_server_sites` | read by the platform root |
+| VPN gateway, customer gateways, VPN connections | `terraform/envs/<stage>/platform` | by CI on merge |
+| Subnets, security group, cluster | `terraform/envs/<stage>/platform`, `compat_database` | by CI on merge |
 | Database and roles | the provision Lambda's seed phase | by the platform apply |
 
-The cluster needs the stage to have at least one site, because it attaches the stage's VPN
-gateway, and the bootstrap root creates that gateway only for a stage with sites. A stage can have
-sites without the cluster; the platform plan warns about it, because each VPN connection costs
-about $44 a month.
+A stage gets a VPN gateway only when it has sites, and the cluster needs the stage to have at least
+one site, because the appliances reach it only through that gateway. A stage can have sites without
+the cluster; the platform plan warns about it, because each VPN connection costs about $44 a month.
 
 ## Adding a site
 
@@ -42,14 +41,10 @@ prod = {
 }
 ```
 
-Merge, then apply the regional bootstrap by hand:
-
-```bash
-tofu -chdir=terraform/envs/bootstrap/prod/us-east-2 apply
-```
-
-Its `compat_vpn_sites` output lists, per site, the VPN connection, both tunnel addresses and the
-ARN of the Secrets Manager secret holding the pre-shared keys. Read the keys with:
+Merge. CI applies the platform root, which creates the site's customer gateway and VPN connection,
+and admits its private /32 to the cluster. The root's `compat_vpn_sites` output, printed at the end
+of the apply job, lists per site the VPN connection, both tunnel addresses and the ARN of the
+Secrets Manager secret holding the pre-shared keys. Read the keys with:
 
 ```bash
 aws secretsmanager get-secret-value --secret-id <preshared_key_arn> --query SecretString --output text
@@ -68,8 +63,8 @@ only that into the tunnel.
 | Routing | static, route-based, one xfrm interface per tunnel |
 | Tunnel MTU | 1,446 bytes on a 1,500-byte path, 1,438 behind NAT |
 
-If the stage has no cluster yet, set `compat_database` in its platform root and merge. A stage that
-already has one picks up the new site's security-group rule on the next CI apply.
+If the stage has no cluster yet, set `compat_database` in its platform root, in the same pull
+request as the site or a later one.
 
 ## Getting the database credentials onto the appliance
 
@@ -106,30 +101,28 @@ PGSSLROOTCERT=/path/to/global-bundle.pem psql "$PANDORA_STORAGE_SERVER_DSN" -c '
 
 It prints `15s`. A connection from any other address times out. The Grafana rule "Compatibility
 server VPN tunnel down" fires while either tunnel is down, which includes the time between the
-bootstrap apply and the appliance's strongSwan coming up.
-
-## Reattaching the gateway, once
-
-Run this once, after the first site's tunnels are up and before the first data reset. It shows
-whether a VPN connection keeps its tunnel addresses while its gateway is detached and attached
-again, which is what a reset of the platform root does.
-
-1. Note both tunnel addresses from the bootstrap root's `compat_vpn_sites` output.
-2. Detach the gateway (`aws ec2 detach-vpn-gateway`), wait for it to report detached, and attach it
-   again (`aws ec2 attach-vpn-gateway`).
-3. Compare the tunnel addresses, and re-apply the platform root so its route propagation is
-   restored.
-
-Record the result in the decision record. If the addresses change, the fallback is to move each
-connection to a new gateway (`aws ec2 modify-vpn-connection --vpn-gateway-id`), which AWS documents
-as keeping the tunnel addresses and options.
+platform apply and the appliance's strongSwan coming up.
 
 ## Dropping the cluster
 
 To drop the Aurora cluster instead of performing a data reset, set `compat_database = null` in the
 stage's platform root and merge. CI deletes the cluster, with no final snapshot when `protect` is
-off, along with its subnets and security group, and detaches the gateway. The VPN stays.
+off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
 
-Removing the VPN is a second step: delete the stage's sites from `compat_server_sites`, merge, and
-apply the regional bootstrap by hand. It must come after the cluster is gone, because AWS cannot
-delete a gateway that is still attached. New tunnels later get new addresses and keys.
+Removing the VPN as well means deleting the stage's sites from `compat_server_sites`, in the same
+pull request or a later one. New tunnels later get new addresses and keys.
+
+## Destroying the platform root
+
+A destroy of the stage's platform root deletes the VPN with the VPC. When the root is applied again,
+every site gets two new tunnel addresses and two new pre-shared keys. Its public IP, private /32,
+the VPC route and the IPsec parameters stay the same. For each site, after the apply:
+
+1. Read the new tunnel addresses from `compat_vpn_sites` and the new keys from Secrets Manager, as
+   in [Adding a site](#adding-a-site), and send them to the site's operator.
+2. The operator replaces the keys in the node's OpenBao and the tunnel addresses in the node's
+   configuration, then re-runs the node's VPN provisioning, as infra-nodes describes.
+3. Check the path as above.
+
+The site cannot reach its database from the destroy until its operator finishes. A data wipe that
+keeps the platform root, or dropping only the cluster, leaves the tunnels as they are.
