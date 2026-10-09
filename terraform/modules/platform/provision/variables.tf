@@ -75,6 +75,17 @@ variable "db_master_secret_kms_key_arn" {
   type = string
 }
 
+variable "pandora_db" {
+  description = "The compatibility server's cluster, whose pandora database and roles the seed phase creates. Null in a stage without one."
+  type = object({
+    host                      = string
+    port                      = number
+    master_secret_arn         = string
+    master_secret_kms_key_arn = string
+  })
+  default = null
+}
+
 variable "openbao_address" {
   description = "Internal OpenBao URL. Only the vault phase uses it."
   type        = string
