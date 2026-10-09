@@ -95,6 +95,25 @@ func TestEnsureValidatesEveryDatabaseBeforeConnecting(t *testing.T) {
 	}
 }
 
+func TestOwnerRole(t *testing.T) {
+	cases := []struct {
+		name string
+		db   Database
+		want string
+	}{
+		{name: "defaults to the database name", db: Database{Name: "sprue"}, want: "sprue"},
+		{name: "is Owner when set", db: Database{Name: "pandora", Owner: "pandora_admin"}, want: "pandora_admin"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.db.OwnerRole(); got != tc.want {
+				t.Errorf("OwnerRole() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDSN(t *testing.T) {
 	cases := []struct {
 		name     string
