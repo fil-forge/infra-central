@@ -74,6 +74,27 @@ variable "db_kms_key_arn" {
   }
 }
 
+variable "compat_database" {
+  description = <<-EOT
+    The SpiderOak compatibility server's pandora cluster, or null for a stage
+    without one. It uses db_kms_key_arn, and needs the stage to have sites in
+    the shared constants module's compat_server_sites, with the regional
+    bootstrap applied, because it attaches the VPN gateway that root creates.
+    See docs/compat-server-vpn.md.
+  EOT
+  type = object({
+    instance_count        = number
+    backup_retention_days = number
+    protect               = bool
+  })
+  default = null
+
+  validation {
+    condition     = var.compat_database == null || var.db_kms_key_arn != null
+    error_message = "compat_database needs db_kms_key_arn, the key its cluster is encrypted with."
+  }
+}
+
 variable "openbao_kms_key_arn" {
   description = "Customer-managed key OpenBao seals with, for a stage whose key must outlive this module. When null, the module creates one that is destroyed with the stage."
   type        = string
