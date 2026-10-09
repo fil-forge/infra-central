@@ -67,6 +67,19 @@ resource "aws_route53_zone" "service" {
   }
 }
 
+# The role Site-to-Site VPN keeps each tunnel's pre-shared keys in Secrets
+# Manager through, for the compatibility server's VPN in the platform root.
+# AWS documents creating it on demand only for certificate-authenticated VPNs,
+# and the platform root's VPN connections use pre-shared keys, so it is created
+# here, once for the account, before the first connection. If it already
+# exists, import it before applying:
+#
+#   tofu import aws_iam_service_linked_role.s2svpn \
+#     arn:aws:iam::<prod account id>:role/aws-service-role/s2svpn.amazonaws.com/AWSServiceRoleForVPCS2SVPN
+resource "aws_iam_service_linked_role" "s2svpn" {
+  aws_service_name = "s2svpn.amazonaws.com"
+}
+
 output "state_bucket_name" {
   value = module.tfstate.bucket_name
 }
