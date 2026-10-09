@@ -1,8 +1,7 @@
 # Regional bootstrap for the prod account in us-east-2: the ECR repository the
 # prod stage pulls its provision image from, the Firehoses and metric stream
-# that carry the stage's logs and metrics to Grafana Cloud, the KMS keys of
-# its Aurora cluster and its OpenBao seal, and the site-to-site VPN that the
-# compatibility server's appliances reach the pandora database through.
+# that carry the stage's logs and metrics to Grafana Cloud, and the KMS keys of
+# its Aurora cluster and its OpenBao seal.
 #
 # The non-prod copy of this directory carries the full explanation of why the
 # state bucket and the CI roles are not here but in ../account/, why this root is
@@ -81,19 +80,6 @@ resource "aws_kms_alias" "openbao_seal" {
   target_key_id = aws_kms_key.openbao_seal.key_id
 }
 
-# One gateway per stage that has compatibility server sites, and one VPN
-# connection per site. Adding a site to the constants module and applying this
-# root by hand comes before the platform root can attach the gateway; see
-# docs/compat-server-vpn.md.
-module "compat_vpn" {
-  source   = "../../../../modules/compat-vpn"
-  for_each = toset(module.constants.prod_stages)
-
-  stage        = each.key
-  sites        = module.constants.compat_server_sites[each.key]
-  private_cidr = module.constants.compat_server_private_cidr
-}
-
 module "telemetry" {
   source = "../../../../modules/telemetry"
 
@@ -134,9 +120,4 @@ output "metric_stream_name" {
 
 output "firehose_backup_bucket" {
   value = module.telemetry.backup_bucket_name
-}
-
-output "compat_vpn_sites" {
-  description = "Per stage, each compatibility server site's VPN connection, tunnel addresses and pre-shared key ARN."
-  value       = { for stage, vpn in module.compat_vpn : stage => vpn.sites }
 }
