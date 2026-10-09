@@ -108,27 +108,24 @@ Indexes 9–11 cannot be covered by one route without including central's third 
 Indexes 12–15 sit inside one free /18.
 
 Sites are listed per stage in the shared constants module, as `compat_server_sites`, keyed by stage
-and then by the appliance's region label, with each site's public and private address. Both roots
-read the one list. Staging appliances run on different hosts from prod ones, so each stage has its
+and then by the appliance's region label, with each site's public and private address. The platform
+root reads the list. Staging appliances run on different hosts from prod ones, so each stage has its
 own sites, and a stage whose list is empty gets no gateway. The cluster needs at least one site,
-because the platform root attaches the stage's gateway to the VPC. A stage can have sites without
-the cluster.
+because the appliances reach it only through the stage's gateway. A stage can have sites without the
+cluster.
 
-A VPC cannot be deleted while a gateway is attached to it, so the pieces split across roots. The
-customer gateway, the virtual private gateway and the VPN connection live in the regional bootstrap
-root, which survives the post-test reset
-([FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396)) and keeps the tunnel addresses
-and keys stable. That root is applied by hand, so adding a site is an operator step. The gateway
-attachment, the route propagation and the cluster live in the platform root, so a reset that
-destroys the platform root also deletes the cluster. Whether a VPN connection on a detached gateway
-keeps its tunnel addresses when the gateway is attached again is tested once before the reset, as a
-runbook step. If it does not, the connection can move to a new gateway, which AWS documents as
-keeping its tunnel addresses and options.
+The VPN, the cluster and their routing all live in the stage's platform root, which CI applies on
+every merge, so adding a site is a pull request. The VPN does not depend on the cluster, so dropping
+or replacing the cluster, or wiping data in place for the post-test reset
+([FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396)), keeps the tunnel addresses and
+keys. A destroy of the whole platform root deletes the VPN with the VPC, after detaching the gateway,
+and the next apply gives each site new tunnel addresses and keys, which its operator installs on the
+appliance by hand. That is expected once or twice, for one or two sites, which costs less than a
+hand-applied root on every site change.
 
 To drop the Aurora cluster instead of performing a data reset, the stage's platform root stops
-creating it, which also detaches the gateway, and the VPN stays. Removing the VPN as well is a
-second step: the sites leave the list and the bootstrap root is applied by hand, and new tunnels
-get new addresses and keys.
+creating it, and the VPN stays. Removing the VPN as well means taking the sites off the list, in the
+same pull request or a later one, and new tunnels get new addresses and keys.
 
 ## Work this leaves for the server and the appliance
 
