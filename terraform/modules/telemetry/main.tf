@@ -46,13 +46,15 @@ locals {
   # or metrics have stopped arriving, and it covers FilOne's Firehoses in the
   # account as well. The metrics stream carries its own health series, so when
   # it stalls the signal is that series going stale; docs/observability.md says
-  # where to read it then.
+  # where to read it then. AWS/VPN carries TunnelState for the compatibility
+  # server's site-to-site VPN, which a Grafana rule alerts on.
   metric_namespaces = [
     "AWS/ECS",
     "AWS/ApplicationELB",
     "AWS/RDS",
     "AWS/NATGateway",
     "AWS/Firehose",
+    "AWS/VPN",
   ]
 }
 
