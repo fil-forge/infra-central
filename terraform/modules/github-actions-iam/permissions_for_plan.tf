@@ -1,13 +1,12 @@
 # What `tofu plan` needs, and nothing more.
 #
 # A refresh describes each resource in state; it never reads what a resource
-# holds. The inventory is closed and small — the terraform/ tree manages 57 AWS
-# resource types and reads 9 AWS data sources, and none of them is an SSM
-# parameter or a Secrets Manager secret, because the provision Lambda mints
-# every secret at runtime rather than passing it through Terraform. The VPN
-# connections keep their pre-shared keys in Secrets Manager, so describing one
-# returns the secret's ARN and no key. So this list can be written out rather
-# than approximated with a managed policy.
+# holds. No resource or data source in the terraform/ tree is an SSM parameter
+# or a Secrets Manager secret, because the provision Lambda mints every secret
+# at runtime rather than passing it through Terraform. The VPN connections keep
+# their pre-shared keys in Secrets Manager, so describing one returns the
+# secret's ARN and no key. So this list can be written out rather than
+# approximated with a managed policy.
 #
 # AWS's ReadOnlyAccess would have been one line, and is what the two CI roles
 # already in this account use. It also carries s3:GetObject on every bucket in
