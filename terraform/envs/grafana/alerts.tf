@@ -541,8 +541,8 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "VPN connection {{ $labels.dimension_VpnId }} has a tunnel down"
-      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} has been down for ten minutes; with both down, the appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
+      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for ten minutes; with both down, the appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
     }
 
     labels = {
@@ -566,9 +566,9 @@ resource "grafana_rule_group" "central" {
         instant      = true
         range        = false
         intervalMs   = 1000
-        legendFormat = "{{dimension_VpnId}}"
+        legendFormat = "{{account_id}} {{dimension_VpnId}}"
         expr         = <<-PROMQL
-          min by (dimension_VpnId) (
+          min by (account_id, dimension_VpnId) (
             min_over_time(
               aws_vpn_tunnel_state_min{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}[5m]
             )
