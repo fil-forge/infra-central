@@ -19,20 +19,10 @@
 #     Expression nodes are skipped, which is why the folders and dashboards in
 #     this root apply without it.
 #
-# Routing is deliberately not managed here. Every rule carries
-# team_name = "forge", and the notification policy tree in the UI is what turns
-# that label into a channel. grafana_notification_policy manages the entire tree
-# as one resource, so adopting it would mean Terraform owning FilOne's routes as
-# well as ours; and
-# grafana_contact_point keeps its Slack token or webhook as an ordinary
-# attribute, which would put a secret in this state for the same reason
-# docs/decisions/2026-09-grafana-telemetry.md keeps the Firehoses out of the
-# stage roots. rule.notification_settings would bypass the policy per rule, but
-# it needs the alertingSimplifiedRouting feature flag and it hides the routing
-# from whoever maintains the tree.
-#
-# So: add one route in the UI matching team_name = "forge" to whichever channel
-# FIL-1164 settles on, and every rule added here after that is routed already.
+# Routing is in routing.tf: every rule sets notification_settings.policy to
+# Forge's own notification policy tree, declared there. A new rule needs the
+# same block, or it falls through to the stack's default tree, where nothing
+# routes Forge's alerts.
 
 variable "alert_stages" {
   description = "Stages the rules alert on, as they appear in the appliance label's <stage>-<region> prefix and in Central's fc-<stage> cluster and target group names. Every ticket says production only; terraform.tfvars adds staging, which is what the hand-built rules these replace were watching."
@@ -261,6 +251,10 @@ resource "grafana_rule_group" "central" {
       severity  = "critical"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -354,6 +348,10 @@ resource "grafana_rule_group" "central" {
       team_name = "forge"
       component = "central"
       severity  = "warning"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -468,6 +466,10 @@ resource "grafana_rule_group" "central" {
       severity  = "warning"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -579,6 +581,10 @@ resource "grafana_rule_group" "appliance" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -703,6 +709,10 @@ resource "grafana_rule_group" "appliance" {
       severity  = "warning"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -795,6 +805,10 @@ resource "grafana_rule_group" "appliance" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -891,6 +905,10 @@ resource "grafana_rule_group" "appliance" {
       severity  = "critical"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.loki_datasource_uid
@@ -980,6 +998,10 @@ resource "grafana_rule_group" "appliance" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "warning"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -1080,6 +1102,10 @@ resource "grafana_rule_group" "appliance" {
       severity  = "warning"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -1163,6 +1189,10 @@ resource "grafana_rule_group" "appliance" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "warning"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -1258,6 +1288,10 @@ resource "grafana_rule_group" "appliance" {
       severity  = "warning"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -1350,6 +1384,10 @@ resource "grafana_rule_group" "appliance" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "warning"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -1455,6 +1493,10 @@ resource "grafana_rule_group" "appliance_containers" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -1621,6 +1663,10 @@ resource "grafana_rule_group" "appliance_containers" {
       severity  = "critical"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -1775,6 +1821,10 @@ resource "grafana_rule_group" "appliance_outages" {
       severity  = "critical"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.loki_datasource_uid
@@ -1874,6 +1924,10 @@ resource "grafana_rule_group" "appliance_outages" {
       component = "appliance"
       stage     = local.appliance_stage_label
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -1991,6 +2045,10 @@ resource "grafana_rule_group" "usage" {
       team_name = "forge"
       component = "usage"
       severity  = "info"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {

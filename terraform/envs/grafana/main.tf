@@ -6,14 +6,16 @@
 # dashboards inside it, and the credential it runs as cannot reach past that
 # folder. What may be declared here:
 #
-#   grafana_folder, grafana_dashboard, grafana_folder_permission and
-#   grafana_rule_group. The folders and their permissions are in folders.tf,
-#   which is where the three ownership models are set out; the rule groups are
-#   in alerts.tf.
+#   grafana_folder, grafana_dashboard, grafana_folder_permission,
+#   grafana_rule_group, and Forge's own notification policy tree as
+#   grafana_apps_notifications_routingtree_v1beta1. The folders and their
+#   permissions are in folders.tf, which is where the three ownership models are
+#   set out; the rule groups are in alerts.tf, and the tree in routing.tf.
 #
 # What may not, because each one reaches outside the slice or into state:
 #
-#   grafana_notification_policy  the whole routing tree as a single resource
+#   grafana_notification_policy  the default routing tree, FilOne's routes
+#                                with it, as a single resource
 #   grafana_contact_point        keeps its Slack token or webhook in state
 #   grafana_data_source          grafanacloud-prom and -logs belong to the stack
 #   grafana_organization         not supported on Grafana Cloud at all
