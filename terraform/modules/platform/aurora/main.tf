@@ -1,6 +1,7 @@
 # One Aurora PostgreSQL cluster shared by every service, each with its own
 # database and owning role: the same shape as the RDS instance in ../database,
-# with a writer and a reader in different availability zones.
+# with a writer and a reader in different availability zones. ../pandora-db
+# runs a second, named copy for the compatibility server's database.
 #
 # The roles and databases themselves are not Terraform resources. HCP Terraform
 # runs outside the VPC and cannot reach the cluster, so the provision Lambda
