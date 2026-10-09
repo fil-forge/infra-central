@@ -11,6 +11,7 @@ The appliance's half (strongSwan, the private /32 and its source NAT) is in
 | Piece | Root | Applied |
 |---|---|---|
 | Site list | `terraform/modules/shared/constants`, `compat_server_sites` | read by the platform root |
+| Service-linked role `AWSServiceRoleForVPCS2SVPN`, which keeps the pre-shared keys in Secrets Manager | `terraform/envs/bootstrap/prod/account` | by hand, once per account |
 | VPN gateway, customer gateways, VPN connections | `terraform/envs/<stage>/platform` | by CI on merge |
 | Subnets, security group, cluster | `terraform/envs/<stage>/platform`, `compat_database` | by CI on merge |
 | Database and roles | the provision Lambda's seed phase | by the platform apply |
