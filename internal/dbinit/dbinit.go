@@ -85,8 +85,7 @@ var hexOnly = regexp.MustCompile(`^[0-9a-f]+$`)
 // interpolated; the name comes from this list and the value must match
 // durationValue, for the same reason as hexOnly.
 var allowedSettings = map[string]bool{
-	"statement_timeout":                   true,
-	"idle_in_transaction_session_timeout": true,
+	"statement_timeout": true,
 }
 
 var durationValue = regexp.MustCompile(`^[0-9]+(ms|s|min)?$`)
