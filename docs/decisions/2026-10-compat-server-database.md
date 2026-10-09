@@ -132,11 +132,11 @@ addresses and keys.
 ## Work this leaves for the server and the appliance
 
 - The server connects as more than one login role. The provision Lambda creates one login role per
-  database today. It needs the second cluster's master secret and a way to create three roles:
-  `pandora_admin`, which owns the `pandora` database and is used only by the loader;
-  `pandora_storage_server` for the server's daemons; and a read-only `ergo_proxy`. The database
-  keeps the name the server hardcodes. The two login roles get a 15-second `statement_timeout`. Each role's DSN goes to SSM with `sslmode=verify-full`, and table grants
-  live in the server's own grants file.
+  database today. It needs the second cluster's master secret and a way to create two roles:
+  `pandora_admin`, which owns the `pandora` database and is used only by the loader, and
+  `pandora_storage_server` for the server's daemons. The database keeps the name the server
+  hardcodes. `pandora_storage_server` gets a 15-second `statement_timeout`. Each role's DSN goes to
+  SSM with `sslmode=verify-full`, and table grants live in the server's own grants file.
 - Passwords minted in central's secret store have no path into an appliance's OpenBao yet.
 - The server's Postgres client must support SCRAM authentication.
 - Connections cross a WAN, so clients set TCP keepalives and `tcp_user_timeout`, and long-lived
