@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -55,6 +56,28 @@ var databaseConsumers = []string{
 	"swarf",
 	"plc",
 	"openbao",
+}
+
+// pandoraOwner owns the compatibility server's database and every table in it.
+// Only the estate loader connects as this role, so it gets no timeout: a
+// restore runs long.
+const pandoraOwner = "pandora"
+
+// pandoraTimeout matches the per-statement budget the compatibility server's
+// daemons are written for.
+var pandoraTimeout = []dbinit.Setting{{Name: "statement_timeout", Value: "15s"}}
+
+// pandoraLoginRoles are the roles the compatibility server's clients connect
+// as. pandora_storage_server keeps the name the server's code hardcodes;
+// ergo_proxy is internet-facing, so it gets a role of its own that cannot write
+// accounts. Their table privileges come from the server's grants file, applied
+// by the owner once the tables exist.
+var pandoraLoginRoles = []struct {
+	name     string
+	settings []dbinit.Setting
+}{
+	{name: "pandora_storage_server", settings: pandoraTimeout},
+	{name: "ergo_proxy", settings: pandoraTimeout},
 }
 
 // walletSpec is a secp256k1 key and the serialization its consumer reads.
@@ -124,6 +147,14 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 	}
 	for _, db := range databases {
 		resp.Databases = append(resp.Databases, db.Name)
+	}
+
+	if d.cfg.Pandora != nil {
+		slog.Info("ensuring the pandora database", "roles", 1+len(pandoraLoginRoles))
+		if err := d.seedPandora(ctx, resp, *d.cfg.Pandora); err != nil {
+			return nil, err
+		}
+		resp.Databases = append(resp.Databases, pandoraOwner)
 	}
 
 	slog.Info("seed complete",
@@ -336,13 +367,17 @@ func (d *deps) seedDatabasePasswords(ctx context.Context, resp *Response) ([]dbi
 }
 
 func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database) error {
-	slog.Info("reading the RDS master secret", "secret", d.cfg.DBMasterSecret)
-	master, err := d.masterCredentials(ctx)
+	return d.ensureDatabases(ctx, d.cfg.centralDB(), databases)
+}
+
+func (d *deps) ensureDatabases(ctx context.Context, target dbTarget, databases []dbinit.Database) error {
+	slog.Info("reading the RDS master secret", "secret", target.MasterSecret)
+	master, err := d.masterCredentials(ctx, target.MasterSecret)
 	if err != nil {
 		return err
 	}
 
-	adminDSN := dbinit.AdminDSN(d.cfg.DBHost, d.cfg.DBPort, d.cfg.DBAdminDatabase,
+	adminDSN := dbinit.AdminDSN(target.Host, target.Port, d.cfg.DBAdminDatabase,
 		master.Username, master.Password)
 
 	// A security group that drops the connection shows up as a long silence
@@ -350,15 +385,78 @@ func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database)
 	// dial. The DSN itself is never logged, because it carries the master
 	// password.
 	slog.Info("connecting to postgres as master",
-		"host", d.cfg.DBHost, "port", d.cfg.DBPort, "database", d.cfg.DBAdminDatabase)
+		"host", target.Host, "port", target.Port, "database", d.cfg.DBAdminDatabase)
 
 	conn, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
-		return fmt.Errorf("connect to %s as master: %w", d.cfg.DBHost, err)
+		return fmt.Errorf("connect to %s as master: %w", target.Host, err)
 	}
 	defer conn.Close(ctx)
 
 	return dbinit.Ensure(ctx, conn, databases)
+}
+
+// seedPandora creates the compatibility server's database and its roles on
+// that server's own cluster, and stores one DSN per role. Each role's
+// parameters sit under a prefix of their own, so whoever installs a DSN on an
+// appliance reads exactly the one it needs.
+func (d *deps) seedPandora(ctx context.Context, resp *Response, target dbTarget) error {
+	password := func(role string) (string, error) {
+		service := ssmService(role)
+		value, created, err := d.store.EnsureSecret(ctx, service, "postgres-password", keygen.RandomHex)
+		if err != nil {
+			return "", fmt.Errorf("ensure postgres password for %s: %w", role, err)
+		}
+		if created {
+			resp.Created = append(resp.Created, d.store.Path(service, "postgres-password"))
+		}
+		return value, nil
+	}
+
+	ownerPassword, err := password(pandoraOwner)
+	if err != nil {
+		return err
+	}
+	db := dbinit.Database{Name: pandoraOwner, Password: ownerPassword}
+	for _, spec := range pandoraLoginRoles {
+		rolePassword, err := password(spec.name)
+		if err != nil {
+			return err
+		}
+		db.LoginRoles = append(db.LoginRoles,
+			dbinit.Role{Name: spec.name, Password: rolePassword, Settings: spec.settings})
+	}
+
+	if err := d.ensureDatabases(ctx, target, []dbinit.Database{db}); err != nil {
+		return err
+	}
+
+	for service, dsn := range pandoraDSNs(target, db) {
+		if err := d.store.PutSecret(ctx, service, "postgres-dsn", dsn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pandoraDSNs renders every role's connection string to the pandora database,
+// keyed by the SSM service it is stored under. They ask for verify-full
+// because the server's clients reach the cluster across the internet, inside
+// the VPN; each client supplies the RDS root bundle itself.
+func pandoraDSNs(target dbTarget, db dbinit.Database) map[string]string {
+	dsns := map[string]string{
+		ssmService(db.Name): dbinit.DSN(target.Host, target.Port, db.Name, db.Name, db.Password, dbinit.SSLVerifyFull),
+	}
+	for _, role := range db.LoginRoles {
+		dsns[ssmService(role.Name)] = dbinit.DSN(target.Host, target.Port, db.Name, role.Name, role.Password, dbinit.SSLVerifyFull)
+	}
+	return dsns
+}
+
+// ssmService turns a Postgres role name into the parameter prefix it is stored
+// under, matching the hyphenated service names every other prefix uses.
+func ssmService(role string) string {
+	return strings.ReplaceAll(role, "_", "-")
 }
 
 // storeConnectionStrings writes each service the exact string it consumes.
@@ -410,9 +508,9 @@ type masterCredentials struct {
 
 // masterCredentials reads the secret RDS manages itself. Terraform never sees
 // this value, because manage_master_user_password keeps it out of state.
-func (d *deps) masterCredentials(ctx context.Context) (masterCredentials, error) {
+func (d *deps) masterCredentials(ctx context.Context, secretARN string) (masterCredentials, error) {
 	out, err := d.secrets.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: aws.String(d.cfg.DBMasterSecret),
+		SecretId: aws.String(secretARN),
 	})
 	if err != nil {
 		return masterCredentials{}, fmt.Errorf("read RDS master secret: %w", err)
