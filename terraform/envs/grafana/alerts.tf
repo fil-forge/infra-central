@@ -532,9 +532,9 @@ resource "grafana_rule_group" "central" {
   # otherwise. The same metric is also published per tunnel address, which the
   # empty TunnelIpAddress matcher leaves out. The VpnId series carry no stage, and the non-prod account holds
   # two stages, so the rule watches the prod account only; prod is the one stage
-  # with sites (modules/shared/constants, compat_server_sites).
+  # with sites (modules/shared/constants, pandora_sites).
   rule {
-    name           = "Compatibility server VPN tunnel down"
+    name           = "Pandora VPN tunnel down"
     condition      = "B"
     for            = "10m"
     no_data_state  = "OK"
@@ -542,7 +542,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} has a tunnel down"
-      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} has been down for ten minutes; with both down, the appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/compat-server-vpn.md covers the appliance side."
+      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} has been down for ten minutes; with both down, the appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
     }
 
     labels = {

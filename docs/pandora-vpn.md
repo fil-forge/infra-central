@@ -10,10 +10,10 @@ The appliance's half (strongSwan, the private /32 and its source NAT) is in
 
 | Piece | Root | Applied |
 |---|---|---|
-| Site list | `terraform/modules/shared/constants`, `compat_server_sites` | read by the platform root |
+| Site list | `terraform/modules/shared/constants`, `pandora_sites` | read by the platform root |
 | Service-linked role `AWSServiceRoleForVPCS2SVPN`, which keeps the pre-shared keys in Secrets Manager | `terraform/envs/bootstrap/prod/account` | by hand, once per account |
 | VPN gateway, customer gateways, VPN connections | `terraform/envs/<stage>/platform` | by CI on merge |
-| Subnets, security group, cluster | `terraform/envs/<stage>/platform`, `compat_database` | by CI on merge |
+| Subnets, security group, cluster | `terraform/envs/<stage>/platform`, `pandora_db` | by CI on merge |
 | Database and roles | the provision Lambda's seed phase | by the platform apply |
 
 A stage gets a VPN gateway only when it has sites, and the cluster needs the stage to have at least
@@ -43,9 +43,9 @@ prod = {
 ```
 
 Merge. CI applies the platform root, which creates the site's customer gateway and VPN connection,
-and admits its private /32 to the cluster. The root's `compat_vpn_sites` output, printed at the end
-of the apply job, lists per site the VPN connection, both tunnel addresses and the ARN of the
-Secrets Manager secret holding the pre-shared keys. Read the keys with:
+and admits its private /32 to the cluster. The root's `pandora_vpn_connections` output, printed at
+the end of the apply job, lists per site the VPN connection, both tunnel addresses and the ARN of
+the Secrets Manager secret holding the pre-shared keys. Read the keys with:
 
 ```bash
 aws secretsmanager get-secret-value --secret-id <preshared_key_arn> --query SecretString --output text
@@ -64,7 +64,7 @@ only that into the tunnel.
 | Routing | static, route-based, one xfrm interface per tunnel |
 | Tunnel MTU | 1,446 bytes on a 1,500-byte path, 1,438 behind NAT |
 
-If the stage has no cluster yet, set `compat_database` in its platform root, in the same pull
+If the stage has no cluster yet, set `pandora_db` in its platform root, in the same pull
 request as the site or a later one.
 
 ## Getting the database credentials onto the appliance
@@ -106,11 +106,11 @@ platform apply and the appliance's strongSwan coming up.
 
 ## Dropping the cluster
 
-To drop the Aurora cluster instead of performing a data reset, set `compat_database = null` in the
+To drop the Aurora cluster instead of performing a data reset, set `pandora_db = null` in the
 stage's platform root and merge. CI deletes the cluster, with no final snapshot when `protect` is
 off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
 
-Removing the VPN as well means deleting the stage's sites from `compat_server_sites`, in the same
+Removing the VPN as well means deleting the stage's sites from `pandora_sites`, in the same
 pull request or a later one. New tunnels later get new addresses and keys.
 
 ## Destroying the platform root
@@ -119,8 +119,8 @@ A destroy of the stage's platform root deletes the VPN with the VPC. When the ro
 every site gets two new tunnel addresses and two new pre-shared keys. Its public IP, private /32,
 the VPC route and the IPsec parameters stay the same. For each site, after the apply:
 
-1. Read the new tunnel addresses from `compat_vpn_sites` and the new keys from Secrets Manager, as
-   in [Adding a site](#adding-a-site), and send them to the site's operator.
+1. Read the new tunnel addresses from `pandora_vpn_connections` and the new keys from Secrets
+   Manager, as in [Adding a site](#adding-a-site), and send them to the site's operator.
 2. The operator replaces the keys in the node's OpenBao and the tunnel addresses in the node's
    configuration, then re-runs the node's VPN provisioning, as infra-nodes describes.
 3. Check the path as above.
