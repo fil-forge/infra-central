@@ -21,8 +21,9 @@ table and security group, carries the VPN route, and central's database network 
 Aurora snapshots and point-in-time recovery cover a whole cluster, so data dropped from a database
 on central's cluster stays in central's 35-day recovery window and in its final and copied
 snapshots. A separate cluster keeps its own recovery window. The cluster used for the test run holds
-test data only and is deleted after it, with deletion protection off and the final snapshot skipped,
-so nothing of it remains. While the test runs, its load stays off Sprue's writer.
+test data only, keeps automated backups for one day, Aurora's minimum, and is deleted after it, with
+deletion protection off and the final snapshot skipped, so nothing of it remains. While the test
+runs, its load stays off Sprue's writer.
 
 ## Engine and size
 
@@ -70,9 +71,9 @@ different zones.
 | Appliance addressing | Each site gets a private /32 from `10.21.0.0/24`, outside the VPC, on a dummy interface, and the server's database traffic is source-NATed to it. The VPN's static route and the security group name that address, and the appliance routes only `10.20.192.0/18` into the tunnel. |
 | Encryption in transit | IPsec on the tunnel, and TLS to Postgres with `rds.force_ssl=1` and clients on `sslmode=verify-full`. |
 | DNS | None needed. The cluster endpoint is a public DNS name that resolves to the cluster's private addresses. |
-| Tunnel options | Pinned on both tunnels: IKEv2 only, and DH groups 20 and 21 in both phases. Phase 1 uses AES256-GCM-16 with SHA2-384 as the PRF. Phase 2 uses AES256-GCM-16, which carries its own integrity, so it has no separate integrity algorithm. The appliance's strongSwan proposals are `aes256gcm16-prfsha384-ecp384-ecp521` for IKE and `aes256gcm16-ecp384-ecp521` for ESP. On Debian 12 and Ubuntu 24.04 they need `libstrongswan-standard-plugins`, which carries the `openssl` and `gcm` plugins. It is only a recommended package, so an install with `--no-install-recommends` leaves it out. Debian 13's base package has the `openssl` plugin. AWS's defaults would also accept AES-128, SHA-1 and DH group 2. |
+| Tunnel options | Pinned on both tunnels: IKEv2 only, and DH groups 20 and 21 in both phases. Phase 1 uses AES256-GCM-16 with SHA2-384 as the PRF. Phase 2 uses AES256-GCM-16, which carries its own integrity, so it has no separate integrity algorithm. AWS's phase-2 integrity list is still set to SHA2-384 alone, which keeps SHA-1 off it and is never negotiated with GCM. The appliance's strongSwan proposals are `aes256gcm16-prfsha384-ecp384-ecp521` for IKE and `aes256gcm16-ecp384-ecp521` for ESP. On Debian 12 and Ubuntu 24.04 they need `libstrongswan-standard-plugins`, which carries the `openssl` and `gcm` plugins. It is only a recommended package, so an install with `--no-install-recommends` leaves it out. Debian 13's base package has the `openssl` plugin. AWS's defaults would also accept AES-128, SHA-1 and DH group 2. |
 | Keys | Pre-shared keys stored in Secrets Manager (`preshared_key_storage = "SecretsManager"`), out of Terraform state. |
-| Monitoring | Two Grafana alert rules on the connection's `TunnelState` (dimension `VpnId`), fed by adding `AWS/VPN` to the metric stream: a `warning` when one tunnel is down and a `critical` when both are. AWS replaces tunnel endpoints one tunnel at a time, so the warning waits longer than that maintenance takes, and the maintenance never reaches the critical rule. Changing the VPN connection's options or its customer gateway takes both tunnels down, so an apply that does needs a silence. Nothing in the account routes CloudWatch alarms to on-call, and every other alert is a Grafana rule. |
+| Monitoring | Two Grafana alert rules on the connection's `TunnelState` (dimension `VpnId`), fed by adding `AWS/VPN` to the metric stream: a `warning` when one tunnel is down and a `critical` when both are. AWS replaces tunnel endpoints one tunnel at a time, so the warning waits longer than that maintenance takes, and the maintenance never reaches the critical rule. Changing the VPN connection's options or its customer gateway takes both tunnels down, so an apply that does needs a silence. Both rules also fire when no `TunnelState` data arrives for as long as they wait. |
 
 The VPN costs about $44 a month per site: $36.50 for the connection and $7.30 for the two tunnel
 addresses. The virtual private gateway is free. Data leaving AWS costs $0.09/GB, the same as on any
@@ -129,14 +130,14 @@ route table and security group. The VPN stays. Taking the stage's sites off `pan
 the VPN too, in the same pull request or a later one; sites added back afterwards get new tunnel
 addresses and keys.
 
+The provision Lambda's seed phase reads the second cluster's master secret and creates the
+`pandora` database there, keeping the name the server hardcodes, with two login roles.
+`pandora_admin` owns the database and is used only by the loader. `pandora_storage_server` is for
+the server's daemons and gets a 15-second `statement_timeout`. Each role's DSN goes to SSM with
+`sslmode=verify-full`, and table grants live in the server's own grants file.
+
 ## Work this leaves for the server and the appliance
 
-- The server connects as more than one login role. The provision Lambda creates one login role per
-  database today. It needs the second cluster's master secret and a way to create two roles:
-  `pandora_admin`, which owns the `pandora` database and is used only by the loader, and
-  `pandora_storage_server` for the server's daemons. The database keeps the name the server
-  hardcodes. `pandora_storage_server` gets a 15-second `statement_timeout`. Each role's DSN goes to
-  SSM with `sslmode=verify-full`, and table grants live in the server's own grants file.
 - Passwords minted in central's secret store have no path into an appliance's OpenBao yet.
 - The server's Postgres client must support SCRAM authentication.
 - Connections cross a WAN, so clients set TCP keepalives and `tcp_user_timeout`, and long-lived
