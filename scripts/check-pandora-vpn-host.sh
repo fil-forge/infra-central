@@ -152,7 +152,16 @@ on_exit() {
   fi
 
   read -r -p "Press Enter to remove the containers and the secrets… " _ </dev/tty || true
-  compose down --rmi local --volumes --remove-orphans || true
+  # The containers hold the keys and the DSN in their tmpfs mounts, and the
+  # next fetch refuses to run while CHECK_DIR exists, so a failed teardown
+  # keeps CHECK_DIR.
+  if ! compose down --rmi local --volumes --remove-orphans; then
+    echo "ERROR: could not remove the containers, which may still hold the keys and the DSN." >&2
+    echo "$CHECK_DIR stays. Remove both with:" >&2
+    echo "  docker compose -f $COMPOSE_FILE down --rmi local --volumes" >&2
+    echo "  rm -rf $CHECK_DIR" >&2
+    exit 1
+  fi
   rm -rf "$CHECK_DIR"
   exit "$status"
 }
