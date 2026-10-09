@@ -88,6 +88,7 @@ appliance label.
 | ----------------------------------- | ------------------------- | ----------------- | -------- |
 | Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
 | Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
+| Service is failing most requests    | Forge Central             | ALB, CloudWatch   | FIL-1207 |
 | Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
 | Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
 | Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
