@@ -7,7 +7,7 @@
 # creates them from inside the private subnets instead.
 
 locals {
-  name          = "fc-${var.stage}"
+  name          = coalesce(var.name, "fc-${var.stage}")
   engine_family = "aurora-postgresql${split(".", var.engine_version)[0]}"
 }
 
