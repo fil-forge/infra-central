@@ -90,6 +90,7 @@ appliance label.
 | Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
 | Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
 | Pandora VPN tunnel down             | Forge Central             | VPN, CloudWatch, prod account | FIL-1436 |
+| Pandora VPN both tunnels down       | Forge Central             | VPN, CloudWatch, prod account | FIL-1436 |
 | Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
 | Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
 | Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
@@ -213,6 +214,9 @@ is 1 with both tunnels up and 0.5 with one; the series per tunnel address carry
 ```promql
 aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 ```
+
+The warning rule reads that minimum, and the critical rule reads `aws_vpn_tunnel_state_maximum`,
+which is 0 only when no tunnel was up during the minute.
 
 Reads against the delegator's tables, likewise:
 
