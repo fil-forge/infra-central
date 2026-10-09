@@ -1,6 +1,6 @@
 # The Forge dashboards and alert rules are Terraform, in a root of their own
 
-The two Grafana dashboards on-call reads during a SpiderOak perf run or an SP
+The two Grafana dashboards on-call reads during an IST-1 perf run or an SP
 deployment are committed here and applied with the Grafana Terraform provider:
 
 - `Forge Central`, uid `forge-central`, the central services.
