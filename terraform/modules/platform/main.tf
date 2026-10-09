@@ -102,6 +102,39 @@ locals {
   database = one(concat(module.database, module.aurora))
 }
 
+# The compatibility server's database, on a cluster of its own that the
+# server's appliances reach over the stage's site-to-site VPN.
+module "compat_database" {
+  source = "./compat-database"
+  count  = var.compat_database == null ? 0 : 1
+
+  stage                    = var.stage
+  vpc_id                   = module.network.vpc_id
+  vpc_cidr                 = var.vpc_cidr
+  availability_zones       = module.network.azs
+  lambda_security_group_id = module.network.lambda_security_group_id
+  kms_key_arn              = var.db_kms_key_arn
+  sites                    = local.compat_server_sites
+
+  instance_count        = var.compat_database.instance_count
+  backup_retention_days = var.compat_database.backup_retention_days
+  protect               = var.compat_database.protect
+}
+
+locals {
+  compat_server_sites = lookup(module.constants.compat_server_sites, var.stage, {})
+}
+
+# Sites without the cluster are allowed: the regional bootstrap brings the VPN
+# up before the cluster exists, and dropping the cluster keeps the tunnels. Left
+# that way for long, though, the stage pays for a VPN with nothing behind it.
+check "compat_server_sites_have_a_cluster" {
+  assert {
+    condition     = var.compat_database != null || length(local.compat_server_sites) == 0
+    error_message = "Stage ${var.stage} has compatibility server sites (${join(", ", keys(local.compat_server_sites))}) but no compat_database, so their VPN connections cost about $44 a month each with no cluster to reach. Set compat_database, or remove the sites and apply the regional bootstrap."
+  }
+}
+
 module "storage" {
   source = "./storage"
 
@@ -175,6 +208,13 @@ module "provision" {
   db_master_secret_arn         = local.database.master_secret_arn
   db_master_secret_kms_key_arn = local.database.master_secret_kms_key_arn
 
+  pandora_db = var.compat_database == null ? null : {
+    host                      = module.compat_database[0].address
+    port                      = module.compat_database[0].port
+    master_secret_arn         = module.compat_database[0].master_secret_arn
+    master_secret_kms_key_arn = module.compat_database[0].master_secret_kms_key_arn
+  }
+
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
 
@@ -188,14 +228,17 @@ module "provision" {
 resource "aws_lambda_invocation" "seed" {
   function_name = module.provision.function_name
 
+  # The pandora host is here so that creating or replacing that cluster
+  # re-invokes the phase. The function reads the host from its environment.
   input = jsonencode({
-    phase   = "seed"
-    trigger = var.seed_trigger
+    phase           = "seed"
+    trigger         = var.seed_trigger
+    pandora_db_host = try(module.compat_database[0].address, null)
   })
 
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
-  depends_on = [module.database, module.aurora]
+  depends_on = [module.database, module.aurora, module.compat_database]
 }
 
 module "openbao" {
