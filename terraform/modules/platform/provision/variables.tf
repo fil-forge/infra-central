@@ -75,7 +75,7 @@ variable "db_master_secret_kms_key_arn" {
   type = string
 }
 
-variable "pandora_db" {
+variable "pandora_db_connection" {
   description = "The compatibility server's cluster, whose pandora database and roles the seed phase creates. Null in a stage without one."
   type = object({
     host                      = string

@@ -14,10 +14,10 @@ locals {
 
   # Both clusters' master secrets. Each is encrypted with the account's
   # AWS-managed Secrets Manager key, so the key ARNs are usually one.
-  db_master_secret_arns = compact([var.db_master_secret_arn, try(var.pandora_db.master_secret_arn, null)])
+  db_master_secret_arns = compact([var.db_master_secret_arn, try(var.pandora_db_connection.master_secret_arn, null)])
   db_master_secret_kms_key_arns = distinct(compact([
     var.db_master_secret_kms_key_arn,
-    try(var.pandora_db.master_secret_kms_key_arn, null),
+    try(var.pandora_db_connection.master_secret_kms_key_arn, null),
   ]))
 }
 
@@ -76,10 +76,10 @@ resource "aws_lambda_function" "this" {
       FORGE_USDFC_ADDRESS        = var.chain.contracts.usdfc_token
       FORGE_FILECOIN_PAY_ADDRESS = var.chain.contracts.filecoin_pay
       FORGE_FWSS_ADDRESS         = var.chain.contracts.fwss
-      }, var.pandora_db == null ? {} : {
-      FORGE_PANDORA_DB_HOST              = var.pandora_db.host
-      FORGE_PANDORA_DB_PORT              = tostring(var.pandora_db.port)
-      FORGE_PANDORA_DB_MASTER_SECRET_ARN = var.pandora_db.master_secret_arn
+      }, var.pandora_db_connection == null ? {} : {
+      FORGE_PANDORA_DB_HOST              = var.pandora_db_connection.host
+      FORGE_PANDORA_DB_PORT              = tostring(var.pandora_db_connection.port)
+      FORGE_PANDORA_DB_MASTER_SECRET_ARN = var.pandora_db_connection.master_secret_arn
     })
   }
 
