@@ -127,7 +127,9 @@ both tunnels down, so silence both rules for it.
 ### Checking a site before its appliance is configured
 
 Two scripts check a site's VPN connection without the appliance's own strongSwan. Both use the
-stage's real tunnels, so silence the Grafana rule "Pandora VPN tunnel down" for the run.
+stage's real tunnels, so silence the Grafana rules "Pandora VPN tunnel down" and "Pandora VPN both
+tunnels down" for the run. Outside the run both tunnels are down until the appliance's strongSwan is
+up, and during it the host check takes tunnel 1 down on purpose.
 
 The host check runs strongSwan and psql in containers on the site's appliance host, and leaves the
 host's network configuration alone. Start it from a laptop with credentials for the stage's account:
@@ -157,14 +159,14 @@ It attempts IKE with both tunnels using the site's identity and real keys, and p
 tunnel establishes. The keys stay in a temporary directory removed on exit.
 
 A host run interrupted before its cleanup leaves its containers and secrets behind, and the next
-fetch refuses to overwrite them. Remove them on the host with:
+fetch refuses to overwrite them. Remove them from the laptop with:
 
 ```bash
-docker compose -f /run/pandora-vpn-check/pandora-vpn-check/compose.yml down --rmi local --volumes
+ssh root@23.83.66.244 docker compose -f /run/pandora-vpn-check/pandora-vpn-check/compose.yml down --rmi local --volumes
 ```
 
 ```bash
-rm -rf /run/pandora-vpn-check
+ssh root@23.83.66.244 rm -rf /run/pandora-vpn-check
 ```
 
 A reboot also clears the secrets.
