@@ -133,6 +133,17 @@ module "platform" {
   # storage is this database.
   protect_stateful_resources = true
 
+  # The compatibility server's pandora database (FIL-1401), holding test data
+  # only for this cycle's migration test: a writer alone, Aurora's shortest
+  # backup retention, and no deletion protection or final snapshot, so dropping
+  # it leaves nothing behind. Setting this to null drops the cluster and keeps
+  # the VPN; docs/pandora-vpn.md has the steps.
+  pandora_db = {
+    instance_count        = 1
+    backup_retention_days = 1
+    protect               = false
+  }
+
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
   # about 80 of them with OpenBao's 24 included.
   openbao_max_parallel = 24

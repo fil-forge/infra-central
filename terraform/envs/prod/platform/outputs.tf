@@ -56,3 +56,8 @@ output "retired_appliances" {
   description = "Regions the last vault run destroyed keys for. Those nodes can never unseal again. The result stays in state until the next run, so a non-empty list records that retirement and does not mean this apply destroyed anything."
   value       = module.platform.retired_appliances
 }
+
+output "pandora_vpn_connections" {
+  description = "Each compatibility server site's VPN connection, tunnel addresses and the ARN of the Secrets Manager secret holding its pre-shared keys. docs/pandora-vpn.md says what to send the site's operator."
+  value       = module.platform.pandora_vpn_connections
+}
