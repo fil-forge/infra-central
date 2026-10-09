@@ -123,9 +123,11 @@ and the next apply gives each site new tunnel addresses and keys, which its oper
 appliance by hand. That is expected once or twice, for one or two sites, which costs less than a
 hand-applied root on every site change.
 
-To drop the Aurora cluster instead of performing a data reset, the stage's platform root stops
-creating it, and the VPN stays. Removing the VPN as well means taking the sites off the list, in the
-same pull request or a later one, and new tunnels get new addresses and keys.
+The pandora cluster can also be dropped instead of resetting its data. A pull request sets the
+platform root's `pandora_db` input to null, and CI's apply deletes the cluster with its subnets,
+route table and security group. The VPN stays. Taking the stage's sites off `pandora_sites` removes
+the VPN too, in the same pull request or a later one; sites added back afterwards get new tunnel
+addresses and keys.
 
 ## Work this leaves for the server and the appliance
 
