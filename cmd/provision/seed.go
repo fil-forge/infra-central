@@ -368,7 +368,7 @@ func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database)
 // otherwise put every password into state.
 func (d *deps) storeConnectionStrings(ctx context.Context, databases []dbinit.Database) error {
 	for _, db := range databases {
-		dsn := dbinit.DSN(d.cfg.DBHost, d.cfg.DBPort, db)
+		dsn := dbinit.DSN(d.cfg.DBHost, d.cfg.DBPort, db.Name, db.Name, db.Password, dbinit.SSLRequire)
 		if err := d.store.PutSecret(ctx, db.Name, "postgres-dsn", dsn); err != nil {
 			return err
 		}
