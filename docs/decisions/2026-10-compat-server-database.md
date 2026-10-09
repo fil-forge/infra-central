@@ -110,8 +110,9 @@ Indexes 12–15 sit inside one free /18.
 Sites are listed per stage in the shared constants module, as `compat_server_sites`, keyed by stage
 and then by the appliance's region label, with each site's public and private address. Both roots
 read the one list. Staging appliances run on different hosts from prod ones, so each stage has its
-own sites, and a stage whose list is empty gets no gateway. A stage with sites must also have the
-cluster.
+own sites, and a stage whose list is empty gets no gateway. The cluster needs at least one site,
+because the platform root attaches the stage's gateway to the VPC. A stage can have sites without
+the cluster.
 
 A VPC cannot be deleted while a gateway is attached to it, so the pieces split across roots. The
 customer gateway, the virtual private gateway and the VPN connection live in the regional bootstrap
@@ -124,10 +125,10 @@ keeps its tunnel addresses when the gateway is attached again is tested once bef
 runbook step. If it does not, the connection can move to a new gateway, which AWS documents as
 keeping its tunnel addresses and options.
 
-Dropping the cluster outside a reset, as at the end of the test cycle, also empties the stage's
-site list, because a stage with sites must have the cluster. The hand-applied bootstrap then
-deletes the gateway and the VPN connections, and the next cycle's tunnels get new addresses and
-keys.
+To drop the Aurora cluster instead of performing a data reset, the stage's platform root stops
+creating it, which also detaches the gateway, and the VPN stays. Removing the VPN as well is a
+second step: the sites leave the list and the bootstrap root is applied by hand, and new tunnels
+get new addresses and keys.
 
 ## Work this leaves for the server and the appliance
 
