@@ -100,9 +100,9 @@ With the tunnels up, from the appliance, with traffic sourced from its private /
 PGSSLROOTCERT=/path/to/global-bundle.pem psql "$PANDORA_STORAGE_SERVER_DSN" -c 'SHOW statement_timeout'
 ```
 
-It prints `15s`. A connection from any other address times out. The Grafana rule "Compatibility
-server VPN tunnel down" fires while either tunnel is down, which includes the time between the
-platform apply and the appliance's strongSwan coming up.
+It prints `15s`. A connection from any other address times out. The Grafana rule "Pandora VPN
+tunnel down" fires while either tunnel is down, which includes the time between the platform apply
+and the appliance's strongSwan coming up.
 
 ## Dropping the cluster
 
