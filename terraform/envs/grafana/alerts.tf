@@ -520,6 +520,194 @@ resource "grafana_rule_group" "central" {
       })
     }
   }
+
+  # A tunnel of the compatibility server's site-to-site VPN is down. Each VPN
+  # connection has two, and the appliance moves its database route to the other
+  # one, so a single tunnel down leaves the database reachable without
+  # redundancy. AWS takes tunnels down one at a time for maintenance, and
+  # for = 15m is meant to outlast that. Until an appliance has strongSwan
+  # configured, both of its tunnels are down and this fires from the moment the
+  # connection exists. "Pandora VPN both tunnels down" below is the critical
+  # rule for the outage itself.
+  #
+  # TunnelState per VpnId is 1 with every tunnel up, 0 with none, and in between
+  # otherwise. The same metric is also published per tunnel address, which the
+  # empty TunnelIpAddress matcher leaves out. The VpnId series carry no stage,
+  # and the non-prod account holds two stages, so the rule watches the prod
+  # account only; prod is the one stage with sites (modules/shared/constants,
+  # pandora_sites).
+  #
+  # no_data_state is Alerting: with no series at all, the metric stream has
+  # stopped delivering AWS/VPN or the last VPN is gone, and nothing is watching
+  # the tunnels. That instance keeps the rule's labels, stage included. The
+  # query keeps returning the last sample for Mimir's five-minute lookback, so
+  # no data fires about 20 minutes after the last sample. Both windows are
+  # provisional until samples show how often AWS/VPN data points arrive through
+  # the stream.
+  #
+  # One VPN's series vanishing while another still reports is a missing series
+  # for Grafana, which resolves that instance instead of firing. Prod has one
+  # site, so the whole-query no data covers it; a second site needs a check of
+  # the series count against pandora_sites.
+  #
+  # Paused while prod has no site, since no_data_state would otherwise fire for
+  # as long as the site list stays empty.
+  rule {
+    name           = "Pandora VPN tunnel down"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
+
+    annotations = {
+      summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
+      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for about 20. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        intervalMs   = 1000
+        legendFormat = "{{account_id}} {{dimension_VpnId}}"
+        expr         = <<-PROMQL
+          min by (account_id, dimension_VpnId) (
+            aws_vpn_tunnel_state_minimum{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [1] }
+        }]
+      })
+    }
+  }
+
+  # Both tunnels of a compatibility server VPN connection are down, so the
+  # appliance cannot reach the pandora database. AWS's maintenance takes one
+  # tunnel at a time and never reaches this rule. An apply that changes a VPN
+  # connection's options or its customer gateway does, and needs a silence.
+  #
+  # The per-VpnId maximum is 0 only when no tunnel was up at any point in the
+  # minute; with two tunnels its other values are 0.5 and 1. no_data_state is
+  # Alerting for the reason the warning rule above gives, and no data fires
+  # about ten minutes after the last sample.
+  #
+  # Paused until the first production appliance runs strongSwan (FIL-1402).
+  # Until then the only prod site is the staging appliance standing in, its
+  # tunnels are down outside test runs, and this rule would page on-call for
+  # that. The pull request that brings a production site live replaces true
+  # with the warning rule's is_paused expression.
+  rule {
+    name           = "Pandora VPN both tunnels down"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+    is_paused      = true
+
+    annotations = {
+      summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
+      description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for about ten. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        intervalMs   = 1000
+        legendFormat = "{{account_id}} {{dimension_VpnId}}"
+        expr         = <<-PROMQL
+          max by (account_id, dimension_VpnId) (
+            aws_vpn_tunnel_state_maximum{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [0.5] }
+        }]
+      })
+    }
+  }
 }
 
 # 300s although the host exporter is scraped once a minute. Nothing in this
