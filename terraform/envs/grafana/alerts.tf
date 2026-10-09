@@ -537,21 +537,32 @@ resource "grafana_rule_group" "central" {
   # account only; prod is the one stage with sites (modules/shared/constants,
   # pandora_sites).
   #
-  # no_data_state is Alerting: with no series for the whole 15 minutes, the
-  # metric stream has stopped delivering AWS/VPN or the VPN is gone, and nothing
-  # is watching the tunnels. That instance keeps the rule's labels, stage
-  # included. Both windows are provisional until samples show how often AWS/VPN
-  # data points arrive through the stream.
+  # no_data_state is Alerting: with no series at all, the metric stream has
+  # stopped delivering AWS/VPN or the last VPN is gone, and nothing is watching
+  # the tunnels. That instance keeps the rule's labels, stage included. The
+  # query keeps returning the last sample for Mimir's five-minute lookback, so
+  # no data fires about 20 minutes after the last sample. Both windows are
+  # provisional until samples show how often AWS/VPN data points arrive through
+  # the stream.
+  #
+  # One VPN's series vanishing while another still reports is a missing series
+  # for Grafana, which resolves that instance instead of firing. Prod has one
+  # site, so the whole-query no data covers it; a second site needs a check of
+  # the series count against pandora_sites.
+  #
+  # Paused while prod has no site, since no_data_state would otherwise fire for
+  # as long as the site list stays empty.
   rule {
     name           = "Pandora VPN tunnel down"
     condition      = "B"
     for            = "15m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
-      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for that long. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for about 20. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
     }
 
     labels = {
@@ -619,12 +630,14 @@ resource "grafana_rule_group" "central" {
   #
   # The per-VpnId maximum is 0 only when no tunnel was up at any point in the
   # minute; with two tunnels its other values are 0.5 and 1. no_data_state is
-  # Alerting for the reason the warning rule above gives.
+  # Alerting for the reason the warning rule above gives, and no data fires
+  # about ten minutes after the last sample.
   #
   # Paused until the first production appliance runs strongSwan (FIL-1402).
   # Until then the only prod site is the staging appliance standing in, its
   # tunnels are down outside test runs, and this rule would page on-call for
-  # that. The pull request that brings a production site live unpauses it.
+  # that. The pull request that brings a production site live replaces true
+  # with the warning rule's is_paused expression.
   rule {
     name           = "Pandora VPN both tunnels down"
     condition      = "B"
@@ -635,7 +648,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
-      description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for that long. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for about ten. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
     }
 
     labels = {
