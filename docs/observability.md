@@ -89,6 +89,7 @@ appliance label.
 | Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
 | Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
 | Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
+| Compatibility server VPN tunnel down | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
 | Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
 | Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
@@ -203,6 +204,14 @@ Provision Lambda errors, arriving through fil-one/infra's stream:
 
 ```promql
 aws_lambda_errors_sum{dimension_FunctionName="fc-dev-provision"}
+```
+
+The compatibility server's VPN tunnels, through this repo's stream. Each VPN connection's series
+is 1 with both tunnels up and 0.5 with one; the series per tunnel address carry
+`dimension_TunnelIpAddress` instead:
+
+```promql
+aws_vpn_tunnel_state_min{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 ```
 
 Reads against the delegator's tables, likewise:
