@@ -76,7 +76,6 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 |---|---|---|
 | `pandora_admin` | the estate loader only; owns the database | `/forge-central/<stage>/pandora-admin/postgres-dsn` |
 | `pandora_storage_server` | the server's daemons | `/forge-central/<stage>/pandora-storage-server/postgres-dsn` |
-| `ergo_proxy` | ergo_proxy's lookups | `/forge-central/<stage>/ergo-proxy/postgres-dsn` |
 
 The DSNs ask for `sslmode=verify-full`. The client supplies the RDS root bundle, for example by
 pointing `PGSSLROOTCERT` at
