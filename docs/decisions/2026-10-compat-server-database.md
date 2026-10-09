@@ -70,9 +70,9 @@ different zones.
 | Appliance addressing | Each site gets a private /32 from `10.21.0.0/24`, outside the VPC, on a dummy interface, and the server's database traffic is source-NATed to it. The VPN's static route and the security group name that address, and the appliance routes only `10.20.192.0/18` into the tunnel. |
 | Encryption in transit | IPsec on the tunnel, and TLS to Postgres with `rds.force_ssl=1` and clients on `sslmode=verify-full`. |
 | DNS | None needed. The cluster endpoint is a public DNS name that resolves to the cluster's private addresses. |
-| Tunnel options | Pinned on both tunnels: IKEv2 only, AES256-GCM-16 with SHA2-384 in both phases, DH groups 20 and 21. strongSwan in Debian 12 and 13 and Ubuntu 24.04 supports all of them, and AWS's defaults would also accept AES-128, SHA-1 and DH group 2. |
+| Tunnel options | Pinned on both tunnels: IKEv2 only, and DH groups 20 and 21 in both phases. Phase 1 uses AES256-GCM-16 with SHA2-384 as the PRF. Phase 2 uses AES256-GCM-16, which carries its own integrity, so it has no separate integrity algorithm. The appliance's strongSwan proposals are `aes256gcm16-prfsha384-ecp384-ecp521` for IKE and `aes256gcm16-ecp384-ecp521` for ESP. On Debian 12 and Ubuntu 24.04 they need `libstrongswan-standard-plugins`, which carries the `openssl` and `gcm` plugins. It is only a recommended package, so an install with `--no-install-recommends` leaves it out. Debian 13's base package has the `openssl` plugin. AWS's defaults would also accept AES-128, SHA-1 and DH group 2. |
 | Keys | Pre-shared keys stored in Secrets Manager (`preshared_key_storage = "SecretsManager"`), out of Terraform state. |
-| Monitoring | A Grafana alert rule on the connection's `TunnelState` (dimension `VpnId`) below 1, fed by adding `AWS/VPN` to the metric stream. It fires when either tunnel is down, including during AWS's tunnel maintenance. Nothing in the account routes CloudWatch alarms to on-call, and every other alert is a Grafana rule. |
+| Monitoring | Two Grafana alert rules on the connection's `TunnelState` (dimension `VpnId`), fed by adding `AWS/VPN` to the metric stream: a `warning` when one tunnel is down and a `critical` when both are. AWS replaces tunnel endpoints one tunnel at a time, so the warning waits longer than that maintenance takes, and the maintenance never reaches the critical rule. Changing the VPN connection's options or its customer gateway takes both tunnels down, so an apply that does needs a silence. Nothing in the account routes CloudWatch alarms to on-call, and every other alert is a Grafana rule. |
 
 The VPN costs about $44 a month per site: $36.50 for the connection and $7.30 for the two tunnel
 addresses. The virtual private gateway is free. Data leaving AWS costs $0.09/GB, the same as on any
@@ -118,10 +118,10 @@ The VPN, the cluster and their routing all live in the stage's platform root, wh
 every merge, so adding a site is a pull request. The VPN does not depend on the cluster, so dropping
 or replacing the cluster, or wiping data in place for the post-test reset
 ([FIL-1396](https://linear.app/filecoin-foundation/issue/FIL-1396)), keeps the tunnel addresses and
-keys. A destroy of the whole platform root deletes the VPN with the VPC, after detaching the gateway,
-and the next apply gives each site new tunnel addresses and keys, which its operator installs on the
-appliance by hand. That is expected once or twice, for one or two sites, which costs less than a
-hand-applied root on every site change.
+keys. A destroy of the whole platform root deletes the VPN with the VPC, after detaching the
+gateway, and the next apply gives each site new tunnel addresses and keys, which its operator
+installs on the appliance by hand. That is expected once or twice, for one or two sites, which
+costs less than a hand-applied root on every site change.
 
 The pandora cluster can also be dropped instead of resetting its data. A pull request sets the
 platform root's `pandora_db` input to null, and CI's apply deletes the cluster with its subnets,
