@@ -137,8 +137,8 @@ module "platform" {
   # only for this cycle's migration test: a writer alone, Aurora's shortest
   # backup retention, and no deletion protection or final snapshot, so dropping
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
-  # the VPN; docs/compat-server-vpn.md has the steps.
-  compat_database = {
+  # the VPN; docs/pandora-vpn.md has the steps.
+  pandora_db = {
     instance_count        = 1
     backup_retention_days = 1
     protect               = false

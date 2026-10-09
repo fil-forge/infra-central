@@ -57,7 +57,7 @@ output "retired_appliances" {
   value       = module.platform.retired_appliances
 }
 
-output "compat_vpn_sites" {
-  description = "Each compatibility server site's VPN connection, tunnel addresses and the ARN of the Secrets Manager secret holding its pre-shared keys. docs/compat-server-vpn.md says what to send the site's operator."
-  value       = module.platform.compat_vpn_sites
+output "pandora_vpn_connections" {
+  description = "Each compatibility server site's VPN connection, tunnel addresses and the ARN of the Secrets Manager secret holding its pre-shared keys. docs/pandora-vpn.md says what to send the site's operator."
+  value       = module.platform.pandora_vpn_connections
 }

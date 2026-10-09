@@ -74,12 +74,12 @@ variable "db_kms_key_arn" {
   }
 }
 
-variable "compat_database" {
+variable "pandora_db" {
   description = <<-EOT
     The SpiderOak compatibility server's pandora cluster, or null for a stage
     without one. It uses db_kms_key_arn, and needs the stage to have sites in
-    the shared constants module's compat_server_sites, because the appliances
-    reach it only over the stage's VPN. See docs/compat-server-vpn.md.
+    the shared constants module's pandora_sites, because the appliances
+    reach it only over the stage's VPN. See docs/pandora-vpn.md.
   EOT
   type = object({
     instance_count        = number
@@ -89,8 +89,8 @@ variable "compat_database" {
   default = null
 
   validation {
-    condition     = var.compat_database == null || var.db_kms_key_arn != null
-    error_message = "compat_database needs db_kms_key_arn, the key its cluster is encrypted with."
+    condition     = var.pandora_db == null || var.db_kms_key_arn != null
+    error_message = "pandora_db needs db_kms_key_arn, the key its cluster is encrypted with."
   }
 }
 
