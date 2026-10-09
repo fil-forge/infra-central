@@ -3,7 +3,7 @@
 # site-to-site VPN. Central's database subnets keep only the VPC's local route,
 # and central's cluster stays unreachable from outside the VPC.
 #
-# The stage's VPN gateway (../compat-vpn) propagates each site's route into the
+# The stage's VPN gateway (../pandora-vpn) propagates each site's route into the
 # cluster's route table only. The pandora database and its roles are created by
 # the provision Lambda's seed phase.
 #
