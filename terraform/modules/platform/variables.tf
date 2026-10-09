@@ -78,9 +78,8 @@ variable "compat_database" {
   description = <<-EOT
     The SpiderOak compatibility server's pandora cluster, or null for a stage
     without one. It uses db_kms_key_arn, and needs the stage to have sites in
-    the shared constants module's compat_server_sites, with the regional
-    bootstrap applied, because it attaches the VPN gateway that root creates.
-    See docs/compat-server-vpn.md.
+    the shared constants module's compat_server_sites, because the appliances
+    reach it only over the stage's VPN. See docs/compat-server-vpn.md.
   EOT
   type = object({
     instance_count        = number

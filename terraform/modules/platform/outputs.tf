@@ -138,3 +138,9 @@ output "retired_appliances" {
   description = "Regions the last vault run destroyed keys for. Those nodes can never unseal again. The result stays in state until the next run, so a non-empty list records that retirement and does not mean this apply destroyed anything."
   value       = try(jsondecode(aws_lambda_invocation.vault.result).retired_appliances, [])
 }
+
+# What a compatibility server site's operator needs to bring the tunnels up.
+# The addresses are public, and the key ARNs grant nothing on their own.
+output "compat_vpn_sites" {
+  value = module.compat_vpn.sites
+}
