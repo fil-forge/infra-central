@@ -52,6 +52,8 @@ type Role struct {
 }
 
 // Setting is a per-role default, applied as ALTER ROLE ... SET.
+// Removing one from Settings leaves the default in place; clear it
+// by hand with ALTER ROLE ... RESET.
 type Setting struct {
 	Name  string
 	Value string
