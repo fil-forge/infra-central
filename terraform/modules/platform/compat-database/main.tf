@@ -3,10 +3,9 @@
 # site-to-site VPN. Central's database subnets keep only the VPC's local route,
 # and central's cluster stays unreachable from outside the VPC.
 #
-# The regional bootstrap creates the VPN gateway and the connections
-# (modules/compat-vpn); this module attaches the gateway to the VPC and lets it
-# propagate each site's route into the cluster's route table only. The pandora
-# database and its roles are created by the provision Lambda's seed phase.
+# The stage's VPN gateway (../compat-vpn) propagates each site's route into the
+# cluster's route table only. The pandora database and its roles are created by
+# the provision Lambda's seed phase.
 #
 # See docs/decisions/2026-10-compat-server-database.md.
 
@@ -18,17 +17,6 @@ locals {
   # 9 to 11 could not be covered by one route without central's third database
   # subnet.
   first_subnet_index = 12
-}
-
-# Named by modules/compat-vpn, which creates it in the regional bootstrap.
-data "aws_vpn_gateway" "this" {
-  state = "available"
-  tags  = { Name = "fc-${var.stage}-compat" }
-}
-
-resource "aws_vpn_gateway_attachment" "this" {
-  vpc_id         = var.vpc_id
-  vpn_gateway_id = data.aws_vpn_gateway.this.id
 }
 
 resource "aws_subnet" "this" {
@@ -50,12 +38,9 @@ resource "aws_route_table" "this" {
   # Empty and authoritative: a route added by hand is removed on the next
   # apply. Propagated routes are not part of this list.
   route            = []
-  propagating_vgws = [data.aws_vpn_gateway.this.id]
+  propagating_vgws = [var.vpn_gateway_id]
 
   tags = { Name = local.name }
-
-  # Propagation needs the gateway attached to this VPC.
-  depends_on = [aws_vpn_gateway_attachment.this]
 }
 
 resource "aws_route_table_association" "this" {
