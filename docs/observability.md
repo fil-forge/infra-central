@@ -84,19 +84,24 @@ The rules watch staging and prod, the stages listed in `alert_stages` in
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
 appliance label.
 
-| Rule                                | Group                     | Source            | Ticket   |
-| ----------------------------------- | ------------------------- | ----------------- | -------- |
-| Service has no healthy hosts        | Forge Central             | ALB, CloudWatch   | FIL-1151 |
-| Service 5xx errors                  | Forge Central             | ALB, CloudWatch   | FIL-1207 |
-| Provision Lambda errors             | Forge Central             | Lambda, CloudWatch| FIL-1151 |
-| Appliance has stopped reporting     | Forge Regions             | deploy stamp      | FIL-1163 |
-| Appliance free disk space below 40% | Forge Regions             | node exporter     | FIL-1209 |
-| Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
-| Postgres is refusing connections    | Forge Regions             | Postgres's logs, Loki | FIL-1163 |
-| Appliance 5xx rate too high         | Forge Regions             | Caddy             | FIL-1163 |
-| Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
-| OpenBao cannot unseal               | Forge Regions outages     | OpenBao's logs, Loki | FIL-1164 |
-| Appliance site is failing most requests | Forge Regions outages | Caddy             | FIL-1164 |
+| Rule                                                 | Group                    | Source                | Ticket   |
+| ---------------------------------------------------- | ------------------------ | --------------------- | -------- |
+| Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch       | FIL-1151 |
+| Service 5xx errors                                   | Forge Central            | ALB, CloudWatch       | FIL-1207 |
+| Provision Lambda errors                              | Forge Central            | Lambda, CloudWatch    | FIL-1151 |
+| Appliance has stopped reporting                      | Forge Regions            | deploy stamp          | FIL-1163 |
+| Appliance free disk space below 40%                  | Forge Regions            | node exporter         | FIL-1209 |
+| Piri's chain head is stale                           | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Piri's proving period has not advanced               | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Piri proving is failing                              | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics        | FIL-1383 |
+| Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki | FIL-1163 |
+| Appliance 5xx rate too high                          | Forge Regions            | Caddy                 | FIL-1163 |
+| Appliance container is not running                   | Forge Regions containers | cAdvisor, staging     | FIL-1163 |
+| OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki  | FIL-1164 |
+| Appliance site is failing most requests              | Forge Regions outages    | Caddy                 | FIL-1164 |
 
 ## Logs
 
