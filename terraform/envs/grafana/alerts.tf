@@ -1418,20 +1418,31 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # The rules below read gauges Piri exports from its PDP pipeline (piri
-  # docs/content/operator-guide/monitoring.md, "PDP Proving Health"), starting
-  # from the PromQL given there. They are grouped by node as well as region for
-  # the reason the disk rule gives. Filecoin epochs are thirty seconds, which is
-  # where every 30 below comes from.
+  # The rules below read gauges Piri exports from its PDP pipeline, and follow
+  # the alerts piri's docs/content/operator-guide/monitoring.md ("PDP Proving
+  # Health") sets out: one failure for each rule to page on. They are grouped by
+  # node as well as region for the reason the disk rule gives, and by proof set
+  # where the failure is a proof set's. Filecoin epochs are thirty seconds,
+  # which is where every 30 below comes from.
+  #
+  # The gauges are what Curio has recorded in its database, not chain state, so
+  # none of these confirms that a proof landed. Two failures go unseen: a proof
+  # Curio sent that then failed on chain, and a Prove task that woke after its
+  # challenge window had closed. Curio records both as successful task runs and
+  # leaves its failure count alone.
+  #
+  # The proving failures page (critical): a missed proof is a fault on chain,
+  # which costs the provider, and waiting for someone to notice costs more.
 
   # The timestamp of the last tipset Piri's chain scheduler applied, against the
-  # wall clock. Five minutes is ten tipsets, far past what null rounds or a slow
-  # block produce, so this is Lotus stalled or unreachable, or Piri's
-  # subscription to it stuck.
+  # wall clock: Lotus stalled or unreachable, or Piri's subscription to it
+  # stuck. Piri cannot schedule or submit proofs without a moving head.
   #
-  # `for` is 5m, the shortest pending period a group evaluated every five
-  # minutes can give: one more evaluation to confirm the first. The threshold
-  # already holds five minutes of grace.
+  # Five minutes is ten tipsets, but a run of null rounds can leave that long
+  # between tipsets, and a slow chain scheduler handler that runs before the
+  # head is recorded can delay it. `for` is 5m, the shortest pending period a
+  # group evaluated every five minutes can give, so the head must stay stale
+  # across two evaluations, about ten minutes in all, before it fires.
   #
   # no_data_state is OK: a Piri that has not seen a head since it started, or
   # one that exports no chain gauges at all, has no series here. The first is
@@ -1514,14 +1525,16 @@ resource "grafana_rule_group" "appliance" {
   # target_info is the evidence Piri is up: it carries the same job and
   # appliance, region and node labels as every other Piri series, so the same
   # matcher applies to it. On its own it would also match every Piri too old to
-  # export the head, which is every Piri until these metrics are deployed. So
-  # the node must also export one of the gauges Piri reads from its database,
-  # which do not depend on the chain: they prove the running Piri has the
-  # metrics, and so that the missing head means something. A node with no proof
-  # sets and no successful proof yet is left out, and has nothing to lose.
+  # export the head. So the node must also export
+  # piri_pdp_proofsets_unrecoverable, which Piri reads from its database on
+  # every collection, proof sets or none, and which does not depend on the
+  # chain: it shows the running Piri has these metrics, and so that the missing
+  # head means something.
   #
   # Five-minute windows are ten of Piri's thirty-second pushes. `for` is 10m, so
-  # a restart that takes a moment to reach Lotus does not fire.
+  # a restart that takes a moment to reach Lotus does not fire. Warning, not
+  # critical: until the first head arrives Piri has not missed anything yet, and
+  # the proving rules below page if it goes on long enough to cost a proof.
   #
   # no_data_state is OK, and not NoData, even though "no head" is what the rule
   # is about: the `unless` is what finds the missing head, so the result is
@@ -1566,17 +1579,11 @@ resource "grafana_rule_group" "appliance" {
           max by (appliance, region, node) (
             present_over_time(target_info{${local.piri_metric_matcher}}[5m])
           )
-          and
-          (
-            max by (appliance, region, node) (
-              present_over_time(piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}}[5m])
-            )
-            or
-            max by (appliance, region, node) (
-              present_over_time(piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}[5m])
-            )
+          and on (appliance, region, node)
+          max by (appliance, region, node) (
+            present_over_time(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[5m])
           )
-          unless
+          unless on (appliance, region, node)
           max by (appliance, region, node) (
             present_over_time(piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}[5m])
           )
@@ -1612,35 +1619,42 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # A proof set whose challenge window has closed without its next proving
-  # period being scheduled: epochs past the window's close, per proof set. The
-  # current epoch is the last head plus the wall-clock time since it, so this
-  # still fires when the head itself is stale.
+  # A proof set whose challenge window, as Curio recorded it, has closed without
+  # Curio scheduling the next proving period, for a reason other than a failure
+  # backoff. The value is epochs past the window's close. The current epoch is
+  # the last head plus the wall-clock time since it, so this still fires when
+  # the head itself is stale.
   #
-  # Some overshoot is normal. Curio's NextProvingPeriod watcher
-  # (tasks/pdpv0/task_next_pp.go) only queues the task once a head reaches
-  # prove_at_epoch + challenge_window, and the task moves prove_at_epoch on
-  # when it sends nextProvingPeriod, without waiting for it to land. Add
-  # harmonytask's three-second poll, a handful of contract reads and Piri's
-  # thirty-second push, and a healthy proof set is a few epochs past its window
-  # for a minute or two each period, which an evaluation can catch. `for` is
-  # 10m: three evaluations in a row, twenty epochs, which that never reaches,
-  # while a scheduling task that is failing, or held back by the hundred-epoch
-  # backoff curio applies after a failed attempt, stays past the window for
-  # longer than that.
+  # It catches proving-period scheduling that has stopped: a stuck head, or the
+  # task engine not running. It does not catch a missed proof. Curio schedules
+  # the next period as soon as the window closes (tasks/pdpv0/task_next_pp.go),
+  # whether or not this period's proof landed, and moves the challenge epoch on
+  # when it sends that transaction rather than when it lands.
   #
-  # no_data_state is OK: a node with no proof sets, or a proof set with no next
-  # challenge (briefly between periods, or proving disabled), has no series.
+  # A proof set in a failure backoff is left out by the `unless`: Curio holds
+  # its scheduling back on purpose until the backoff deadline passes the head,
+  # and "Piri proving is failing" has already paged for the failure that set
+  # it. The deadline stays recorded after it passes, so the comparison is
+  # against the same extrapolated head, and the set comes back into this rule
+  # once the head is past it.
+  #
+  # A healthy proof set is past its window for a minute or two each period,
+  # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
+  # the shortest a five-minute group gives: two evaluations in a row cannot both
+  # land in that.
+  #
+  # no_data_state is OK: a node with no proof sets, or a proof set with proving
+  # disabled or marked unrecoverable, has no schedule series.
   rule {
-    name           = "Piri proof set is past its challenge window"
+    name           = "Piri's proving period has not advanced"
     condition      = "B"
-    for            = "10m"
+    for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) is past its challenge window"
-      description = "The proof set's challenge window closed more than ten minutes ago and Piri has not scheduled its next proving period, so this period's proof is missed or at risk and the proof set may be faulted on chain. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's on-chain state with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove and PDPv0_ProvPeriod task logs say why it failed."
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
@@ -1667,13 +1681,26 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-              max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-            + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            (
+                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node) group_right()
+            max by (appliance, region, node, proof_set) (
+                piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
+              + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
+            )
           )
-          - on (appliance, region, node) group_right
-          max by (appliance, region, node, proof_set) (
-              piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
-            + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
+          unless on (appliance, region, node, proof_set)
+          (
+            max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_next_prove_attempt_epoch{${local.piri_metric_matcher}}
+            )
+            > on (appliance, region, node) group_left()
+            (
+                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
           )
         PROMQL
       }))
@@ -1707,33 +1734,38 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # The backstop: no successful PDPv0_Prove on the node in one and a half
-  # proving periods. The value is the time since the last success in proving
-  # periods, so the threshold is 1.5.
+  # Curio has had a proving transaction for a proof set rejected within the
+  # last hour. A rejected prove is not retried within its period, so that
+  # period's proof was missed; a rejected scheduling transaction is retried
+  # after a backoff, and Curio gives up on the set after repeated failures (the
+  # next rule).
   #
-  # Per node, not per proof set: one proof set proving keeps it quiet while
-  # another does not, which is the rule above's job. What this adds is the case
-  # that rule cannot see. A proof set curio gives up on after repeated failures
-  # has its next challenge cleared and drops out of the proof set gauges
-  # altogether. The period is read over three days for that reason, so it
-  # outlasts one and a half of the longest period (2880 epochs, a day) after
-  # the gauge is gone, and still lapses on its own once proving on the node has
-  # ended for good.
+  # The gauge is the count of rejections since the set's last successful prove
+  # send, and the level is not a paging condition. Only a successful prove send
+  # resets it, so it stays above zero for up to a proving period after any
+  # rejection, even when the retry that follows succeeds, and indefinitely if
+  # proving is then disabled for the set. So the rule fires on a rise instead.
+  # `increase`, not `delta`, because the count behaves as a counter whose only
+  # drop is the reset to zero: a reset followed by a new failure within the
+  # hour is still counted as a rise, where `delta` would net it to zero.
   #
-  # `for` is 10m. The threshold is the grace; this only confirms it.
+  # It fires for about an hour per new failure, so during a long backoff it
+  # pages after each failure rather than throughout. `for` is 0m: the hour
+  # window is the debounce, and a single rejection is worth a page.
   #
-  # no_data_state is OK: a node that has never proved, or has no proof sets in
-  # three days, has no series.
+  # no_data_state is OK: every proof set reports the count, zero included, so
+  # an empty result means no proof sets or a Piri older than the metric, and a
+  # healthy set evaluates to zero.
   rule {
-    name           = "Piri has not proved in 1.5 proving periods"
+    name           = "Piri proving is failing"
     condition      = "B"
-    for            = "10m"
+    for            = "0m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not submitted a successful proof in 1.5 proving periods"
-      description = "No PDPv0_Prove task has succeeded on this node for more than one and a half proving periods, so at least one proving period has passed without a proof. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why proofs are failing."
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
+      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, check the proof set with `piri client pdp proofset state`, and check the wallet has FIL for gas."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
@@ -1741,7 +1773,188 @@ resource "grafana_rule_group" "appliance" {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "warning"
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, proof_set) (
+            increase(piri_pdp_proofset_consecutive_prove_failures{${local.piri_metric_matcher}}[1h])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Curio has given up proving a proof set after an unrecoverable failure.
+  # Piri stops reporting that set's own series and counts it in
+  # piri_pdp_proofsets_unrecoverable instead, per node.
+  #
+  # The count does not go down on its own: Piri does not run Curio's data set
+  # deletion, so the row stays until someone removes it by hand. A rule on the
+  # level would page forever after the first one, so this fires on a rise, for
+  # about an hour per newly unrecoverable set. `for` is 0m for the reason the
+  # rule above gives. Two things follow from reading a rise:
+  #
+  #   - A set that was already unrecoverable when a Piri with this metric first
+  #     reported is never paged for; graph the gauge to see the current state.
+  #   - `increase` reads any drop as a counter reset, so removing one row by
+  #     hand while others remain fires once, for an hour.
+  #
+  # no_data_state is OK: Piri reports the count, zero included, on every
+  # collection, so an empty result is a Piri older than the metric, and a
+  # healthy node evaluates to zero.
+  rule {
+    name           = "Piri proof set is unrecoverable"
+    condition      = "B"
+    for            = "0m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped proving a proof set after an unrecoverable failure"
+      description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            increase(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[1h])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The backstop: no PDPv0_Prove run has finished on the node in one and a half
+  # proving periods. The value is the time since the last one in proving
+  # periods, so the threshold is 1.5.
+  #
+  # The gauge is the last run that finished without a retryable error, not the
+  # last proof that landed. It includes runs that woke too late, found proving
+  # disabled or had their proof rejected, so it says the task engine is running
+  # Prove, not that proofs are landing; the rules above cover rejections. What
+  # it adds is a Prove task that keeps failing with a retryable error, or never
+  # runs, while scheduling carries on, which nothing else here sees.
+  #
+  # Per node, not per proof set: with several proof sets, proving one keeps it
+  # quiet. The period is the longest seen over a day, which bridges a missed
+  # collection. A node whose last proof set is disabled or unrecoverable loses
+  # the period series within the day, before the threshold, so this lapses
+  # rather than repeat the unrecoverable page.
+  #
+  # Critical, as the piri docs recommend: a Prove task that does not run misses
+  # every proof on the node. `for` is 10m. The threshold is the grace; this only
+  # confirms it.
+  #
+  # no_data_state is OK: a node that has never finished a Prove run, or has had
+  # no scheduled proof set in a day, has no series.
+  rule {
+    name           = "Piri's Prove task has not run in 1.5 proving periods"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
+      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
     }
 
     data {
@@ -1767,7 +1980,7 @@ resource "grafana_rule_group" "appliance" {
           / on (appliance, region, node)
           (
             30 * max by (appliance, region, node) (
-              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[3d])
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
             )
           )
         PROMQL

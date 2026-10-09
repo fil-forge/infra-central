@@ -94,8 +94,10 @@ appliance label.
 | Piri has stopped receiving chain notifications | Forge Regions | Piri's logs, Loki | FIL-1383 |
 | Piri's chain head is stale          | Forge Regions             | Piri's metrics    | FIL-1383 |
 | Piri is reporting but has no chain head | Forge Regions         | Piri's metrics    | FIL-1383 |
-| Piri proof set is past its challenge window | Forge Regions     | Piri's metrics    | FIL-1383 |
-| Piri has not proved in 1.5 proving periods | Forge Regions      | Piri's metrics    | FIL-1383 |
+| Piri's proving period has not advanced | Forge Regions          | Piri's metrics    | FIL-1383 |
+| Piri proving is failing             | Forge Regions             | Piri's metrics    | FIL-1383 |
+| Piri proof set is unrecoverable     | Forge Regions             | Piri's metrics    | FIL-1383 |
+| Piri's Prove task has not run in 1.5 proving periods | Forge Regions | Piri's metrics | FIL-1383 |
 | Postgres is refusing connections    | Forge Regions             | Postgres's logs, Loki | FIL-1163 |
 | Appliance 5xx rate too high         | Forge Regions             | Caddy             | FIL-1163 |
 | Appliance container is not running  | Forge Regions containers  | cAdvisor, staging | FIL-1163 |
