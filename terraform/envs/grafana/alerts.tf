@@ -108,7 +108,10 @@ locals {
   # reused: its service_name is the host exporter's.
   piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
 
-  # Postgres's container log stream, same scheme. Anchored, so this is the
+  # Postgres's container log stream. Alloy names each container's stream
+  # appliance-<stage>-<region>-<service> from the Compose service and stamps
+  # appliance, region and node on it (infra-nodes
+  # nodes/dev/platform/config/alloy/config.alloy). Anchored, so this is the
   # postgres service and not postgres-init.
   postgres_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-postgres\""
 
@@ -1322,8 +1325,9 @@ resource "grafana_rule_group" "appliance" {
   # challenge window had closed. Curio records both as successful task runs and
   # leaves its failure count alone.
   #
-  # The proving failures page (critical): a missed proof is a fault on chain,
-  # which costs the provider, and waiting for someone to notice costs more.
+  # All of these page (critical). Each one means proofs are failing or about to:
+  # a missed proof is a fault on chain, which costs the provider, and waiting
+  # for someone to notice costs more.
   #
   # One cause can raise more than one of these over time: a head that stays
   # stuck is first "chain head is stale", then "proving period has not
@@ -1341,8 +1345,8 @@ resource "grafana_rule_group" "appliance" {
   # Five minutes is ten tipsets, but a run of null rounds can leave that long
   # between tipsets, and a slow chain scheduler handler that runs before the
   # head is recorded can delay it. `for` is 5m, the shortest non-zero pending
-  # period a group evaluated every five minutes can give, so the head must stay stale
-  # across two evaluations, about ten minutes in all, before it fires.
+  # period a group evaluated every five minutes can give, so the head must stay
+  # stale across two evaluations, about ten minutes in all, before it fires.
   #
   # no_data_state is OK: a Piri that has not seen a head since it started, or
   # one that exports no chain gauges at all, has no series here. The first is
@@ -1542,8 +1546,8 @@ resource "grafana_rule_group" "appliance" {
   #
   # A healthy proof set is past its window for a minute or two each period,
   # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
-  # the shortest a five-minute group gives: two evaluations in a row cannot both
-  # land in that.
+  # the shortest non-zero pending period a five-minute group gives: two
+  # evaluations in a row cannot both land in that.
   #
   # no_data_state is OK: a node with no proof sets, or a proof set with proving
   # disabled or marked unrecoverable, has no schedule series.
