@@ -57,3 +57,38 @@ output "prod_openbao_seal_key_alias" {
   description = "Alias of the KMS key prod OpenBao seals its storage with. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
   value       = "alias/fc-prod-openbao-seal"
 }
+
+# The SpiderOak compatibility server's appliances, per stage and then per
+# region label. Read by both roots that build the path to the stage's pandora
+# database: the regional bootstrap creates a customer gateway and a VPN
+# connection per site, and the platform root admits each private_ip to the
+# cluster. A stage can have sites without the cluster, which is the state
+# between bringing the VPN up and creating the cluster, and after dropping the
+# cluster; a stage with the cluster needs sites. See docs/compat-server-vpn.md
+# for adding one.
+#
+# public_ip is the appliance's static IPv4. It is public anyway, behind
+# s3.<region>.filonecontent.com. private_ip is the /32 the appliance
+# source-NATs its database traffic to, from compat_server_private_cidr.
+output "compat_server_sites" {
+  description = "Compatibility server appliances by stage, then by region label."
+  value = {
+    dev     = {}
+    staging = {}
+    prod = {
+      # Provisional: the staging appliance server, standing in to test the
+      # VPN and TLS to the cluster until the server is deployed on the
+      # production node. That node's entry replaces this one, which gives it
+      # new tunnel addresses and keys.
+      provisional = {
+        public_ip  = "23.83.66.244"
+        private_ip = "10.21.0.1/32"
+      }
+    }
+  }
+}
+
+output "compat_server_private_cidr" {
+  description = "Block every compatibility server site's private /32 comes from. Outside every stage's VPC (10.20.0.0/16 by default)."
+  value       = "10.21.0.0/24"
+}
