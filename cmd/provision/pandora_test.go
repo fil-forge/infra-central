@@ -77,7 +77,6 @@ func TestPandoraDSNs(t *testing.T) {
 		Password: "aa",
 		LoginRoles: []dbinit.Role{
 			{Name: "pandora_storage_server", Password: "bb"},
-			{Name: "ergo_proxy", Password: "cc"},
 		},
 	}
 
@@ -85,7 +84,6 @@ func TestPandoraDSNs(t *testing.T) {
 	want := map[string]string{
 		"pandora-admin":          "postgres://pandora_admin:aa@db.example:5432/pandora?sslmode=verify-full",
 		"pandora-storage-server": "postgres://pandora_storage_server:bb@db.example:5432/pandora?sslmode=verify-full",
-		"ergo-proxy":             "postgres://ergo_proxy:cc@db.example:5432/pandora?sslmode=verify-full",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("pandoraDSNs() = %v, want %v", got, want)

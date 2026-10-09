@@ -71,16 +71,14 @@ const pandoraOwner = "pandora_admin"
 var pandoraTimeout = []dbinit.Setting{{Name: "statement_timeout", Value: "15s"}}
 
 // pandoraLoginRoles are the roles the compatibility server's clients connect
-// as. pandora_storage_server keeps the name the server's code hardcodes;
-// ergo_proxy is internet-facing, so it gets a role of its own that cannot write
-// accounts. Their table privileges come from the server's grants file, applied
-// by the owner once the tables exist.
+// as. pandora_storage_server keeps the name the server's code hardcodes. Table
+// privileges come from the server's grants file, applied by the owner once the
+// tables exist.
 var pandoraLoginRoles = []struct {
 	name     string
 	settings []dbinit.Setting
 }{
 	{name: "pandora_storage_server", settings: pandoraTimeout},
-	{name: "ergo_proxy", settings: pandoraTimeout},
 }
 
 // walletSpec is a secp256k1 key and the serialization its consumer reads.
