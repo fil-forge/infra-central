@@ -30,8 +30,9 @@ The site's operator provides:
   two AWS tunnel addresses, with no upstream filtering or rate limiting of IPsec.
 - the path MTU to the internet, expected to be 1,500 bytes.
 
-Pick the site's private /32 from `10.21.0.0/24`, unused by any other site, and add the site to the
-stage's map, keyed by its region label:
+Pick the site's private /32 from `10.21.0.0/24`. No other site in the same stage may use it, since
+the stage's sites share one VPN and one security group; sites in different stages can reuse an
+address. Add the site to the stage's map, keyed by its region label:
 
 ```hcl
 prod = {
