@@ -13,10 +13,10 @@
 # non-prod stage with sites needs the same resource in the non-prod one.
 #
 # See docs/decisions/2026-10-compat-server-database.md and
-# docs/compat-server-vpn.md.
+# docs/pandora-vpn.md.
 
 locals {
-  name = "fc-${var.stage}-compat"
+  name = "fc-${var.stage}-pandora-vpn"
 
   # A stage with no sites gets no gateway, so a stage that never runs the
   # compatibility server carries nothing of it.

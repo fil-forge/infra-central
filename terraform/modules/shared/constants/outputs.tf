@@ -63,12 +63,12 @@ output "prod_openbao_seal_key_alias" {
 # connection per site, and admits each private_ip to the stage's pandora
 # database cluster. A stage can have sites without the cluster, which keeps the
 # tunnels up while the cluster is dropped; a stage with the cluster needs sites.
-# See docs/compat-server-vpn.md for adding one.
+# See docs/pandora-vpn.md for adding one.
 #
 # public_ip is the appliance's static IPv4. It is public anyway, behind
 # s3.<region>.filonecontent.com. private_ip is the /32 the appliance
-# source-NATs its database traffic to, from compat_server_private_cidr.
-output "compat_server_sites" {
+# source-NATs its database traffic to, from pandora_sites_private_cidr.
+output "pandora_sites" {
   description = "Compatibility server appliances by stage, then by region label."
   value = {
     dev     = {}
@@ -86,7 +86,7 @@ output "compat_server_sites" {
   }
 }
 
-output "compat_server_private_cidr" {
+output "pandora_sites_private_cidr" {
   description = "Block every compatibility server site's private /32 comes from. Outside every stage's VPC (10.20.0.0/16 by default)."
   value       = "10.21.0.0/24"
 }
