@@ -21,7 +21,7 @@ variable "availability_zones" {
 }
 
 variable "vpn_gateway_id" {
-  description = "The stage's VPN gateway from ../compat-vpn, attached to vpc_id."
+  description = "The stage's VPN gateway from ../pandora-vpn, attached to vpc_id."
   type        = string
 }
 
@@ -36,7 +36,7 @@ variable "kms_key_arn" {
 }
 
 variable "sites" {
-  description = "The stage's compatibility server sites from the shared constants module's compat_server_sites. Each private_ip is admitted on 5432. ../compat-vpn validates the addresses."
+  description = "The stage's compatibility server sites from the shared constants module's pandora_sites. Each private_ip is admitted on 5432. ../pandora-vpn validates the addresses."
   type = map(object({
     public_ip  = string
     private_ip = string
@@ -44,7 +44,7 @@ variable "sites" {
 
   validation {
     condition     = length(var.sites) > 0
-    error_message = "The cluster needs at least one compatibility server site: it is reached through the stage's VPN gateway, which exists only for a stage with sites. Add one to compat_server_sites in modules/shared/constants."
+    error_message = "The cluster needs at least one compatibility server site: it is reached through the stage's VPN gateway, which exists only for a stage with sites. Add one to pandora_sites in modules/shared/constants."
   }
 }
 
