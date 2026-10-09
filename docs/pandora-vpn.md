@@ -15,6 +15,7 @@ The appliance's half (strongSwan, the private /32 and its source NAT) is in
 | VPN gateway, customer gateways, VPN connections | `terraform/envs/<stage>/platform` | by CI on merge |
 | Subnets, security group, cluster | `terraform/envs/<stage>/platform`, `pandora_db` | by CI on merge |
 | Database and roles | the provision Lambda's seed phase | by the platform apply |
+| `AWS/VPN` in the metric stream, which feeds the tunnel alerts | `terraform/envs/bootstrap/prod/us-east-2` | by hand, once |
 
 A stage gets a VPN gateway only when it has sites, and the cluster needs the stage to have at least
 one site, because the appliances reach it only through that gateway. A stage can have sites without
@@ -43,6 +44,10 @@ prod = {
 }
 ```
 
+Both tunnels stay down from the apply until the appliance's strongSwan is up. Before merging,
+silence the Grafana rules "Pandora VPN tunnel down" and "Pandora VPN both tunnels down" for the
+stage's account until then.
+
 Merge. CI applies the platform root, which creates the site's customer gateway and VPN connection,
 and admits its private /32 to the cluster. The root's `pandora_vpn_connections` output, printed at
 the end of the apply job, lists per site the VPN connection, both tunnel addresses and the ARN of
@@ -60,10 +65,16 @@ only that into the tunnel.
 |---|---|
 | IKE | IKEv2 only |
 | Phase 1 and 2 encryption | AES256-GCM-16 |
-| Phase 1 and 2 integrity | SHA2-384 |
+| Phase 1 PRF | SHA2-384 |
+| Phase 2 integrity | none, AES-GCM carries its own |
 | DH groups, both phases | 20 or 21 |
+| strongSwan proposals | `aes256gcm16-prfsha384-ecp384-ecp521` for IKE, `aes256gcm16-ecp384-ecp521` for ESP |
 | Routing | static, route-based, one xfrm interface per tunnel |
 | Tunnel MTU | 1,446 bytes on a 1,500-byte path, 1,438 behind NAT |
+
+On Debian 12 and Ubuntu 24.04, strongSwan needs `libstrongswan-standard-plugins` for AES-GCM and
+DH groups 20 and 21. It is only a recommended package, so an install with `--no-install-recommends`
+leaves it out. Debian 13's base package is enough.
 
 If the stage has no cluster yet, set `pandora_db` in its platform root, in the same pull
 request as the site or a later one.
@@ -100,9 +111,14 @@ With the tunnels up, from the appliance, with traffic sourced from its private /
 PGSSLROOTCERT=/path/to/global-bundle.pem psql "$PANDORA_STORAGE_SERVER_DSN" -c 'SHOW statement_timeout'
 ```
 
-It prints `15s`. A connection from any other address times out. The Grafana rule "Pandora VPN
-tunnel down" fires while either tunnel is down, which includes the time between the platform apply
-and the appliance's strongSwan coming up.
+It prints `15s`. A connection from any other address times out.
+
+The Grafana rule "Pandora VPN tunnel down" is a warning after one tunnel has been down for 15
+minutes, and "Pandora VPN both tunnels down" is a critical after both have been down for five. Both
+also fire when no `TunnelState` data arrives for that long. The critical rule stays paused until the
+first production appliance runs strongSwan (FIL-1402); the pull request that brings that site live
+sets `is_paused = false` in `terraform/envs/grafana/alerts.tf`. An apply that changes a VPN
+connection's options or its customer gateway takes both tunnels down, so silence both rules for it.
 
 ## Dropping the cluster
 
