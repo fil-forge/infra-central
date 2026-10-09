@@ -211,7 +211,7 @@ is 1 with both tunnels up and 0.5 with one; the series per tunnel address carry
 `dimension_TunnelIpAddress` instead:
 
 ```promql
-aws_vpn_tunnel_state_min{dimension_VpnId!="", dimension_TunnelIpAddress=""}
+aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 ```
 
 Reads against the delegator's tables, likewise:

@@ -569,9 +569,7 @@ resource "grafana_rule_group" "central" {
         legendFormat = "{{account_id}} {{dimension_VpnId}}"
         expr         = <<-PROMQL
           min by (account_id, dimension_VpnId) (
-            min_over_time(
-              aws_vpn_tunnel_state_min{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}[5m]
-            )
+            aws_vpn_tunnel_state_minimum{account_id="${module.constants.prod_account_id}", dimension_VpnId!="", dimension_TunnelIpAddress=""}
           )
         PROMQL
       }))
