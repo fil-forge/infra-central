@@ -449,10 +449,12 @@ resource "grafana_rule_group" "central" {
   # sum_over_time adds the minutes present, and a service with no 5xx has no
   # numerator series; no_data_state is OK because an empty result is healthy.
   #
-  # `for` is 2m, as on the appliance's outage rules, to keep detection near
-  # five minutes once the stream's delay is added. The window already sums
-  # several minutes, so one late or missing sample lowers the counts rather
-  # than removing the series and resetting pending.
+  # `for` is 2m, as on the appliance's outage rules. Detection is the stream's
+  # delay, then the minutes until failures outweigh the rest of the window,
+  # then the 2m, then up to one evaluation: about six or seven minutes with a
+  # delay of two or three. The window already sums several minutes, so one late
+  # or missing sample lowers the counts rather than removing the series and
+  # resetting pending, unless it takes the count below the gate.
   #
   # What this does not see: 5xx the load balancer generates itself, such as a
   # 502 when a target resets the connection or a 504 when it times out.
@@ -468,7 +470,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
-      description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana."
+      description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana. The link opens the dashboard on this service alone, Overview included; drop var-service from its URL to see every service."
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
       __dashboardUid__ = "forge-central"
       __panelId__      = "13"
