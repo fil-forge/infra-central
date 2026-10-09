@@ -77,7 +77,7 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 
 | Role | Used by | SSM parameter |
 |---|---|---|
-| `pandora` | the estate loader only | `/forge-central/<stage>/pandora/postgres-dsn` |
+| `pandora_admin` | the estate loader only; owns the database | `/forge-central/<stage>/pandora-admin/postgres-dsn` |
 | `pandora_storage_server` | the server's daemons | `/forge-central/<stage>/pandora-storage-server/postgres-dsn` |
 | `ergo_proxy` | ergo_proxy's lookups | `/forge-central/<stage>/ergo-proxy/postgres-dsn` |
 
@@ -92,8 +92,9 @@ access reads each DSN and installs it on the appliance by hand:
 aws ssm get-parameter --with-decryption --name /forge-central/prod/pandora-storage-server/postgres-dsn --query Parameter.Value --output text
 ```
 
-The `pandora` DSN goes only to whoever runs the loader. It stays out of `/etc/default/pandora`,
-because legacy tools connect as `pandora` by default and would then run as the owner.
+The `pandora_admin` DSN goes only to whoever runs the loader, and stays out of
+`/etc/default/pandora`. Legacy tools connect as a role named `pandora` by default, and no such role
+exists, so they fail rather than run as the owner.
 
 ## Checking the path
 
