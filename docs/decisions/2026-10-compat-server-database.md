@@ -107,7 +107,7 @@ The cluster's subnets take /20 indexes 12–14 of the VPC (`10.20.192.0/20` to `
 Indexes 9–11 cannot be covered by one route without including central's third database subnet.
 Indexes 12–15 sit inside one free /18.
 
-Sites are listed per stage in the shared constants module, as `compat_server_sites`, keyed by stage
+Sites are listed per stage in the shared constants module, as `pandora_sites`, keyed by stage
 and then by the appliance's region label, with each site's public and private address. The platform
 root reads the list. Staging appliances run on different hosts from prod ones, so each stage has its
 own sites, and a stage whose list is empty gets no gateway. The cluster needs at least one site,
