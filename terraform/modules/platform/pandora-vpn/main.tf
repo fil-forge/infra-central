@@ -22,9 +22,16 @@ locals {
   # compatibility server carries nothing of it.
   enabled = length(var.sites) > 0
 
-  # strongSwan in Debian 12 and 13 and Ubuntu 24.04 supports all of these.
   # AWS's defaults also accept AES-128, SHA-1 and DH group 2, which an
   # appliance could otherwise negotiate down to.
+  #
+  # In phase 1, SHA2-384 is the PRF. In phase 2 it has no effect, because
+  # AES-GCM carries its own integrity; it is set only to keep SHA-1 off AWS's
+  # list. The appliance's ESP proposal must not name it. The strongSwan
+  # proposals are aes256gcm16-prfsha384-ecp384-ecp521 for IKE and
+  # aes256gcm16-ecp384-ecp521 for ESP. On Debian 12 and Ubuntu 24.04 they need
+  # libstrongswan-standard-plugins, a recommended package that
+  # --no-install-recommends leaves out.
   ike_versions          = ["ikev2"]
   encryption_algorithms = ["AES256-GCM-16"]
   integrity_algorithms  = ["SHA2-384"]
