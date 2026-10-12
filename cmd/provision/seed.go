@@ -67,8 +67,12 @@ const pandoraDatabase = "pandora"
 const pandoraOwner = "pandora_admin"
 
 // pandoraTimeout matches the per-statement budget the compatibility server's
-// daemons are written for.
-var pandoraTimeout = []dbinit.Setting{{Name: "statement_timeout", Value: "15s"}}
+// daemons are written for, and ends a daemon session left idle inside a
+// transaction.
+var pandoraTimeout = []dbinit.Setting{
+	{Name: "statement_timeout", Value: "15s"},
+	{Name: "idle_in_transaction_session_timeout", Value: "30s"},
+}
 
 // pandoraMigrationIdle ends a migration session left idle inside a
 // transaction. It sets no statement_timeout: the migration's bulk statements
@@ -84,9 +88,10 @@ var pandoraMigrationIdle = []dbinit.Setting{{Name: "idle_in_transaction_session_
 //   - locker is the stats lock tool, whose code hardcodes the name. It gets no
 //     timeout of either kind: it holds a session-level advisory lock while idle
 //     in a transaction for the whole stats dump, which takes minutes. The lock
-//     belongs to the session, so on the node side its connection needs
-//     PgBouncer in session pooling mode. Transaction pooling can pass its
-//     backend, lock included, to another client between transactions.
+//     belongs to the session, so on the node side its connection goes straight
+//     to the database or through a session pool, never a transaction pool:
+//     transaction pooling can pass its backend, lock included, to another
+//     client between transactions.
 //   - pandora_migration is the capture load, the sync with its legacy-row
 //     refresh, and the stage record, all run on the appliance.
 var pandoraLoginRoles = []struct {

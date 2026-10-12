@@ -90,12 +90,14 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 | `locker` | the server's stats lock tool | `/forge-central/<stage>/locker/postgres-dsn` |
 | `pandora_migration` | the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
 
-`pandora_storage_server` has a 15-second `statement_timeout`. `pandora_migration` has no statement
+`pandora_storage_server` has a 15-second `statement_timeout` and a 30-second
+`idle_in_transaction_session_timeout`. `pandora_migration` has no statement
 timeout, since its bulk statements run long, and an `idle_in_transaction_session_timeout` of 30
 seconds. `locker` has neither: it holds a session-level advisory lock while idle in a transaction
-for the whole stats dump, which takes minutes. On the appliance, its connection needs PgBouncer in
-session pooling mode, because transaction pooling can pass its backend and the lock to another
-client. The server's grants file gives each role its table privileges.
+for the whole stats dump, which takes minutes. On the appliance, its connection goes straight to the database
+or through a session pool, never a transaction pool, because transaction pooling can pass its
+backend and the lock to another client. `locker`'s parameters sit at the stage root, so no central
+service may take the name `locker`. The server's grants file gives each role its table privileges.
 
 The DSNs ask for `sslmode=verify-full`. The client supplies the RDS root bundle, for example by
 pointing `PGSSLROOTCERT` at

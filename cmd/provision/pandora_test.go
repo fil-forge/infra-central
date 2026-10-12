@@ -104,9 +104,12 @@ func TestPandoraLoginRoles(t *testing.T) {
 		got[spec.name] = spec.settings
 	}
 	want := map[string][]dbinit.Setting{
-		"pandora_storage_server": {{Name: "statement_timeout", Value: "15s"}},
-		"locker":                 nil,
-		"pandora_migration":      {{Name: "idle_in_transaction_session_timeout", Value: "30s"}},
+		"pandora_storage_server": {
+			{Name: "statement_timeout", Value: "15s"},
+			{Name: "idle_in_transaction_session_timeout", Value: "30s"},
+		},
+		"locker":            nil,
+		"pandora_migration": {{Name: "idle_in_transaction_session_timeout", Value: "30s"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("pandoraLoginRoles = %v, want %v", got, want)
