@@ -176,9 +176,10 @@ copy_to_host() {
   scp -rq "$secrets_dir" "$SCRIPT_DIR/pandora-vpn-check" "$SCRIPT_DIR/check-pandora-vpn-host.sh" \
     "${HOST}:${HOST_CHECK_DIR}/"
 
+  # Through bash, because Debian and Ubuntu mount /run noexec.
   echo
   echo "Run the check on the host:"
-  echo "  ssh -t ${HOST} ${HOST_CHECK_DIR}/check-pandora-vpn-host.sh"
+  echo "  ssh -t ${HOST} bash ${HOST_CHECK_DIR}/check-pandora-vpn-host.sh"
 }
 
 main

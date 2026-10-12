@@ -150,11 +150,12 @@ scripts/fetch-pandora-vpn-secrets.sh --stage prod --site provisional --host root
 ```
 
 ```bash
-ssh -t root@23.83.66.244 /run/pandora-vpn-check/check-pandora-vpn-host.sh
+ssh -t root@23.83.66.244 bash /run/pandora-vpn-check/check-pandora-vpn-host.sh
 ```
 
 The first copies the check, the tunnel addresses, the keys, the `pandora_storage_server` DSN and the
-RDS CA bundle to `/run/pandora-vpn-check` on the host, a tmpfs. The second brings both tunnels up,
+RDS CA bundle to `/run/pandora-vpn-check` on the host, a tmpfs. Debian and Ubuntu mount `/run`
+noexec, so the second runs the check through bash. It brings both tunnels up,
 queries the cluster through tunnel 1, then through tunnel 2 with tunnel 1 down. With both tunnels
 back up it prints the command that shows their status on the AWS side, waits for Enter, and removes
 its containers, images and `/run/pandora-vpn-check`. Nothing else on the host may initiate IKE
