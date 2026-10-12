@@ -82,10 +82,11 @@ var hexOnly = regexp.MustCompile(`^[0-9a-f]+$`)
 
 // allowedSettings are the role settings a caller may ask for. ALTER ROLE ...
 // SET takes neither its name nor its value as a bind parameter, so both are
-// interpolated; the name comes from this list and the value must match
-// durationValue, for the same reason as hexOnly.
+// interpolated; the name comes from this list and the value, a duration for
+// every entry, must match durationValue, for the same reason as hexOnly.
 var allowedSettings = map[string]bool{
-	"statement_timeout": true,
+	"statement_timeout":                   true,
+	"idle_in_transaction_session_timeout": true,
 }
 
 var durationValue = regexp.MustCompile(`^[0-9]+(ms|s|min)?$`)
