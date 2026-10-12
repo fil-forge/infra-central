@@ -77,6 +77,8 @@ func TestPandoraDSNs(t *testing.T) {
 		Password: "aa",
 		LoginRoles: []dbinit.Role{
 			{Name: "pandora_storage_server", Password: "bb"},
+			{Name: "locker", Password: "cc"},
+			{Name: "pandora_migration", Password: "dd"},
 		},
 	}
 
@@ -84,8 +86,29 @@ func TestPandoraDSNs(t *testing.T) {
 	want := map[string]string{
 		"pandora-admin":          "postgres://pandora_admin:aa@db.example:5432/pandora?sslmode=verify-full",
 		"pandora-storage-server": "postgres://pandora_storage_server:bb@db.example:5432/pandora?sslmode=verify-full",
+		"locker":                 "postgres://locker:cc@db.example:5432/pandora?sslmode=verify-full",
+		"pandora-migration":      "postgres://pandora_migration:dd@db.example:5432/pandora?sslmode=verify-full",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("pandoraDSNs() = %v, want %v", got, want)
+	}
+}
+
+// The server's code hardcodes pandora_storage_server and locker, and each
+// role's settings fit how it uses its session: the daemons get a statement
+// budget, the stats lock tool sits idle in a transaction for minutes, and the
+// migration runs long statements but must not hold a transaction open idle.
+func TestPandoraLoginRoles(t *testing.T) {
+	got := map[string][]dbinit.Setting{}
+	for _, spec := range pandoraLoginRoles {
+		got[spec.name] = spec.settings
+	}
+	want := map[string][]dbinit.Setting{
+		"pandora_storage_server": {{Name: "statement_timeout", Value: "15s"}},
+		"locker":                 nil,
+		"pandora_migration":      {{Name: "idle_in_transaction_session_timeout", Value: "30s"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("pandoraLoginRoles = %v, want %v", got, want)
 	}
 }
