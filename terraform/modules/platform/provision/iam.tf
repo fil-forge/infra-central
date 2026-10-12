@@ -79,13 +79,13 @@ data "aws_iam_policy_document" "this" {
   statement {
     sid       = "ReadRDSMasterSecret"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [var.db_master_secret_arn]
+    resources = local.db_master_secret_arns
   }
 
   statement {
     sid       = "DecryptRDSMasterSecret"
     actions   = ["kms:Decrypt"]
-    resources = [var.db_master_secret_kms_key_arn]
+    resources = local.db_master_secret_kms_key_arns
 
     condition {
       test     = "StringEquals"
