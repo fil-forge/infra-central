@@ -129,11 +129,11 @@ minutes, and "Pandora VPN both tunnels down" is a critical after both have been 
 also fire when no `TunnelState` data arrives, about 20 and ten minutes after the last sample: the
 query keeps returning that sample for Mimir's five-minute lookback before the wait starts. With more
 than one site, the rules do not notice one VPN connection's data stopping while another's arrives.
-The critical rule stays paused until the first production appliance runs strongSwan (FIL-1402); the
-pull request that brings that site live replaces its `is_paused = true` in
-`terraform/envs/grafana/alerts.tf` with the warning rule's expression, which pauses a rule while
-prod has no site. An apply that changes a VPN connection's options or its customer gateway takes
-both tunnels down, so silence both rules for it.
+Both rules stay paused until the first production appliance runs strongSwan (FIL-1402). The pull
+request that brings that site live replaces their `is_paused = true` in
+`terraform/envs/grafana/alerts.tf` with `length(module.constants.pandora_sites.prod) == 0`, which
+pauses a rule while prod has no site. An apply that changes a VPN connection's options or its
+customer gateway takes both tunnels down, so silence both rules for it.
 
 ### Checking a site before its appliance is configured
 
