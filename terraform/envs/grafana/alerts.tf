@@ -530,12 +530,13 @@ resource "grafana_rule_group" "central" {
   # connection exists. "Pandora VPN both tunnels down" below is the critical
   # rule for the outage itself.
   #
-  # TunnelState per VpnId is 1 with every tunnel up, 0 with none, and in between
-  # otherwise. The same metric is also published per tunnel address, which the
-  # empty TunnelIpAddress matcher leaves out. The VpnId series carry no stage,
-  # and the non-prod account holds two stages, so the rule watches the prod
-  # account only; prod is the one stage with sites (modules/shared/constants,
-  # pandora_sites).
+  # Each TunnelState sample is 1 for a tunnel up and 0 for one down, and the
+  # series per VpnId pools both tunnels' samples. Its minimum is 1 only when
+  # every tunnel was up for the whole minute. The same metric is also published
+  # per tunnel address, which the empty TunnelIpAddress matcher leaves out. The
+  # VpnId series carry no stage, and the non-prod account holds two stages, so
+  # the rule watches the prod account only; prod is the one stage with sites
+  # (modules/shared/constants, pandora_sites).
   #
   # no_data_state is Alerting: with no series at all, the metric stream has
   # stopped delivering AWS/VPN or the last VPN is gone, and nothing is watching
@@ -550,7 +551,12 @@ resource "grafana_rule_group" "central" {
   # site, so the whole-query no data covers it; a second site needs a check of
   # the series count against pandora_sites.
   #
-  # Paused while prod has no site, since no_data_state would otherwise fire for
+  # Paused until the first production appliance runs strongSwan (FIL-1402).
+  # Until then the only prod site is the staging appliance standing in, and its
+  # tunnels are down outside test runs, so this rule would keep firing. The
+  # pull request that brings a production site live replaces true with
+  # length(module.constants.pandora_sites.prod) == 0, which keeps the rule
+  # paused while prod has no site, since no_data_state would otherwise fire for
   # as long as the site list stays empty.
   rule {
     name           = "Pandora VPN tunnel down"
@@ -558,7 +564,7 @@ resource "grafana_rule_group" "central" {
     for            = "15m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
-    is_paused      = length(module.constants.pandora_sites.prod) == 0
+    is_paused      = true
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
@@ -628,16 +634,16 @@ resource "grafana_rule_group" "central" {
   # tunnel at a time and never reaches this rule. An apply that changes a VPN
   # connection's options or its customer gateway does, and needs a silence.
   #
-  # The per-VpnId maximum is 0 only when no tunnel was up at any point in the
-  # minute; with two tunnels its other values are 0.5 and 1. no_data_state is
-  # Alerting for the reason the warning rule above gives, and no data fires
-  # about ten minutes after the last sample.
+  # The per-VpnId maximum is 1 when any tunnel was up at some point in the
+  # minute, and 0 when none was. no_data_state is Alerting for the reason the
+  # warning rule above gives, and no data fires about ten minutes after the
+  # last sample.
   #
   # Paused until the first production appliance runs strongSwan (FIL-1402).
   # Until then the only prod site is the staging appliance standing in, its
   # tunnels are down outside test runs, and this rule would page on-call for
   # that. The pull request that brings a production site live replaces true
-  # with the warning rule's is_paused expression.
+  # with the expression the warning rule above gives.
   rule {
     name           = "Pandora VPN both tunnels down"
     condition      = "B"
