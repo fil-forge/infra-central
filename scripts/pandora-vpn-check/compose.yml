@@ -1,0 +1,59 @@
+# Containers for scripts/check-pandora-vpn-host.sh, run on a site's appliance
+# host. strongswan holds the tunnels, the site's private /32 and the source NAT
+# in its own network namespace; client runs psql and reaches the VPC through
+# it. Nothing changes in the host's network namespace except the bridge
+# network below.
+#
+# The secrets directory sits next to this one, in the tmpfs the fetch script
+# copies everything to.
+name: pandora-vpn-check
+
+services:
+  strongswan:
+    build: .
+    entrypoint: ["strongswan-entrypoint.sh"]
+    cap_add: [NET_ADMIN]
+    environment:
+      ROLE: host
+      CLIENT_IP: 192.168.247.3
+      VPC_ROUTE: 10.20.192.0/18
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      # Return traffic can arrive on either tunnel, whichever one the route
+      # points at.
+      net.ipv4.conf.all.rp_filter: "2"
+      net.ipv4.conf.default.rp_filter: "2"
+    volumes:
+      - ../secrets:/secrets:ro
+    tmpfs:
+      - /etc/swanctl/conf.d:mode=0700
+    networks:
+      check:
+        ipv4_address: 192.168.247.2
+
+  client:
+    build: .
+    entrypoint: ["client-entrypoint.sh"]
+    cap_add: [NET_ADMIN]
+    depends_on: [strongswan]
+    environment:
+      STRONGSWAN_IP: 192.168.247.2
+      VPC_ROUTE: 10.20.192.0/18
+      PGPASSFILE: /run/pandora/pgpass
+      PGSSLROOTCERT: /secrets/global-bundle.pem
+      PGCONNECT_TIMEOUT: "10"
+    volumes:
+      - ../secrets:/secrets:ro
+    tmpfs:
+      - /run/pandora:mode=0700
+    networks:
+      check:
+        ipv4_address: 192.168.247.3
+
+# Outside the FilOne network's 172.18.0.0/16, every stage's VPC in
+# 10.20.0.0/16 and the sites' 10.21.0.0/24.
+networks:
+  check:
+    ipam:
+      config:
+        - subnet: 192.168.247.0/29
