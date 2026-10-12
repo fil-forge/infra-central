@@ -26,6 +26,10 @@ type config struct {
 	DBAdminDatabase string
 	DBMasterSecret  string // Secrets Manager ARN written by manage_master_user_password
 
+	// Pandora is the compatibility server's cluster, separate from central's.
+	// Nil in a stage without one, and the seed phase then skips it.
+	Pandora *dbTarget
+
 	OpenBaoAddr string
 
 	// Chain configuration, used only by the fund phase. Not validated at
@@ -70,6 +74,11 @@ func loadConfig() (config, error) {
 	}
 	cfg.DBPort = port
 
+	cfg.Pandora, err = loadPandoraTarget(os.Getenv)
+	if err != nil {
+		return config{}, err
+	}
+
 	if raw := os.Getenv("FORGE_CHAIN_ID"); raw != "" {
 		chainID, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
@@ -100,6 +109,51 @@ func loadConfig() (config, error) {
 	}
 
 	return cfg, nil
+}
+
+// dbTarget is a cluster the seed phase connects to as its master user.
+type dbTarget struct {
+	Host         string
+	Port         int
+	MasterSecret string // Secrets Manager ARN written by manage_master_user_password
+}
+
+// centralDB is the cluster every central service's database lives on.
+func (c config) centralDB() dbTarget {
+	return dbTarget{Host: c.DBHost, Port: c.DBPort, MasterSecret: c.DBMasterSecret}
+}
+
+// loadPandoraTarget reads the compatibility server's cluster. Terraform sets
+// all three variables or none, so a partial set is a wiring mistake and fails
+// rather than being skipped.
+func loadPandoraTarget(getenv func(string) string) (*dbTarget, error) {
+	vars := []string{"FORGE_PANDORA_DB_HOST", "FORGE_PANDORA_DB_PORT", "FORGE_PANDORA_DB_MASTER_SECRET_ARN"}
+
+	var set, missing []string
+	for _, name := range vars {
+		if getenv(name) == "" {
+			missing = append(missing, name)
+		} else {
+			set = append(set, name)
+		}
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%s set without %s; the pandora cluster needs all three",
+			strings.Join(set, ", "), strings.Join(missing, ", "))
+	}
+
+	port, err := strconv.Atoi(getenv("FORGE_PANDORA_DB_PORT"))
+	if err != nil {
+		return nil, fmt.Errorf("FORGE_PANDORA_DB_PORT is not a number: %w", err)
+	}
+	return &dbTarget{
+		Host:         getenv("FORGE_PANDORA_DB_HOST"),
+		Port:         port,
+		MasterSecret: getenv("FORGE_PANDORA_DB_MASTER_SECRET_ARN"),
+	}, nil
 }
 
 func envOr(name, fallback string) string {
