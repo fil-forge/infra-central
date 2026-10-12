@@ -164,7 +164,7 @@ terraform/
     bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
-    prod/platform/     prod/apps/                  platform applied on every push to main; apps not yet
+    prod/platform/     prod/apps/                  applied on every push to main
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -381,16 +381,17 @@ check`. CI pins 0.11.0, so that build is the one that decides a merge; an
 | provision image            | `make publish` run locally, pushed to ECR by hand              |
 | dev `platform`, `apps`     | GitHub Actions, on every push to `main`, with no approval step |
 | staging `platform`, `apps` | GitHub Actions, on every push to `main`, with no approval step |
+| prod `platform`, `apps`    | GitHub Actions, on every push to `main`, with no approval step |
 
-The dev and staging stages deploy themselves after their initial bootstrap.
+The dev, staging and prod stages deploy themselves after their initial bootstrap.
 `.github/workflows/check-and-deploy.yml` runs `make check` on every pull request
-and every push to `main`; a pull request then plans all four roots, and a push
-applies and smoke-tests both stages. The OpenTofu version is pinned in the
+and every push to `main`; a pull request then plans all six roots, and a push
+applies and smoke-tests all three stages. The OpenTofu version is pinned in the
 workflow rather than taken from an operator's machine.
 
 `apps` reads `platform`'s state through `terraform_remote_state`, so ordering
 matters: `apply-dev-apps` waits on `apply-dev-platform`, and the corresponding
-staging jobs have the same edge. An apps job therefore never plans against
+staging and prod jobs have the same edge. An apps job therefore never plans against
 outputs an in-flight platform apply is about to change. Every root is applied
 on every push, even one that touched only one of them. An empty plan costs about
 a minute, and it means there is no path-filter list to forget to update when a
@@ -444,9 +445,6 @@ There are two roles, and the split matters: GitHub runs the workflow file from a
 pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
-
-The workflow applies the prod platform root on every merge to `main`. The prod
-apps root has no CI job yet.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
