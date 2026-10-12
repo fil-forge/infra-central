@@ -13,6 +13,14 @@ They live in `terraform/envs/grafana/`, with the JSON beside the root in
 
 ## One root, no stage, applied by an operator until CI is turned on
 
+*Amended 2026-10-12: `check-and-deploy.yml` plans this root on pull requests,
+in a `plan-grafana` job that runs `tofu plan -refresh=false` with no Grafana
+credential. Without a refresh the provider never calls Grafana, so the token
+stays out of pull requests. The plan compares the configuration to the last
+applied state, and so cannot show a dashboard edited in the UI that the next
+apply would overwrite. The text below is struck through where it says there is
+no plan job.*
+
 Both dashboards describe every stage at once, through a `$stage` template
 variable that reads `label_values(dimension_ClusterName)`. There is no stage
 whose deploy they belong to, so they are not in `check-and-deploy.yml`'s plan or
@@ -29,10 +37,10 @@ would fail at `tofu init`.
 
 It runs on push only, which is what keeps the token out of pull requests: a job
 gated that way is never instantiated by one, so a bumped action in a Dependabot
-branch never sees the secret. There is no plan job for the grafana root for the
+branch never sees the secret. ~~There is no plan job for the grafana root for the
 same reason — a plan runs on `pull_request`, which is exactly where the token
 must not be — and a dashboard change is reviewed from its preview rather than
-from a plan.
+from a plan.~~
 
 The state lives in the nonprod bucket because that is where an operator already
 applies from, and because nothing in this root is account-specific. Its key is

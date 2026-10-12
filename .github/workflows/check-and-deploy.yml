@@ -459,6 +459,66 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/wait-services-stable.sh" "$(tofu output -raw cluster_arn)"
 
+  # The Grafana root's plan, outside the matrix above for the reason
+  # apply-grafana below gives.
+  #
+  # -refresh=false is what lets it run with no Grafana credential. A refresh
+  # reads every managed resource back from Grafana, and reading
+  # grafana_folder_permission is an Admin-level action, so only forge-terraform's
+  # token could refresh, and that token must stay away from pull requests (see
+  # apply-grafana). Without the refresh the plan compares this pull request's
+  # configuration to the state the last apply wrote, and the provider never calls
+  # Grafana. TF_VAR_grafana_auth is a placeholder only because the variable is
+  # required. A data source added to the root would be read during the plan, and
+  # this job would fail on it with a 401.
+  #
+  # It cannot show drift. A dashboard edited in the UI and not yet brought back
+  # by the sync workflow is invisible here, and the apply on main, which does
+  # refresh, overwrites the edit. The alert rules are git only, so for them this
+  # plan shows the whole change.
+  #
+  # The plan role already reads grafana/forge.tfstate, since grafana is in the
+  # nonprod account bootstrap root's state_key_prefixes. Not gated on
+  # GRAFANA_APPLY_ENABLED: that variable stands for the apply's token, which this
+  # job does not use.
+  plan-grafana:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform/envs/grafana
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-plan-grafana-${{ github.run_id }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tofu-providers-${{ hashFiles('terraform/envs/grafana/.terraform.lock.hcl') }}
+
+      - run: tofu init -input=false
+
+      - name: tofu plan
+        env:
+          TF_VAR_grafana_auth: unused-without-refresh
+        run: tofu plan -refresh=false -input=false -lock-timeout=5m
+
   # The Grafana root: the dashboards, the alert rules and the three folders they
   # live in. Not a stage, and not in the plan matrix above — it describes every
   # stage at once through a $stage template variable, so there is no stage deploy
@@ -475,10 +535,8 @@ jobs:
   # Push only, like every apply above, and that is what keeps the Grafana token
   # away from pull requests: a job gated this way is never instantiated by a
   # pull request, so a bumped action in a Dependabot branch never sees the
-  # secret. There is deliberately no plan job for the same reason — a plan runs
-  # on pull_request, which is exactly where the token must not be. The apply
-  # prints its plan to stdout before it changes anything, and a dashboard change
-  # is reviewed from its preview rather than from HCL.
+  # secret. plan-grafana above plans without it. The apply prints its plan to
+  # stdout before it changes anything.
   #
   # No path filter, for the reason the applies above carry none: a filter has to
   # name every file the root depends on, and one added without a matching filter
