@@ -143,9 +143,10 @@ build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
+scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
-scripts/set-dev-pin.sh        pins one dev service at one image digest
+scripts/set-pin.sh            pins one service of one stage at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
 scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach steady state
@@ -872,12 +873,12 @@ gh workflow run bump-deployed-image.yml -R fil-forge/infra-central \
   -f service=sprue -f digest="$(crane digest ghcr.io/fil-forge/sprue:main)"
 ```
 
-Locally, [`scripts/set-dev-pin.sh`](scripts/set-dev-pin.sh) makes the same edit.
+Locally, [`scripts/set-pin.sh`](scripts/set-pin.sh) makes the same edit.
 It is what both workflows run, so a pin written by hand comes out identical to
 one written by the bot:
 
 ```bash
-scripts/set-dev-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
+scripts/set-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
 ```
 
 A service is wired up with a dispatch step in its publish workflow plus the
@@ -887,8 +888,12 @@ repository the service is published from, so the required `client_payload` is
 `service`, `digest` and `source_repo`; `commit`, `pr_url` and `run_url` are
 provenance links the commit message uses when present.
 
-Staging and prod stay manual: a promotion copies dev's reviewed digest in a
-deliberate pull request.
+Staging and prod are promoted by merging a pull request the bot keeps open:
+"Promote dev's images to staging" and "Promote staging's images to prod". Each
+is rebuilt after its source stage passes its smoke test, lists what every
+service brings, and merges only by hand. To hold a service back, push to its
+branch. [The decision record](docs/decisions/2026-10-automated-promotion.md)
+explains how they work.
 
 ### Confirming nothing was regenerated
 
@@ -1060,7 +1065,6 @@ See the following Linear tickets:
 - [FIL-1155](https://linear.app/filecoin-foundation/issue/FIL-1155) Own the RDS parameter group and pin `rds.force_ssl`
 - [FIL-1161](https://linear.app/filecoin-foundation/issue/FIL-1161) Verify the RDS server certificate in every Forge service
 - [FIL-1162](https://linear.app/filecoin-foundation/issue/FIL-1162) Zero-downtime upgrades of Forge Central services
-- [FIL-1158](https://linear.app/filecoin-foundation/issue/FIL-1158) Automate promotion of Forge Central from dev to staging
 
 ### Forcing a provision phase to re-run
 

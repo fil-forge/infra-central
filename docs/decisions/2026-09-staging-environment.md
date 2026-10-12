@@ -30,9 +30,11 @@ Service and PLC each receive 0.25 vCPU and 0.5 GiB. Every service runs one task.
 additional ephemeral storage beyond Fargate's default allocation.
 
 Staging initially pins the image digests already running in dev. Later service and provision Lambda
-versions move to staging in deliberate promotion pull requests after they are healthy in dev. The
-Lambda promotion copies the digest already stored in the ECR repository both stages share. The
-automated image-bump workflow continues to update dev only.
+versions move to staging in deliberate promotion pull requests after they are healthy in dev. For
+service images, a bot keeps that pull request open and a person merges it, as
+[2026-10-automated-promotion.md](2026-10-automated-promotion.md) records. The Lambda promotion
+copies the digest already stored in the ECR repository both stages share. The automated image-bump
+workflow continues to update dev only.
 
 Sprue may provision storage without a funded payment plan, matching the previous shared staging
 deployment. Services log at `info`.

@@ -606,6 +606,31 @@ jobs:
           echo "the prod stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
+  # Rebuild each promotion pull request once its source stage has passed smoke
+  # on this commit. Two jobs rather than a matrix, because each waits on a
+  # different smoke test, and a failure in one chain must not hold the other.
+  promote-staging:
+    if: github.event_name == 'push'
+    needs: smoke-dev
+    permissions:
+      contents: read
+    uses: ./.github/workflows/promote.yml
+    with:
+      target: staging
+    secrets:
+      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
+  promote-prod:
+    if: github.event_name == 'push'
+    needs: smoke-staging
+    permissions:
+      contents: read
+    uses: ./.github/workflows/promote.yml
+    with:
+      target: prod
+    secrets:
+      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
@@ -702,6 +727,8 @@ jobs:
       - apply-prod-platform
       - apply-prod-apps
       - smoke-prod
+      - promote-staging
+      - promote-prod
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
