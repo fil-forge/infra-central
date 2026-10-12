@@ -473,9 +473,11 @@ jobs:
   # this job would fail on it with a 401.
   #
   # It cannot show drift. A dashboard edited in the UI and not yet brought back
-  # by the sync workflow is invisible here, and the apply on main, which does
-  # refresh, overwrites the edit. The alert rules are git only, so for them this
-  # plan shows the whole change.
+  # by the sync workflow is invisible here, and the apply on main meets the edit
+  # instead: terraform/envs/grafana/main.tf leaves the dashboards' overwrite
+  # unset so that apply fails on the version conflict rather than discard the
+  # edit. The alert rules are git only, so for them this plan shows the whole
+  # change.
   #
   # The plan role already reads grafana/forge.tfstate, since grafana is in the
   # nonprod account bootstrap root's state_key_prefixes. Not gated on

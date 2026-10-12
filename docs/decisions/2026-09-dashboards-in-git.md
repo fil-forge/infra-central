@@ -17,9 +17,10 @@ They live in `terraform/envs/grafana/`, with the JSON beside the root in
 in a `plan-grafana` job that runs `tofu plan -refresh=false` with no Grafana
 credential. Without a refresh the provider never calls Grafana, so the token
 stays out of pull requests. The plan compares the configuration to the last
-applied state, and so cannot show a dashboard edited in the UI that the next
-apply would overwrite. The text below is struck through where it says there is
-no plan job.*
+applied state, and so cannot show a dashboard edited in the UI and not yet
+synced back. The apply on main meets that edit instead, and fails on the version
+conflict that leaving `overwrite` unset is meant to cause. The text below is
+struck through where it says there is no plan job.*
 
 Both dashboards describe every stage at once, through a `$stage` template
 variable that reads `label_values(dimension_ClusterName)`. There is no stage
