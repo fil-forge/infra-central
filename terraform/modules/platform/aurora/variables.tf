@@ -2,6 +2,17 @@ variable "stage" {
   type = string
 }
 
+variable "name" {
+  description = "Names the cluster, its instances (<name>-N), subnet group and parameter group. Defaults to fc-<stage>, the stage's own cluster; a second cluster in the same stage needs a name of its own. Changing it on a live cluster replaces the cluster."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.name == null || can(regex("^fc-[a-z0-9]+(-[a-z0-9]+)*$", var.name))
+    error_message = "name must start with fc- and contain only lowercase letters, digits and single hyphens, e.g. fc-prod-pandora-db."
+  }
+}
+
 variable "subnet_ids" {
   description = "One subnet per availability zone, at least two. A live cluster cannot move to another subnet group, so these are fixed when the cluster is created."
   type        = list(string)
