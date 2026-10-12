@@ -68,6 +68,18 @@ func TestEnsureRejectsUnsafeLoginRoles(t *testing.T) {
 				Settings: []Setting{{Name: "statement_timeout", Value: ""}}},
 			wantErr: "not a duration",
 		},
+		{
+			name: "an idle timeout that would close the literal",
+			role: Role{Name: "pandora_migration", Password: "abc123",
+				Settings: []Setting{{Name: "idle_in_transaction_session_timeout", Value: "30s'; DROP ROLE pandora; --"}}},
+			wantErr: "not a duration",
+		},
+		{
+			name: "an idle timeout that is not a duration",
+			role: Role{Name: "pandora_migration", Password: "abc123",
+				Settings: []Setting{{Name: "idle_in_transaction_session_timeout", Value: "off"}}},
+			wantErr: "not a duration",
+		},
 	}
 
 	for _, tc := range rejected {
@@ -78,6 +90,30 @@ func TestEnsureRejectsUnsafeLoginRoles(t *testing.T) {
 				t.Errorf("Ensure() error = %v, want it to contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// Both timeouts dbinit applies pass validation with a duration, and a role
+// with no settings at all passes too.
+func TestValidateAcceptsRoleSettings(t *testing.T) {
+	accepted := []Role{
+		{Name: "pandora_storage_server", Password: "abc123",
+			Settings: []Setting{{Name: "statement_timeout", Value: "15s"}}},
+		{Name: "pandora_migration", Password: "abc123",
+			Settings: []Setting{{Name: "idle_in_transaction_session_timeout", Value: "30s"}}},
+		{Name: "pandora_migration", Password: "abc123",
+			Settings: []Setting{
+				{Name: "statement_timeout", Value: "0"},
+				{Name: "idle_in_transaction_session_timeout", Value: "500ms"},
+			}},
+		{Name: "locker", Password: "abc123"},
+	}
+
+	for _, role := range accepted {
+		db := Database{Name: "pandora", Password: "abc123", LoginRoles: []Role{role}}
+		if err := validate(db); err != nil {
+			t.Errorf("validate(%+v) = %v, want nil", role, err)
+		}
 	}
 }
 
