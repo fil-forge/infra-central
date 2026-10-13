@@ -532,7 +532,7 @@ jobs:
   # the apply role can reach grafana/forge.tfstate. Without the second, every
   # push to main would fail at `tofu init` with an access denial. Turn it on once
   # an operator has applied the root by hand at least once and watched what it
-  # does.
+  # does. It is now on, so every push to main that changes the root applies it.
   #
   # Push only, like every apply above, and that is what keeps the Grafana token
   # away from pull requests: a job gated this way is never instantiated by a
