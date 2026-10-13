@@ -2,6 +2,11 @@ output "vpc_id" {
   value = aws_vpc.this.id
 }
 
+output "azs" {
+  description = "The zones the stage's subnets are in, in order. modules/platform/pandora-db puts its subnets in the same ones."
+  value       = local.azs
+}
+
 output "public_subnet_ids" {
   value = [for subnet in aws_subnet.public : subnet.id]
 }

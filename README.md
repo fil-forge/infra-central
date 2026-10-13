@@ -215,9 +215,11 @@ it depends on:
 ```
 terraform/modules/
   platform/                everything the platform root builds
-    main.tf                the wiring, calling the eight below
+    main.tf                the wiring, calling the modules below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
     aurora/                prod's database, in place of database/
+    pandora-vpn/           the compatibility server's site-to-site VPN
+    pandora-db/            the compatibility server's database cluster, reached over that VPN
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root

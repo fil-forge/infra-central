@@ -70,9 +70,9 @@
 # the other working, and no secret has to be moved between two stores by hand.
 # Either credential is needed for a plan as much as an apply: a plan refreshes
 # every managed resource, and refreshing grafana_folder_permission calls
-# folders.permissions:read, which is an Admin-level action. There is no
-# read-only credential that can plan this root, which is why check-and-deploy.yml
-# carries no plan job for it.
+# folders.permissions:read, which is an Admin-level action. No read-only
+# credential can refresh this root, so check-and-deploy.yml's plan-grafana job
+# plans pull requests with -refresh=false and no Grafana credential at all.
 #
 # A repository secret is reachable by anyone who can land a workflow change on
 # main, which is why that job is gated on `github.event_name == 'push'` -- a pull
@@ -99,6 +99,11 @@ variable "terraform_service_account_id" {
 provider "grafana" {
   url  = "https://filecoinfoundation.grafana.net/"
   auth = var.grafana_auth
+}
+
+# Account ids, for the rule that can tell stages apart only by account.
+module "constants" {
+  source = "../../modules/shared/constants"
 }
 
 # config_json is the whole Kubernetes-style document, apiVersion and kind and
