@@ -2,10 +2,10 @@
 # underneath a running service, so staging runs the build that was promoted
 # rather than whatever a rolling tag points at when a task restarts.
 #
-# Seeded from the digests dev ran when staging was created. Promote later
-# versions here in a deliberate pull request after they are healthy in dev.
-# Copy the reviewed digest from dev's terraform.tfvars; each digest carries
-# linux/arm64, which the tasks run on.
+# Seeded from the digests dev ran when staging was created. Later versions
+# arrive by merging the "Promote dev's images to staging" pull request, which
+# scripts/promote.sh keeps open; each digest carries linux/arm64, which the
+# tasks run on.
 #
 # The blank lines between the pins are what keeps two services' bumps from
 # conflicting. Each bump rewrites one line, and git conflicts on changes to

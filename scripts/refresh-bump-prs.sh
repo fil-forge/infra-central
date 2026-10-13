@@ -137,7 +137,7 @@ while IFS= read -r branch <&3; do
       message=$(git log -1 --format=%B "origin/$branch")
 
       git checkout --quiet -B "$branch" origin/main
-      changed=$(scripts/set-dev-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
+      changed=$(scripts/set-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
       if [ "$changed" != true ]; then
         echo "::error::$FILE pins $service at $main_digest and rewriting it to $digest changed nothing"
         exit 1
