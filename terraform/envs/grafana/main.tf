@@ -1,19 +1,23 @@
-# The two Forge dashboards, and nothing else in the Grafana stack.
+# Forge's dashboards, alert rules, and notification policy tree
 #
 # The filecoinfoundation stack is shared. FilOne ships metrics into it from its
 # own infrastructure, and the staging appliance's host ships Lotus, Curio and
-# Guppy telemetry through the same writer. So this root owns one folder and the
-# dashboards inside it, and the credential it runs as cannot reach past that
-# folder. What may be declared here:
+# Guppy telemetry through the same writer. So this root owns the Forge folders
+# and what is inside them, and the credential it runs as cannot reach past them,
+# except through the routing-tree role routing.tf names, which reaches every
+# notification policy tree in the stack. (The provenance role alerts.tf names
+# is unscoped too, but writes nothing on its own.) What may be declared here:
 #
-#   grafana_folder, grafana_dashboard, grafana_folder_permission and
-#   grafana_rule_group. The folders and their permissions are in folders.tf,
-#   which is where the three ownership models are set out; the rule groups are
-#   in alerts.tf.
+#   grafana_folder, grafana_dashboard, grafana_folder_permission,
+#   grafana_rule_group, and Forge's own notification policy tree as
+#   grafana_apps_notifications_routingtree_v1beta1. The folders and their
+#   permissions are in folders.tf, which is where the three ownership models are
+#   set out; the rule groups are in alerts.tf, and the tree in routing.tf.
 #
 # What may not, because each one reaches outside the slice or into state:
 #
-#   grafana_notification_policy  the whole routing tree as a single resource
+#   grafana_notification_policy  the default routing tree, FilOne's routes
+#                                with it, as a single resource
 #   grafana_contact_point        keeps its Slack token or webhook in state
 #   grafana_data_source          grafanacloud-prom and -logs belong to the stack
 #   grafana_organization         not supported on Grafana Cloud at all
@@ -36,10 +40,13 @@
 #   tofu -chdir=terraform/envs/grafana apply
 #
 # That token is forge-terraform's, and it is the only one this root ever runs
-# as. It holds folder Admin on the three Forge folders and no org role, which is
-# enough to manage everything declared here and not enough to create a folder.
+# as. It holds folder Admin on the three Forge folders and no org role, plus the
+# two fixed roles alerts.tf and routing.tf name for the rules and the tree. That
+# is enough to manage everything declared here and not enough to create a folder.
 # Nothing hands an org-admin credential to OpenTofu, at bootstrap or after: a
-# wrong plan cannot reach past the Forge tree even on its first run. There are no
+# wrong plan cannot reach past the Forge folders even on its first run, though
+# one could reach another notification policy tree through the role routing.tf
+# names, which is why this root declares only its own. There are no
 # import blocks in this root -- an earlier draft adopted the folders and the
 # dashboards that way, and bc34b8d replaced it with creating them fresh.
 #
@@ -93,7 +100,7 @@
 # Forge Central item in the Fil One 1Password vault.
 
 variable "grafana_auth" {
-  description = "Service account token for the filecoinfoundation stack. Its basic role is None, so it has no org-level permission at all; its access is Admin on the three Forge folders and nothing anywhere else. Folder Admin rather than Edit because this root declares grafana_folder_permission, and writing a folder's permissions needs that level on the folder. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
+  description = "Service account token for the filecoinfoundation stack. Its basic role is None; its access is Admin on the three Forge folders, plus the fixed roles alerts.tf and routing.tf name for writing the alert rules and Forge's notification policy tree. Folder Admin rather than Edit because this root declares grafana_folder_permission, and writing a folder's permissions needs that level on the folder. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
   type        = string
   sensitive   = true
 }

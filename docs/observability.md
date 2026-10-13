@@ -67,11 +67,16 @@ been tested; if it does not, the export route is the only one.
 
 Each rule carries `team_name = "forge"` and a `severity` (`critical`, `warning`
 or `info`), and each rule that watches a stage carries `stage` as well; the
-stack-wide trace volume rule has none. Routing is maintained in the UI, not
-here: a route in the notification policy tree matches `team_name = "forge"`, and
-IRM picks the escalation from `stage` and `severity`, so that a production
-critical alert pages and everything else notifies. The policy has to group by
-`stage` and `severity` for IRM to see them on the group it is sent.
+stack-wide trace volume rule has none. Every rule routes through Forge's own
+notification policy tree, `forge`, declared in
+`terraform/envs/grafana/routing.tf` and named in each rule's
+`notification_settings.policy`; the stack's default tree, which holds FilOne's
+routes, stays in the UI. The tree sends everything to the contact point for the
+IRM integration Forge shares with FilOne, grouped by `alertname`, `node`,
+`stage` and `severity`, so that each group IRM receives has one value of
+`stage` and of `severity`. IRM's routes, kept in the IRM UI, pick the escalation
+from them, so that a production critical alert pages and everything else
+notifies.
 
 An alert raised because a rule's query failed (`DatasourceError`) or returned
 nothing where a rule treats that as a fault (`DatasourceNoData`) carries none of
