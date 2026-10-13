@@ -88,6 +88,7 @@ appliance label.
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
 | Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch               | FIL-1151 |
 | Service 5xx errors                                   | Forge Central            | ALB, CloudWatch               | FIL-1207 |
+| Service is failing most requests                     | Forge Central            | ALB, CloudWatch               | FIL-1207 |
 | Provision Lambda errors                              | Forge Central            | Lambda, CloudWatch            | FIL-1151 |
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
