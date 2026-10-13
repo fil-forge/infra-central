@@ -48,3 +48,9 @@ loki_datasource_uid = "grafanacloud-logs"
 # build if they drift, which is what keeps alerts firing for a stage no
 # dashboard offers from going unnoticed.
 alert_stages = ["staging", "prod"]
+
+# The contact point for the IRM integration Forge shares with FilOne, which
+# routing.tf's tree delivers every alert to. Alerting -> Contact points; it was
+# made in the UI, and its uid (RmlsT25l, in its edit page's address) is only its
+# name base64-encoded. Not a secret.
+forge_contact_point = "FilOne"

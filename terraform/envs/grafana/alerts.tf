@@ -580,6 +580,10 @@ resource "grafana_rule_group" "central" {
       severity  = "warning"
     }
 
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+    }
+
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -664,6 +668,10 @@ resource "grafana_rule_group" "central" {
       component = "central"
       stage     = "prod"
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
