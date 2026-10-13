@@ -19,7 +19,8 @@
 #     Expression nodes are skipped, which is why the folders and dashboards in
 #     this root apply without it.
 #
-# routing.tf's tree needs one more, set out there.
+# routing.tf's tree needs one more role on forge-terraform, and a feature toggle
+# on the stack; both are set out there.
 #
 # Routing is in routing.tf: every rule sets notification_settings.policy to
 # Forge's own notification policy tree, declared there. A new rule needs the

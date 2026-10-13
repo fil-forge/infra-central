@@ -1,10 +1,12 @@
-# The two Forge dashboards, and nothing else in the Grafana stack.
+# Forge's dashboards, alert rules and notification policy tree, and nothing else
+# in the Grafana stack.
 #
 # The filecoinfoundation stack is shared. FilOne ships metrics into it from its
 # own infrastructure, and the staging appliance's host ships Lotus, Curio and
 # Guppy telemetry through the same writer. So this root owns one folder and the
 # dashboards inside it, and the credential it runs as cannot reach past that
-# folder. What may be declared here:
+# folder, except through the routing-tree role routing.tf names, which reaches
+# every notification policy tree in the stack. What may be declared here:
 #
 #   grafana_folder, grafana_dashboard, grafana_folder_permission,
 #   grafana_rule_group, and Forge's own notification policy tree as
@@ -35,7 +37,9 @@
 # two fixed roles alerts.tf and routing.tf name for the rules and the tree. That
 # is enough to manage everything declared here and not enough to create a folder.
 # Nothing hands an org-admin credential to OpenTofu, at bootstrap or after: a
-# wrong plan cannot reach past the Forge tree even on its first run. There are no
+# wrong plan cannot reach past the Forge folders even on its first run, though
+# one could reach another notification policy tree through the role routing.tf
+# names, which is why this root declares only its own. There are no
 # import blocks in this root -- an earlier draft adopted the folders and the
 # dashboards that way, and bc34b8d replaced it with creating them fresh.
 #

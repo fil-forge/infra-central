@@ -20,10 +20,12 @@
 #     provider's documentation for this resource requires (Grafana 13.1 or
 #     later); and
 #   - on forge-terraform, the fixed role `fixed:alerting.routes:writer`
-#     ("Notification policies writer"), granted for this tree on 2026-10-13.
+#     ("Notification Policies Writer"), granted for this tree on 2026-10-13.
 #     Grafana's access-role docs scope it to routingtrees:*, every tree in the
 #     stack, so it can reach the default tree and FilOne's routes too; this root
-#     declares only its own.
+#     declares only its own. Grafana also defines a narrower
+#     `fixed:alerting.managed-routes:creator` ("Notification Policies Creator"),
+#     which may grant a tree's creator rights on that tree alone; untried here.
 #
 # The contact point is named, not declared. grafana_contact_point would keep its
 # integration's URL or token in this state.
