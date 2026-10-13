@@ -120,8 +120,8 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.bot.outputs.token }}
 
-      # The rewrite itself lives in scripts/set-dev-pin.sh, which the refresh
-      # workflow and a person at a terminal run too. Its stdout is the
+      # The rewrite itself lives in scripts/set-pin.sh, which the refresh and
+      # promotion workflows and a person at a terminal run too. Its stdout is the
       # `changed` output and nothing else; what a person reads goes to stderr.
       - name: Rewrite the dev pin
         id: edit
@@ -130,7 +130,7 @@ jobs:
           DIGEST: ${{ steps.req.outputs.digest }}
         run: |
           set -euo pipefail
-          scripts/set-dev-pin.sh "$SERVICE" "$DIGEST" >> "$GITHUB_OUTPUT"
+          scripts/set-pin.sh "$SERVICE" "$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Set up OpenTofu
         if: steps.edit.outputs.changed == 'true'
