@@ -582,8 +582,9 @@ jobs:
 
       # The token is on this step alone rather than the job, so the checkout and
       # the credentials step above never carry it. The service account it belongs
-      # to holds Admin on the three Forge folders and nothing else in a stack
-      # shared with FilOne, so this cannot reach anyone else's dashboards.
+      # to holds Admin on the three Forge folders in a stack shared with FilOne,
+      # so this cannot reach anyone else's dashboards. Its only stack-wide grants
+      # are the alerting roles alerts.tf and routing.tf name.
       - name: tofu apply
         env:
           TF_VAR_grafana_auth: ${{ secrets.GRAFANA_TERRAFORM_TOKEN }}

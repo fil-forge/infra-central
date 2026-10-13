@@ -19,10 +19,14 @@
 #     Expression nodes are skipped, which is why the folders and dashboards in
 #     this root apply without it.
 #
+# routing.tf's tree needs one more, set out there.
+#
 # Routing is in routing.tf: every rule sets notification_settings.policy to
 # Forge's own notification policy tree, declared there. A new rule needs the
-# same block, or it falls through to the stack's default tree, where nothing
-# routes Forge's alerts.
+# same block, or it falls through to the stack's default tree. That still holds
+# the UI route matching team_name = "forge" that Forge used before this tree, so
+# such a rule is delivered, but grouped the old way; once that route is
+# removed, nothing in the default tree routes it.
 
 variable "alert_stages" {
   description = "Stages the rules alert on, as they appear in the appliance label's <stage>-<region> prefix and in Central's fc-<stage> cluster and target group names. Every ticket says production only; terraform.tfvars adds staging, which is what the hand-built rules these replace were watching."
@@ -478,6 +482,10 @@ resource "grafana_rule_group" "central" {
       team_name = "forge"
       component = "central"
       severity  = "critical"
+    }
+
+    notification_settings {
+      policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
     }
 
     data {
@@ -2332,9 +2340,9 @@ resource "grafana_rule_group" "appliance_outages" {
 #   - It averages the rate over six hours and needs that average over the
 #     threshold for an hour more, so a burst never fires it, and it evaluates
 #     every fifteen minutes because nothing about it is urgent.
-#   - severity is info, so a route in the policy tree can send it somewhere
-#     quieter than the warnings; until one does, it goes wherever the forge
-#     route sends everything else.
+#   - severity is info, so IRM's routes can treat it more quietly than the
+#     warnings. Forge's tree has no child routes and sends it to the same
+#     contact point as everything else.
 #
 # What it does not stay quiet about is being broken. no_data_state is NoData
 # and exec_err_state is Error, because a rule on the wrong data source, or on a

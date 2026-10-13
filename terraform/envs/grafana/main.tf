@@ -31,8 +31,9 @@
 #   tofu -chdir=terraform/envs/grafana apply
 #
 # That token is forge-terraform's, and it is the only one this root ever runs
-# as. It holds folder Admin on the three Forge folders and no org role, which is
-# enough to manage everything declared here and not enough to create a folder.
+# as. It holds folder Admin on the three Forge folders and no org role, plus the
+# two fixed roles alerts.tf and routing.tf name for the rules and the tree. That
+# is enough to manage everything declared here and not enough to create a folder.
 # Nothing hands an org-admin credential to OpenTofu, at bootstrap or after: a
 # wrong plan cannot reach past the Forge tree even on its first run. There are no
 # import blocks in this root -- an earlier draft adopted the folders and the
@@ -88,7 +89,7 @@
 # Forge Central item in the Fil One 1Password vault.
 
 variable "grafana_auth" {
-  description = "Service account token for the filecoinfoundation stack. Its basic role is None, so it has no org-level permission at all; its access is Admin on the three Forge folders and nothing anywhere else. Folder Admin rather than Edit because this root declares grafana_folder_permission, and writing a folder's permissions needs that level on the folder. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
+  description = "Service account token for the filecoinfoundation stack. Its basic role is None; its access is Admin on the three Forge folders, plus the fixed roles alerts.tf and routing.tf name for writing the alert rules and Forge's notification policy tree. Folder Admin rather than Edit because this root declares grafana_folder_permission, and writing a folder's permissions needs that level on the folder. Passed as TF_VAR_grafana_auth, read from the Forge Central item in the Fil One 1Password vault."
   type        = string
   sensitive   = true
 }

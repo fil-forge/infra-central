@@ -14,6 +14,17 @@
 # Grouping by stage and severity is what lets them: each notification IRM
 # receives carries one value of each.
 #
+# Writing the tree needs two things outside this root:
+#
+#   - the alertingMultiplePolicies feature toggle on the stack, which the
+#     provider's documentation for this resource requires (Grafana 13.1 or
+#     later); and
+#   - on forge-terraform, the fixed role `fixed:alerting.routes:writer`
+#     ("Notification policies writer"), granted for this tree on 2026-10-13.
+#     Grafana's access-role docs scope it to routingtrees:*, every tree in the
+#     stack, so it can reach the default tree and FilOne's routes too; this root
+#     declares only its own.
+#
 # The contact point is named, not declared. grafana_contact_point would keep its
 # integration's URL or token in this state.
 variable "forge_contact_point" {

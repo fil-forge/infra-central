@@ -72,7 +72,8 @@ notification policy tree, `forge`, declared in `terraform/envs/grafana/routing.t
 and named in each rule's `notification_settings.policy`; the stack's default
 tree, which holds FilOne's routes, stays in the UI. The tree sends everything to
 the contact point for the IRM integration Forge shares with FilOne, grouped by
-`stage` and `severity` so that each group IRM receives has one value of each.
+`alertname`, `node`, `stage` and `severity`, so that each group IRM receives
+has one value of `stage` and of `severity`.
 IRM's routes, kept in the IRM UI, pick the escalation from them, so that a
 production critical alert pages and everything else notifies.
 
