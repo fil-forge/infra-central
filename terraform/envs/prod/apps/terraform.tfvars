@@ -1,9 +1,9 @@
 # Pinned per service, by digest. A digest names one artifact and cannot move
 # underneath a running service, so a redeploy cannot silently change what runs.
 #
-# Seeded from the digests staging ran when prod was created. Promote later
-# versions here in a deliberate pull request after they are healthy in staging,
-# copying the reviewed digest from staging's terraform.tfvars.
+# Seeded from the digests staging ran when prod was created. Later versions
+# arrive by merging the "Promote staging's images to prod" pull request, which
+# scripts/promote.sh keeps open.
 #
 # The blank lines between the pins are what keeps two services' bumps from
 # conflicting. Each bump rewrites one line, and git conflicts on changes to
