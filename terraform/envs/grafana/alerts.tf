@@ -24,10 +24,11 @@
 #
 # Routing is in routing.tf: every rule sets notification_settings.policy to
 # Forge's own notification policy tree, declared there. A new rule needs the
-# same block, and each group's postcondition fails the plan if one lacks it;
-# without it, a rule would fall through to the stack's default tree. That still holds
-# the UI route matching team_name = "forge" that Forge used before this tree, so
-# such a rule is delivered, but grouped the old way; once that route is
+# same block, and each group's postcondition fails the plan if one of its rules
+# lacks it; a new group needs the same postcondition to be covered. A rule
+# without the block falls through to the stack's default tree. That still
+# holds the UI route matching team_name = "forge" that Forge used before this
+# tree, so such a rule is delivered, but grouped the old way; once that route is
 # removed, nothing in the default tree routes it.
 
 variable "alert_stages" {
@@ -240,11 +241,12 @@ resource "grafana_rule_group" "central" {
   interval_seconds = 60
 
   # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
-  # rule added without it fails plan-grafana on its pull request.
+  # rule added without it fails plan-grafana on its pull request. A new group
+  # needs a copy of this block.
   lifecycle {
     postcondition {
       condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Set notification_settings { policy = ... } on each to Forge's tree; see routing.tf."
     }
   }
 
@@ -886,11 +888,12 @@ resource "grafana_rule_group" "appliance" {
   interval_seconds = 300
 
   # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
-  # rule added without it fails plan-grafana on its pull request.
+  # rule added without it fails plan-grafana on its pull request. A new group
+  # needs a copy of this block.
   lifecycle {
     postcondition {
       condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Set notification_settings { policy = ... } on each to Forge's tree; see routing.tf."
     }
   }
 
@@ -2347,11 +2350,12 @@ resource "grafana_rule_group" "appliance_containers" {
   interval_seconds = 60
 
   # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
-  # rule added without it fails plan-grafana on its pull request.
+  # rule added without it fails plan-grafana on its pull request. A new group
+  # needs a copy of this block.
   lifecycle {
     postcondition {
       condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Set notification_settings { policy = ... } on each to Forge's tree; see routing.tf."
     }
   }
 
@@ -2669,11 +2673,12 @@ resource "grafana_rule_group" "appliance_outages" {
   interval_seconds = 60
 
   # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
-  # rule added without it fails plan-grafana on its pull request.
+  # rule added without it fails plan-grafana on its pull request. A new group
+  # needs a copy of this block.
   lifecycle {
     postcondition {
       condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Set notification_settings { policy = ... } on each to Forge's tree; see routing.tf."
     }
   }
 
@@ -2942,11 +2947,12 @@ resource "grafana_rule_group" "usage" {
   interval_seconds = 900
 
   # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
-  # rule added without it fails plan-grafana on its pull request.
+  # rule added without it fails plan-grafana on its pull request. A new group
+  # needs a copy of this block.
   lifecycle {
     postcondition {
       condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Set notification_settings { policy = ... } on each to Forge's tree; see routing.tf."
     }
   }
 
