@@ -1012,6 +1012,40 @@ The vault phase also self-heals: if a stored `secret_id` no longer
 authenticates, because OpenBao's storage was rebuilt underneath it, the next run
 replaces it rather than leaving hilt unable to start.
 
+### Hilt's partner keys
+
+hilt's Tenant API takes a partner key as a bearer token. Each consumer has its
+own key, minted once by the seed phase:
+
+- `hilt/partner-key` belongs to the FilOne backend, which holds a copy in its
+  `ForgeManagementApiToken` (staging) and `ForgeDevManagementApiToken` (dev)
+  SST secrets.
+- `hilt/partner-key-ci` belongs to the end-to-end check in
+  [infra-nodes](https://github.com/fil-forge/infra-nodes), which reads it from
+  the `HILT_PARTNER_KEY` secret of the GitHub Environment named after the stage.
+
+The seed phase joins them into `hilt/partner-keys`, the comma-separated form hilt
+accepts in `HILT_AUTH_PARTNER_KEY`, and rewrites it whenever either key changes.
+Every partner key can manage every tenant, whoever created it
+([FIL-1489](https://linear.app/filecoin-foundation/issue/FIL-1489)).
+
+infra-nodes' runbook, under [Setting up the end-to-end test's
+credential](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#setting-up-the-end-to-end-tests-credential),
+describes how to copy the CI key into GitHub. The Environment that holds the key
+has to admit only `main` before the key goes in.
+
+To rotate one key, delete its parameter and [force the seed phase to
+run again](#forcing-a-provision-phase-to-re-run). The phase mints a new key and
+rewrites `hilt/partner-keys`. ECS reads secrets only when a task starts, so
+redeploy hilt:
+
+```bash
+aws ecs update-service --cluster fc-dev --service fc-dev-hilt --force-new-deployment
+```
+
+The old key stops working once the new tasks replace the old ones. Hand the new
+key to its consumer straight away; the other consumer's key is unchanged.
+
 ## Development
 
 ```bash
@@ -1070,7 +1104,7 @@ See the following Linear tickets:
 
 `aws_lambda_invocation` re-invokes only when its input changes, which is what
 `seed_trigger` and `vault_trigger` in `modules/platform` exist for. Rotating an
-identity or hilt's OpenBao credential needs one of them bumped.
+identity, hilt's OpenBao credential or a partner key needs one of them bumped.
 
 Neither is reachable today. The stage roots do not expose them, and the workflow
 passes no `-var` flags, so the only way to bump one is to edit

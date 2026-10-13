@@ -37,6 +37,9 @@ instance goes until the apply brings it back, which is fine in dev.
   reports `action: mint`, so no `--reissue` is needed.
 - **The three central proofs** under `delegator/` and `hilt/`. Their issuer and
   audience are unchanged.
+- **`hilt/partner-key`, `hilt/partner-key-ci` and `hilt/partner-keys`.** FilOne
+  and infra-nodes' end-to-end check keep their keys. The tenants those keys
+  created are wiped with hilt's database.
 
 ## What gets wiped
 

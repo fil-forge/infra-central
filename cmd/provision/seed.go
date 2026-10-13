@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -119,9 +120,18 @@ var wallets = []walletSpec{
 }
 
 // randomSecrets are shared bearer tokens with no structure beyond being secret.
+//
+// Hilt has one partner key per consumer of its Tenant API: partner-key is
+// FilOne's and partner-key-ci is infra-nodes' end-to-end check's. Each one is
+// rotated on its own; seedHiltPartnerKeys joins them for Hilt.
 var randomSecrets = []struct{ service, name string }{
 	{service: "hilt", name: "partner-key"},
+	{service: "hilt", name: "partner-key-ci"},
 }
+
+// hiltPartnerKeys are the parameters joined into hilt/partner-keys, the CSV
+// form Hilt accepts in HILT_AUTH_PARTNER_KEY.
+var hiltPartnerKeys = []string{"partner-key", "partner-key-ci"}
 
 // seed mints identities, wallets and passwords, then creates the databases.
 func (d *deps) seed(ctx context.Context) (*Response, error) {
@@ -149,7 +159,13 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 	}
 
 	slog.Info("ensuring shared secrets", "secrets", len(randomSecrets))
-	if err := d.seedRandomSecrets(ctx, resp); err != nil {
+	secrets, err := d.seedRandomSecrets(ctx, resp)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("joining hilt partner keys", "keys", len(hiltPartnerKeys))
+	if err := d.seedHiltPartnerKeys(ctx, secrets); err != nil {
 		return nil, err
 	}
 
@@ -361,17 +377,63 @@ func parseWallet(spec walletSpec, stored string) (*keygen.EVMWallet, error) {
 	}
 }
 
-func (d *deps) seedRandomSecrets(ctx context.Context, resp *Response) error {
+// seedRandomSecrets returns the value stored for each secret, keyed by
+// "<service>/<name>".
+func (d *deps) seedRandomSecrets(ctx context.Context, resp *Response) (map[string]string, error) {
+	values := make(map[string]string, len(randomSecrets))
 	for _, secret := range randomSecrets {
-		_, created, err := d.store.EnsureSecret(ctx, secret.service, secret.name, keygen.RandomHex)
+		value, created, err := d.store.EnsureSecret(ctx, secret.service, secret.name, keygen.RandomHex)
 		if err != nil {
-			return fmt.Errorf("ensure secret %s/%s: %w", secret.service, secret.name, err)
+			return nil, fmt.Errorf("ensure secret %s/%s: %w", secret.service, secret.name, err)
 		}
 		if created {
 			resp.Created = append(resp.Created, d.store.Path(secret.service, secret.name))
 		}
+		values[secret.service+"/"+secret.name] = value
 	}
-	return nil
+	return values, nil
+}
+
+// seedHiltPartnerKeys writes hilt/partner-keys, the CSV of every partner key.
+//
+// The CSV is derived, so it is rewritten whenever a key behind it changes. A
+// rotation replaces one key's parameter and re-runs seed. It is written only
+// when it differs, because PutParameter is capped at 3 TPS.
+func (d *deps) seedHiltPartnerKeys(ctx context.Context, secrets map[string]string) error {
+	keys := make([]string, 0, len(hiltPartnerKeys))
+	for _, name := range hiltPartnerKeys {
+		keys = append(keys, secrets["hilt/"+name])
+	}
+
+	joined, err := joinPartnerKeys(keys)
+	if err != nil {
+		return err
+	}
+
+	current, found, err := d.store.LookupSecret(ctx, "hilt", "partner-keys")
+	if err != nil {
+		return err
+	}
+	if found && current == joined {
+		return nil
+	}
+	return d.store.PutSecret(ctx, "hilt", "partner-keys", joined)
+}
+
+// joinPartnerKeys renders keys in the CSV form Hilt splits on commas. Hilt
+// compares each key byte for byte, so a key that is empty or holds a comma or
+// whitespace would silently never match; it fails here instead. The error never
+// includes a key.
+func joinPartnerKeys(keys []string) (string, error) {
+	for i, key := range keys {
+		if key == "" {
+			return "", fmt.Errorf("hilt partner key %s is empty", hiltPartnerKeys[i])
+		}
+		if strings.ContainsFunc(key, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+			return "", fmt.Errorf("hilt partner key %s holds a comma or whitespace", hiltPartnerKeys[i])
+		}
+	}
+	return strings.Join(keys, ","), nil
 }
 
 func (d *deps) seedDatabasePasswords(ctx context.Context, resp *Response) ([]dbinit.Database, error) {
