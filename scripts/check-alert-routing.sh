@@ -9,10 +9,15 @@
 # This one covers every grafana_rule_group the plan holds.
 #
 # Takes the output of `tofu show -json` on a saved plan, as a file or on stdin.
-# plan-grafana runs it on every pull request.
+# plan-grafana runs it on pull requests from this repository's own branches;
+# applies don't.
 set -euo pipefail
 
 plan="$(cat "${1:-/dev/stdin}")"
+if [ -z "$plan" ]; then
+  echo "No plan JSON to read." >&2
+  exit 1
+fi
 resources='[.planned_values.root_module | recurse(.child_modules[]?) | .resources[]?]'
 
 policy="$(jq -r "$resources"' | .[] | select(.address == "grafana_apps_notifications_routingtree_v1beta1.forge") | .values.metadata.uid' <<<"$plan")"

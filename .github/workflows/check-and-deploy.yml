@@ -524,7 +524,9 @@ jobs:
       # Every alert rule has to name Forge's notification policy tree; the
       # script says why this reads the plan rather than the configuration.
       - name: Check alert routing
-        run: tofu show -json tfplan | "$GITHUB_WORKSPACE/scripts/check-alert-routing.sh"
+        run: |
+          tofu show -json tfplan > "$RUNNER_TEMP/plan.json"
+          "$GITHUB_WORKSPACE/scripts/check-alert-routing.sh" "$RUNNER_TEMP/plan.json"
 
   # The Grafana root: the dashboards, the alert rules and the three folders they
   # live in. Not a stage, and not in the plan matrix above — it describes every
