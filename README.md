@@ -143,9 +143,10 @@ build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
+scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
-scripts/set-dev-pin.sh        pins one dev service at one image digest
+scripts/set-pin.sh            pins one service of one stage at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
 scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach steady state
@@ -163,7 +164,7 @@ terraform/
     bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
-    prod/platform/     prod/apps/                  platform applied on every push to main; apps not yet
+    prod/platform/     prod/apps/                  applied on every push to main
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -214,9 +215,11 @@ it depends on:
 ```
 terraform/modules/
   platform/                everything the platform root builds
-    main.tf                the wiring, calling the eight below
+    main.tf                the wiring, calling the modules below
     network/ kms/ database/ storage/ ingress/ provision/ openbao/
     aurora/                prod's database, in place of database/
+    pandora-vpn/           the compatibility server's site-to-site VPN
+    pandora-db/            the compatibility server's database cluster, reached over that VPN
     log-forwarding/        the role CloudWatch Logs ships a stage's groups to Grafana with
   apps/                    the six ECS services
   shared/                  used by more than one root
@@ -380,16 +383,17 @@ check`. CI pins 0.11.0, so that build is the one that decides a merge; an
 | provision image            | `make publish` run locally, pushed to ECR by hand              |
 | dev `platform`, `apps`     | GitHub Actions, on every push to `main`, with no approval step |
 | staging `platform`, `apps` | GitHub Actions, on every push to `main`, with no approval step |
+| prod `platform`, `apps`    | GitHub Actions, on every push to `main`, with no approval step |
 
-The dev and staging stages deploy themselves after their initial bootstrap.
+The dev, staging and prod stages deploy themselves after their initial bootstrap.
 `.github/workflows/check-and-deploy.yml` runs `make check` on every pull request
-and every push to `main`; a pull request then plans all four roots, and a push
-applies and smoke-tests both stages. The OpenTofu version is pinned in the
+and every push to `main`; a pull request then plans all six roots, and a push
+applies and smoke-tests all three stages. The OpenTofu version is pinned in the
 workflow rather than taken from an operator's machine.
 
 `apps` reads `platform`'s state through `terraform_remote_state`, so ordering
 matters: `apply-dev-apps` waits on `apply-dev-platform`, and the corresponding
-staging jobs have the same edge. An apps job therefore never plans against
+staging and prod jobs have the same edge. An apps job therefore never plans against
 outputs an in-flight platform apply is about to change. Every root is applied
 on every push, even one that touched only one of them. An empty plan costs about
 a minute, and it means there is no path-filter list to forget to update when a
@@ -443,9 +447,6 @@ There are two roles, and the split matters: GitHub runs the workflow file from a
 pull request's own head, so the role a plan job uses can describe infrastructure
 and read nothing, and the role that can change anything is reachable only from
 `refs/heads/main`. See `terraform/modules/github-actions-iam`.
-
-The workflow applies the prod platform root on every merge to `main`. The prod
-apps root has no CI job yet.
 
 See [Planned work](#planned-work) for the manual steps that remain.
 
@@ -872,12 +873,12 @@ gh workflow run bump-deployed-image.yml -R fil-forge/infra-central \
   -f service=sprue -f digest="$(crane digest ghcr.io/fil-forge/sprue:main)"
 ```
 
-Locally, [`scripts/set-dev-pin.sh`](scripts/set-dev-pin.sh) makes the same edit.
+Locally, [`scripts/set-pin.sh`](scripts/set-pin.sh) makes the same edit.
 It is what both workflows run, so a pin written by hand comes out identical to
 one written by the bot:
 
 ```bash
-scripts/set-dev-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
+scripts/set-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
 ```
 
 A service is wired up with a dispatch step in its publish workflow plus the
@@ -887,8 +888,12 @@ repository the service is published from, so the required `client_payload` is
 `service`, `digest` and `source_repo`; `commit`, `pr_url` and `run_url` are
 provenance links the commit message uses when present.
 
-Staging and prod stay manual: a promotion copies dev's reviewed digest in a
-deliberate pull request.
+Staging and prod are promoted by merging a pull request the bot keeps open:
+"Promote dev's images to staging" and "Promote staging's images to prod". Each
+is rebuilt after its source stage passes its smoke test, lists what every
+service brings, and merges only by hand. To hold a service back, push to its
+branch. [The decision record](docs/decisions/2026-10-automated-promotion.md)
+explains how they work.
 
 ### Confirming nothing was regenerated
 
@@ -1060,7 +1065,6 @@ See the following Linear tickets:
 - [FIL-1155](https://linear.app/filecoin-foundation/issue/FIL-1155) Own the RDS parameter group and pin `rds.force_ssl`
 - [FIL-1161](https://linear.app/filecoin-foundation/issue/FIL-1161) Verify the RDS server certificate in every Forge service
 - [FIL-1162](https://linear.app/filecoin-foundation/issue/FIL-1162) Zero-downtime upgrades of Forge Central services
-- [FIL-1158](https://linear.app/filecoin-foundation/issue/FIL-1158) Automate promotion of Forge Central from dev to staging
 
 ### Forcing a provision phase to re-run
 

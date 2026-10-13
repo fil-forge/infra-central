@@ -72,3 +72,7 @@ database security group already allows no outbound connections, so the subnets a
 in case that rule ever changes. They cost nothing. A live cluster cannot move to another subnet
 group, so the choice is made before the first apply, and it holds if the cluster carries over into
 launch.
+
+The compatibility server's pandora cluster has subnets of its own at /20 indexes 12–14, with a
+route table that the site-to-site VPN propagates into; central's database subnets stay as they are
+([2026-10-compat-server-database.md](2026-10-compat-server-database.md)).

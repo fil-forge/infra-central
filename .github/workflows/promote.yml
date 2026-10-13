@@ -1,0 +1,84 @@
+# Keeps one pull request per target stage that promotes the previous stage's
+# images, and never merges it: merging it is how a person promotes. Staging
+# takes dev's pins and prod takes staging's.
+#
+# Check and deploy calls this after a push to main, once the source stage has
+# passed its smoke test: staging's pull request after smoke-dev, prod's after
+# smoke-staging. Each is built on the commit that run deployed, so a pull
+# request only ever proposes pins its source stage has passed smoke with. A
+# manual run rebuilds one target on current main without waiting for smoke.
+#
+# What it opens, refreshes and closes: scripts/promote.sh. Why it works this
+# way: docs/decisions/2026-10-automated-promotion.md.
+name: Promote
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Stage to promote into, staging or prod
+        type: string
+        required: true
+    secrets:
+      FORGE_BOT_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Stage to promote into
+        type: choice
+        options: [staging, prod]
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Promote into ${{ inputs.target }}
+    # A promotion pull request targets main, and only main's history carries
+    # the dev bumps its change list is read from.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # One run per target at a time. Two runs would force-push the branch from
+    # two different commits, and the pull request would show whichever lost.
+    # A literal prefix, because under workflow_call github.workflow names the
+    # caller.
+    concurrency:
+      group: promote-${{ inputs.target }}
+      cancel-in-progress: false
+    steps:
+      # Not GITHUB_TOKEN: a pull request it opens or a push it makes starts no
+      # workflows, so the checks the pull request needs would never run.
+      - name: Mint fil-forge-bot token
+        id: bot
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # GitHub accepts the numeric App ID wherever it asks for the client ID.
+          client-id: ${{ vars.FORGE_BOT_APP_ID }}
+          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
+      # The commit this run deployed, not main's tip: main may have moved past
+      # it to pins the source stage has not passed smoke with yet. Full
+      # history, because each pin's source commit is read off the dev bump that
+      # first carried its digest.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ steps.bot.outputs.token }}
+
+      - name: Open, refresh or close the promotion
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          APP_SLUG: ${{ steps.bot.outputs.app-slug }}
+          TARGET: ${{ inputs.target }}
+          BASE: ${{ github.sha }}
+          # Under workflow_call the event and the run are the caller's: the push
+          # whose smoke test just passed. A manual run has none to link.
+          SMOKE_RUN_URL: >-
+            ${{ github.event_name == 'push'
+            && format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id)
+            || '' }}
+        run: scripts/promote.sh "$TARGET"
