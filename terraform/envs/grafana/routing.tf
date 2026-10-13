@@ -15,36 +15,9 @@ variable "forge_contact_point" {
 }
 
 # The tree's uid, which each rule's notification_settings.policy names.
+# scripts/check-alert-routing.sh fails plan-grafana on a rule that doesn't.
 locals {
   forge_policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
-}
-
-# Fails the plan, and so plan-grafana on a pull request, if any rule in
-# alerts.tf does not name the tree, and lists the ones that don't. One check
-# for every group, so a new grafana_rule_group has to be added to forge_rules.
-# A precondition on terraform_data rather than a check block, because a failed
-# check block is only a warning and the plan goes ahead.
-locals {
-  forge_rules = concat(
-    grafana_rule_group.central.rule,
-    grafana_rule_group.appliance.rule,
-    grafana_rule_group.appliance_containers.rule,
-    grafana_rule_group.appliance_outages.rule,
-    flatten(grafana_rule_group.usage[*].rule),
-  )
-  unrouted_rules = [
-    for r in local.forge_rules : r.name
-    if try(r.notification_settings[0].policy, null) != local.forge_policy
-  ]
-}
-
-resource "terraform_data" "forge_routing_check" {
-  lifecycle {
-    precondition {
-      condition     = length(local.unrouted_rules) == 0
-      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", local.unrouted_rules)}. Set notification_settings { policy = local.forge_policy } on each; see routing.tf."
-    }
-  }
 }
 
 resource "grafana_apps_notifications_routingtree_v1beta1" "forge" {
