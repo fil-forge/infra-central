@@ -110,9 +110,15 @@ variable "terraform_service_account_id" {
   type        = string
 }
 
+# stack_id is what the provider builds the namespace for app platform
+# resources from (routing.tf's tree): stacks-<id>. Without it the provider
+# falls back to org 1's namespace, "default", and the stack refuses every such
+# request with a 403 (Grafana's authn: "invalid namespace"). It is the stack's
+# id, not a secret.
 provider "grafana" {
-  url  = "https://filecoinfoundation.grafana.net/"
-  auth = var.grafana_auth
+  url      = "https://filecoinfoundation.grafana.net/"
+  auth     = var.grafana_auth
+  stack_id = 387458
 }
 
 # Account ids, for the rule that can tell stages apart only by account.
