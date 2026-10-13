@@ -109,10 +109,11 @@ source_commit() {
 # What a service brings between two of its commits, one line per commit, oldest
 # first. Squash-merged titles end in "(#123)", which here would link to this
 # repository's pull request 123; each is qualified with the service's
-# repository instead.
+# repository instead. Paged, because an unpaged compare stops at 250 commits
+# without saying so, and the list would quietly leave changes out.
 changes() {
   local repo=$1 from=$2 to=$3
-  gh api "repos/$repo/compare/$from...$to" \
+  gh api --paginate "repos/$repo/compare/$from...$to?per_page=100" \
     --jq '.commits[] | "- " + (.commit.message | split("\n")[0]) + " (" + .sha[0:7] + ")"' \
     | sed -E "s|\(#([0-9]+)\)|($repo#\1)|g"
 }
