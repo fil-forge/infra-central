@@ -3,10 +3,11 @@
 #
 # The filecoinfoundation stack is shared. FilOne ships metrics into it from its
 # own infrastructure, and the staging appliance's host ships Lotus, Curio and
-# Guppy telemetry through the same writer. So this root owns one folder and the
-# dashboards inside it, and the credential it runs as cannot reach past that
-# folder, except through the routing-tree role routing.tf names, which reaches
-# every notification policy tree in the stack. What may be declared here:
+# Guppy telemetry through the same writer. So this root owns the Forge folders
+# and what is inside them, and the credential it runs as cannot reach past them,
+# except through the routing-tree role routing.tf names, which reaches every
+# notification policy tree in the stack. (The provenance role alerts.tf names
+# is unscoped too, but writes nothing on its own.) What may be declared here:
 #
 #   grafana_folder, grafana_dashboard, grafana_folder_permission,
 #   grafana_rule_group, and Forge's own notification policy tree as
