@@ -1,5 +1,4 @@
-# Forge's dashboards, alert rules and notification policy tree, and nothing else
-# in the Grafana stack.
+# Forge's dashboards, alert rules, and notification policy tree
 #
 # The filecoinfoundation stack is shared. FilOne ships metrics into it from its
 # own infrastructure, and the staging appliance's host ships Lotus, Curio and
