@@ -526,13 +526,13 @@ jobs:
   # stage at once through a $stage template variable, so there is no stage deploy
   # it belongs to. It hangs off `check` and runs beside the others.
   #
-  # Off until someone sets the GRAFANA_APPLY_ENABLED repository variable, because
-  # it has two prerequisites outside this file: the GRAFANA_TERRAFORM_TOKEN
-  # secret, and "grafana" in the account bootstrap root's state_key_prefixes so
-  # the apply role can reach grafana/forge.tfstate. Without the second, every
-  # push to main would fail at `tofu init` with an access denial. Turn it on once
-  # an operator has applied the root by hand at least once and watched what it
-  # does. It is now on, so it runs on every push to main.
+  # Gated on the GRAFANA_APPLY_ENABLED repository variable, which is now set, so
+  # it runs on every push to main. It was off until then because it has two
+  # prerequisites outside this file: the GRAFANA_TERRAFORM_TOKEN secret, and
+  # "grafana" in the account bootstrap root's state_key_prefixes so the apply
+  # role can reach grafana/forge.tfstate. Without the second, every push to main
+  # would fail at `tofu init` with an access denial. It was turned on once an
+  # operator had applied the root by hand and watched what it does.
   #
   # Push only, like every apply above, and that is what keeps the Grafana token
   # away from pull requests: a job gated this way is never instantiated by a

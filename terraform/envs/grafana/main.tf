@@ -20,7 +20,7 @@
 #   grafana_team, grafana_user   shared with FilOne
 #   grafana_cloud_*              the Cloud org, not this stack
 #
-# Not in check-and-deploy.yml's per-stage plan or apply matrix, for the same
+# Not among check-and-deploy.yml's per-stage plans or applies, for the same
 # reason the state key carries no stage: there is no stage whose deploy this
 # belongs to. It has two jobs of its own there instead. plan-grafana plans every
 # pull request from a branch in this repository, with no Grafana credential and
