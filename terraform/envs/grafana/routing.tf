@@ -34,6 +34,12 @@ variable "forge_contact_point" {
   type        = string
 }
 
+# What each rule's notification_settings.policy names, and what the rule groups'
+# postconditions in alerts.tf compare it with.
+locals {
+  forge_policy = grafana_apps_notifications_routingtree_v1beta1.forge.metadata.uid
+}
+
 resource "grafana_apps_notifications_routingtree_v1beta1" "forge" {
   metadata {
     uid = "forge"

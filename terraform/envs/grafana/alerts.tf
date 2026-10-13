@@ -24,7 +24,8 @@
 #
 # Routing is in routing.tf: every rule sets notification_settings.policy to
 # Forge's own notification policy tree, declared there. A new rule needs the
-# same block, or it falls through to the stack's default tree. That still holds
+# same block, and each group's postcondition fails the plan if one lacks it;
+# without it, a rule would fall through to the stack's default tree. That still holds
 # the UI route matching team_name = "forge" that Forge used before this tree, so
 # such a rule is delivered, but grouped the old way; once that route is
 # removed, nothing in the default tree routes it.
@@ -237,6 +238,15 @@ resource "grafana_rule_group" "central" {
   name             = "Forge Central"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
+
+  # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
+  # rule added without it fails plan-grafana on its pull request.
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+    }
+  }
 
   # No healthy host behind a target group. `for` is 5m rather than the immediate
   # firing the hand-built rule had: this reads a CloudWatch metric published once
@@ -874,6 +884,15 @@ resource "grafana_rule_group" "appliance" {
   name             = "Forge Regions"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 300
+
+  # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
+  # rule added without it fails plan-grafana on its pull request.
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+    }
+  }
 
   # Two failures, not one, and they need different queries.
   #
@@ -2327,6 +2346,15 @@ resource "grafana_rule_group" "appliance_containers" {
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
 
+  # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
+  # rule added without it fails plan-grafana on its pull request.
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+    }
+  }
+
   # Absence is the signal. cAdvisor stops publishing a container's series when
   # the container goes away, so there is no value to compare against a
   # threshold; the expression tests for a series that was there and is not. The
@@ -2640,6 +2668,15 @@ resource "grafana_rule_group" "appliance_outages" {
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 60
 
+  # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
+  # rule added without it fails plan-grafana on its pull request.
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+    }
+  }
+
   # OpenBao cannot unseal, so nothing on the node can read its secrets. The
   # node auto-unseals through the transit key at Central, which it reaches with
   # the seal token, so an expired or revoked token, a missing transit key or an
@@ -2903,6 +2940,15 @@ resource "grafana_rule_group" "usage" {
   name             = "Forge Usage"
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 900
+
+  # Every rule names Forge's tree; see routing.tf. Checked at plan time, so a
+  # rule added without it fails plan-grafana on its pull request.
+  lifecycle {
+    postcondition {
+      condition     = alltrue([for r in self.rule : try(r.notification_settings[0].policy, null) == local.forge_policy])
+      error_message = "Rules not routed through Forge's notification policy tree: ${join(", ", [for r in self.rule : r.name if try(r.notification_settings[0].policy, null) != local.forge_policy])}. Give each a notification_settings block naming it, as the others have."
+    }
+  }
 
   rule {
     name           = "Trace volume is above its threshold"
