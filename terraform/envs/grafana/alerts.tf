@@ -868,34 +868,24 @@ resource "grafana_rule_group" "appliance" {
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 300
 
-  # Two failures, not one, and they need different queries.
+  # The node has gone away: nothing from its host exporter in the last fifteen
+  # minutes, though it reported some time in the last day. This is the rule
+  # that catches a whole appliance going dark: the other appliance rules read
+  # data that vanishes with the node, and are built to stay quiet when it does.
+  # It cannot tell a dead box from a live one whose host exporter or Alloy has
+  # stopped; both look the same from here, and both leave the node unwatched.
   #
-  # The timer stops but the box stays up. This is the common one, and the
-  # absence shape misses it completely: deploy_last_success_timestamp is a
-  # textfile-collector gauge (infra-nodes scripts/host/lib.sh), so node_exporter
-  # re-exports it from the stamp file on every scrape whether or not the timer
-  # ran. The series stays present and only its *value* goes stale, so
-  # present_over_time never lapses. The age is the signal, and it is the
-  # repository's own documented one -- infra-nodes docs/observability.md gives
-  # `time() - deploy_last_success_timestamp{project="reconcile"} > 15 * 60`, and
-  # the Regions dashboard's "Time since last deploy" panel draws exactly that
-  # against a 15-minute threshold line.
+  # Absence is the signal, so there is no value to compare: the expression
+  # tests for a series that was there and is not. Its 24h window is what makes
+  # it self-cleaning, since a node decommissioned longer ago than that falls out
+  # of both sides on its own. The result is 1, so the threshold stage is `gt 0`.
   #
-  # The node goes away entirely. Then there is no series to take an age of, the
-  # left side returns nothing, and no_data_state = OK would keep the rule quiet
-  # about a node that has vanished. So the absence shape is kept as the second
-  # branch of an `or`: reported some time in the last day, not in the last
-  # fifteen minutes. Its 24h window is what makes it self-cleaning, since a node
-  # decommissioned longer ago than that falls out of both sides on its own.
+  # Recovery is a no-data event: a node that reports again satisfies both
+  # present_over_time clauses, the `unless` cancels them, and nothing is left.
+  # no_data_state = OK is what turns that into Normal.
   #
-  # Either branch produces a value greater than zero -- an age in seconds, or 1
-  # -- so the threshold stage stays `gt 0` and does not care which fired.
-  #
-  # Recovery is a no-data event, not a falling value. A fresh stamp fails the
-  # `> 900` filter and the node is present again, so both branches return
-  # nothing and there is no series left to go below a threshold.
-  # no_data_state = OK is what turns that into Normal; Alerting or NoData here
-  # would leave the rule firing after the node had recovered.
+  # Critical: a node that has gone dark may be serving nothing, and nothing
+  # else would say so.
   rule {
     name           = "Appliance has stopped reporting"
     condition      = "C"
@@ -905,7 +895,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
-      description      = "The reconcile stamp is more than fifteen minutes old, or the node has stopped reporting altogether. The timer runs every five, so either the node has stopped reconciling or its telemetry has stopped arriving."
+      description      = "Nothing from this node's host exporter has arrived for fifteen minutes. Either the node is down or unreachable, or its host exporter or Alloy has stopped, and the dashboards can no longer tell which."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
       __dashboardUid__ = "forge-regions"
@@ -938,21 +928,128 @@ resource "grafana_rule_group" "appliance" {
         range        = true
         legendFormat = "{{appliance}}"
         expr         = <<-PROMQL
-          (
-            max by (node, region, appliance) (
-              time() - deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}
-            ) > 900
+          max by (node, region, appliance) (
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
           )
-          or
-          (
-            max by (node, region, appliance) (
-              present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
-            )
-            unless
-            max by (node, region, appliance) (
-              present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
-            )
+          unless
+          max by (node, region, appliance) (
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
           )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "reduce"
+        expression    = "A"
+        reducer       = "last"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+      })
+    }
+
+    data {
+      ref_id         = "C"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "B"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The reconcile timer has stopped but the box stays up. This is the common
+  # failure, and absence misses it completely: deploy_last_success_timestamp is
+  # a textfile-collector gauge (infra-nodes scripts/host/lib.sh), so
+  # node_exporter re-exports it from the stamp file on every scrape whether or
+  # not the timer ran. The series stays present and only its *value* goes
+  # stale, so the rule above never fires. The age is the signal, and it is the
+  # repository's own documented one -- infra-nodes docs/observability.md gives
+  # `time() - deploy_last_success_timestamp{project="reconcile"} > 15 * 60`, and
+  # the Regions dashboard's "Time since last deploy" panel draws exactly that
+  # against a 15-minute threshold line.
+  #
+  # The two rules do not overlap: this one needs the series present, the one
+  # above needs it absent. Recovery is a no-data event here too, since a fresh
+  # stamp fails the `> 900` filter, so no_data_state = OK is again what clears it.
+  #
+  # A warning, not critical: the node keeps serving what it already runs, and
+  # what it misses is deploys, which can wait for working hours.
+  rule {
+    name           = "Appliance has stopped reconciling"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reconciling"
+      description      = "The node is still reporting, but its reconcile stamp is more than fifteen minutes old. The timer runs every five, so the node has stopped applying deploys: it keeps serving what it already runs, and new releases and config do not reach it."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "13"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = false
+        range        = true
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          max by (node, region, appliance) (
+            time() - deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}
+          ) > 900
         PROMQL
       }))
     }
