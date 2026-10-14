@@ -157,4 +157,9 @@ module "platform" {
   # Two static addresses an appliance operator can allowlist once, and an edge
   # that takes a flood before the load balancer does. Dev has neither need.
   enable_global_accelerator = true
+
+  # Bumped to move the identity and wallet keys from SSM to Secrets Manager. The
+  # seed phase re-runs only when its input changes, so the bump has to land with
+  # the provision build that does the move.
+  seed_trigger = "2"
 }
