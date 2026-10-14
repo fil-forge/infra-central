@@ -97,9 +97,9 @@ module "platform" {
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.
-  db_instance_class        = "db.t4g.micro"
-  db_multi_az              = false
-  db_backup_retention_days = 1
+  db_instance_class = "db.t4g.micro"
+  db_multi_az       = false
+  pitr_window_days  = 1
 
   # Lets a dev stage actually be destroyed. Note that destroying it does not
   # remove the SSM parameters: the provision Lambda creates them, not
@@ -113,7 +113,8 @@ module "platform" {
   # Both invocations re-run only when their input changes, so replacing the
   # RDS instance does not run them on its own: the fresh instance would get no
   # databases and OpenBao would never be initialised. Bump both together on
-  # every dev reset. See docs/dev-reset.md.
-  seed_trigger  = "5"
+  # every dev reset. See docs/dev-reset.md. seed_trigger was bumped alone once,
+  # to move the identity and wallet keys from SSM to Secrets Manager.
+  seed_trigger  = "6"
   vault_trigger = "5"
 }

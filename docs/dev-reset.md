@@ -17,14 +17,16 @@ instance goes until the apply brings it back, which is fine in dev.
 ## What survives
 
 - **`signing-service/payer-key` and `delegator/transactor-key`.** Real funds
-  live at these addresses, and nothing here deletes or rotates them. Check both
+  live at these addresses, and nothing here deletes or rotates them. Both are
+  Secrets Manager secrets, and their addresses are SSM parameters. Check both
   balances before starting:
 
   ```bash
   aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
   aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
   ```
-- **Every central service's `identity` key and `postgres-dsn`.** The seed phase
+- **Every central service's `identity` key and `postgres-dsn`.** The identity
+  keys are Secrets Manager secrets, which the reset does not touch. The seed phase
   recreates each role on the new instance and applies the stored password
   unconditionally, so the DSNs the services already read keep working.
 - **`openbao/root-token`, `openbao/recovery-keys`, `hilt/vault-secret-id`.**
@@ -44,7 +46,7 @@ instance goes until the apply brings it back, which is fine in dev.
   `swarf`, `plc` and `openbao`, plus the master secret RDS manages.
 - The delegator's two DynamoDB tables. The allow list holds the old node's Piri
   DID, and recreating both empty costs nothing.
-- sprue's three S3 buckets. They hold no version history, so this is not
+- sprue's two S3 buckets. They hold no version history, so this is not
   reversible.
 - Two SSM entries under the region's prefix: the stored delegation
   `hilt-ingot-s3-proof` with its `.issuer` sidecar, and every Piri DID recorded
@@ -85,7 +87,7 @@ for table in fc-dev-delegator-allow-list fc-dev-delegator-provider-info; do
     --query 'TableDescription.TableStatus' --output text
 done
 
-for bucket in agent-message delegation upload-shards; do
+for bucket in agent-message delegation; do
   aws s3 rm "s3://fc-dev-${bucket}-${ACCOUNT}" --recursive
 done
 ```

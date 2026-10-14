@@ -24,6 +24,7 @@ output "platform" {
     openbao_internal_address  = module.platform.openbao_internal_address
     chain                     = module.platform.chain
     log_forwarding            = module.platform.log_forwarding
+    secret_arns               = module.platform.secret_arns
   }
 }
 

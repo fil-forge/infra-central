@@ -162,6 +162,12 @@ variable "sprue_postgres_max_conns" {
   default     = null
 }
 
+variable "secret_arns" {
+  description = "Service to key name to the full ARN of the Secrets Manager secret holding that identity or wallet key, from the platform root's seed result. A key missing here is read from its SSM parameter, as on a stage whose seed phase has not yet moved it."
+  type        = map(map(string))
+  default     = {}
+}
+
 variable "log_forwarding" {
   description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, read from the platform root's outputs and passed to every service. Null leaves the log groups in CloudWatch only."
   type = object({

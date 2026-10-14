@@ -25,14 +25,23 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# The scoping that matters: /forge-central/<stage>/<service>/* and nothing
-# else. A compromised sprue task cannot read hilt's AppRole secret_id, the
-# delegator's transactor key, or the OpenBao root token.
+# The scoping that matters: forge-central/<stage>/<service>/* and nothing
+# else, in SSM and in Secrets Manager alike. A compromised sprue task cannot
+# read hilt's AppRole secret_id, the delegator's transactor key, or the OpenBao
+# root token.
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     sid       = "ReadOwnParameters"
     actions   = ["ssm:GetParameters", "ssm:GetParameter"]
     resources = [local.ssm_prefix_arn]
+  }
+
+  # Identity and wallet keys, which the provision Lambda keeps in Secrets
+  # Manager.
+  statement {
+    sid       = "ReadOwnKeys"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [local.secret_prefix_arn]
   }
 
   # Parameters are encrypted under the account's AWS-managed SSM key, which has
@@ -48,6 +57,19 @@ data "aws_iam_policy_document" "execution_secrets" {
       test     = "StringEquals"
       variable = "kms:ViaService"
       values   = ["ssm.${var.region}.amazonaws.com"]
+    }
+  }
+
+  # The same bound as above, for the AWS-managed Secrets Manager key.
+  statement {
+    sid       = "DecryptOwnKeys"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${var.region}.amazonaws.com"]
     }
   }
 }

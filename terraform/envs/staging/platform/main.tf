@@ -97,10 +97,10 @@ module "platform" {
 
   # Staging keeps one database instance, while giving the shared Postgres and
   # OpenBao workload twice dev's memory and connection budget.
-  db_instance_class        = "db.t4g.small"
-  db_allocated_storage     = 20
-  db_multi_az              = false
-  db_backup_retention_days = 7
+  db_instance_class    = "db.t4g.small"
+  db_allocated_storage = 20
+  db_multi_az          = false
+  pitr_window_days     = 7
 
   # Staging holds the root of trust for an appliance. Protect its RDS instance,
   # ALB and DynamoDB tables from deletion, retain a final database snapshot and
@@ -113,6 +113,7 @@ module "platform" {
 
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
-  # hostname migration must explicitly replace them.
-  seed_trigger = "3"
+  # hostname migration must explicitly replace them. Bumped again to move the
+  # identity and wallet keys from SSM to Secrets Manager.
+  seed_trigger = "4"
 }

@@ -123,11 +123,11 @@ module "platform" {
   # credits within hours. The reader takes the writer's load after a failover,
   # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
   # arithmetic and the costs.
-  db_engine                = "aurora"
-  db_instance_class        = "db.r8g.large"
-  db_instance_count        = 2
-  db_backup_retention_days = 35
-  db_kms_key_arn           = data.aws_kms_alias.aurora.target_key_arn
+  db_engine         = "aurora"
+  db_instance_class = "db.r8g.large"
+  db_instance_count = 2
+  pitr_window_days  = 35
+  db_kms_key_arn    = data.aws_kms_alias.aurora.target_key_arn
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
