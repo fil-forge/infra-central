@@ -2228,12 +2228,19 @@ resource "grafana_rule_group" "appliance" {
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
+  #
+  # Paused until Piri's Curio dependency parses PiecesAddedV2 events
+  # (FIL-1222). Until then Piri never records the pieces it adds, every Prove
+  # run fails with "no subpiece found", and this rule would keep paging
+  # on-call for that known bug. The pull request that deploys the fix removes
+  # is_paused.
   rule {
     name           = "Piri's Prove task has not run in 1.5 proving periods"
     condition      = "B"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Error"
+    is_paused      = true
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
