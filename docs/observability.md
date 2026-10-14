@@ -91,14 +91,14 @@ the label, that keeps staging from paging.
 - **`critical`**: customers are affected now, or a loss is building up that
   would grow before anyone saw it in working hours. Data at risk counts, and so
   does revenue lost for each proving period Piri leaves unproven. Pages in
-  production.
+  production, and when the alert has no `stage`.
 - **`warning`**: needs attention the same or the next working day. Notifies.
 - **`info`**: a trend to look at; nobody needs to act on it right away. IRM's
   routes can treat it more quietly than a warning.
 
-A new rule is `critical` only when a person paged now can do something about it
-and waiting until working hours would cost something hard to recover. Otherwise
-it is a `warning`.
+A rule is `critical` only when a person paged now can do something about it and
+waiting until working hours would cost something hard to recover. Otherwise it
+is a `warning`, or `info` if nobody needs to act on it.
 
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
