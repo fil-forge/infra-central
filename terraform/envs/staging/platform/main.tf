@@ -113,7 +113,6 @@ module "platform" {
 
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
-  # hostname migration must explicitly replace them. Bumped again to move the
-  # identity and wallet keys from SSM to Secrets Manager.
-  seed_trigger = "4"
+  # hostname migration must explicitly replace them.
+  seed_trigger = "3"
 }
