@@ -111,6 +111,11 @@ appliance label.
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
 
+"Piri's Prove task has not run in 1.5 proving periods" stays paused until Piri's Curio dependency
+parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with "no subpiece found".
+The pull request that deploys the fix removes its `is_paused = true` in
+`terraform/envs/grafana/alerts.tf`.
+
 ## Logs
 
 One service:
