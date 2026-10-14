@@ -60,6 +60,38 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
+  # The service identities and the two wallets. The function creates each one
+  # once and never deletes any; rotating a key is an operator's act. Seeding a
+  # stage that predates the move also copies each key out of SSM, which is what
+  # the ssm:DeleteParameters grant above then removes.
+  statement {
+    sid = "ManageStageKeys"
+
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:PutSecretValue",
+    ]
+
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:forge-central/${var.stage}/*",
+    ]
+  }
+
+  # The keys take the account's AWS-managed Secrets Manager key, for the same
+  # reason the SecureStrings take the AWS-managed SSM key.
+  statement {
+    sid       = "EncryptAndDecryptKeys"
+    actions   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+    }
+  }
+
   # The delegator's allow list, written by the onboard phase. An appliance whose
   # DID is absent from it is refused at `piri init` with a 403, and the
   # delegator's own CLI needs a shell in its task that no service exposes.

@@ -32,7 +32,7 @@ const (
 //
 // It signs as sprue and as hilt, because that is what their admin APIs require:
 // an invocation is refused unless its issuer is the service's own DID. Those keys
-// live in SSM and are readable only by this function, which is the reason the
+// live in Secrets Manager and are readable only by this function, which is the reason the
 // writes happen here rather than on an operator's machine.
 func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error) {
 	if err := validateOnboardRequest(req); err != nil {
@@ -237,10 +237,11 @@ func (d *deps) applianceProofIssuer(hiltDIDWeb string) func(context.Context, str
 	return func(ctx context.Context, region, ingotDID string) (string, error) {
 		proof := keygen.HiltIngotS3Proof(applianceService(region), hiltDIDWeb, ingotDID)
 
-		hiltPEM, err := d.store.GetSecret(ctx, "hilt", "identity")
+		hiltKey, err := d.keys.Get(ctx, "hilt", "identity")
 		if err != nil {
 			return "", fmt.Errorf("read hilt's identity to sign the proof: %w", err)
 		}
+		hiltPEM := hiltKey.Value
 		hiltIdentity, err := keygen.ParseIdentity([]byte(hiltPEM))
 		if err != nil {
 			return "", fmt.Errorf("derive hilt's key DID: %w", err)
@@ -297,12 +298,12 @@ func (d *deps) recordProofIssuer(ctx context.Context, proof keygen.Proof, issuer
 // serviceIssuer builds an issuer that signs with a service's key and presents
 // its did:web, which is the identity its admin API checks against.
 func (d *deps) serviceIssuer(ctx context.Context, service string) (ucan.Issuer, string, error) {
-	pem, err := d.store.GetSecret(ctx, service, "identity")
+	key, err := d.keys.Get(ctx, service, "identity")
 	if err != nil {
 		return nil, "", fmt.Errorf("read %s's identity: %w", service, err)
 	}
 
-	signer, err := identity.DecodeSignerFromPEM([]byte(pem))
+	signer, err := identity.DecodeSignerFromPEM([]byte(key.Value))
 	if err != nil {
 		return nil, "", fmt.Errorf("decode %s's identity: %w", service, err)
 	}

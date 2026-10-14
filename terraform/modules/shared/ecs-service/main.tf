@@ -55,7 +55,8 @@ locals {
     local.wrapper_prelude == "" ? var.shell_command : "${local.wrapper_prelude} && exec ${var.shell_command}"
   )
 
-  ssm_prefix_arn = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge-central/${var.stage}/${var.service}/*"
+  ssm_prefix_arn    = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/forge-central/${var.stage}/${var.service}/*"
+  secret_prefix_arn = "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:forge-central/${var.stage}/${var.service}/*"
 }
 
 resource "aws_cloudwatch_log_group" "this" {

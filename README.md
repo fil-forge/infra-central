@@ -55,19 +55,19 @@ at `upload`, `auth` and `revoke`, as specified by the
 
 ## Architecture decisions
 
-| Decision                                        | Why                                                                                                                                                                                                                             |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                     |
-| **SSM Parameter Store, per-service prefixes**   | Each task execution role reads only `/forge-central/<stage>/<service>/*`. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. smelt's 1Password item is all-or-nothing by comparison. |
-| **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                   |
-| **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                               |
-| **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                      |
-| **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                        |
-| **Two roots per stage**                         | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                            |
-| **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                        |
-| **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                          |
-| **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                        |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                           |
+| Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, which can be replicated to a DR region; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
+| **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
+| **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
+| **Directory per stage over shared modules**     | Each stage's root says what differs and nothing else; the shared modules stop the stages drifting apart.                                                                                                                                                                                                                             |
+| **Two roots per stage**                         | `platform` holds the VPC, RDS, OpenBao and ingress; `apps` holds the services. A routine image bump plans in seconds and never touches the database.                                                                                                                                                                                 |
+| **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
+| **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
+| **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
+| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                                                                                                                                |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -318,14 +318,24 @@ cannot be one central certificate:
 
 ## What survives a destroy
 
-**`terraform destroy` deletes no parameter this project generates.** The
-provision Lambda creates them, so Terraform has no record of them and never
+**`terraform destroy` deletes no parameter or secret this project generates.**
+The provision Lambda creates them, so Terraform has no record of them and never
 removes them. An accidental destroy therefore cannot burn a funded wallet or
 invalidate a DID that storage providers have already registered against.
 
-They also stay readable, which takes deliberate arrangement. SecureStrings are
-encrypted under the account's AWS-managed SSM key rather than the stage's own
-customer-managed key. The stage's key is destroyed with the stage, and a key in
+The service identities and the two wallets are Secrets Manager secrets under
+`forge-central/<stage>/<service>/`. Everything else is an SSM parameter under
+`/forge-central/<stage>/<service>/`.
+
+A stage seeded before the keys moved holds them as SSM SecureStrings. Its next
+seed run copies each key into Secrets Manager, checks the DID or address the copy
+derives against the SSM record, and only then deletes the SecureString. A
+mismatch fails the run and leaves SSM untouched. Until a stage's seed result
+lists a key's secret, the apps root keeps pointing ECS at the SSM parameter.
+
+They also stay readable, which takes deliberate arrangement. SecureStrings and
+secrets are encrypted under the account's AWS-managed SSM and Secrets Manager
+keys rather than the stage's own customer-managed key. The stage's key is destroyed with the stage, and a key in
 PendingDeletion stops serving decryption at once, so tying the parameters to it
 would leave every secret unreadable the moment the stage came down and would
 fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
@@ -342,10 +352,12 @@ assuming a rebuilt stage is fresh:
 ```bash
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text
+aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text
 ```
 
-To retire a stage, delete the parameters after the destroy, having first
-confirmed the wallets hold no funds:
+To retire a stage, delete the parameters and secrets after the destroy, having
+first confirmed the wallets hold no funds:
 
 ```bash
 # Check the balances first. This is not reversible.
@@ -355,6 +367,9 @@ aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
+aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text \
+  | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
 ```
 
 In staging and prod, the platform root refuses to destroy at all. Sprue's buckets
@@ -913,7 +928,11 @@ tofu -chdir=terraform/envs/dev/platform output created_parameters
 
 Empty means every key already existed and was reused. A non-empty list after
 the first apply of a stage means something was minted; find out what before
-assuming a wallet is intact.
+assuming a wallet is intact. The list names SSM parameters and, for identities
+and wallets, Secrets Manager secrets.
+
+A key the seed phase moved out of SSM is reused, not minted, so moving the keys
+leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
 ### Smoke-testing a stage
 
@@ -957,15 +976,22 @@ stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
-Delete the parameter:
+Delete the secret, skipping the recovery window:
 
 ```bash
-aws ssm delete-parameter --name /forge-central/dev/swarf/identity
+aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+  --force-delete-without-recovery
 ```
+
+A plain `delete-secret` keeps the name reserved for at least seven days, and the
+seed phase fails to mint the new key until the window ends. The forced delete
+cannot be undone, so check the stage name first. For the delegator and the
+signing service, delete `identity-multibase` too; the seed phase rewrites it from
+the new key either way.
 
 Then force the seed phase to run again. A plain run will not do it: the phase is
 an `aws_lambda_invocation`, which re-invokes only when its input changes, and
-deleting a parameter changes nothing Terraform can see. See [Forcing a provision
+deleting a secret changes nothing Terraform can see. See [Forcing a provision
 phase to re-run](#forcing-a-provision-phase-to-re-run).
 
 The new DID appears in `service_dids`, and the rotation also refreshes

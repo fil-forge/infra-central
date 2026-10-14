@@ -44,10 +44,11 @@ func (d *deps) fund(ctx context.Context, req Request) (*Response, error) {
 		ForceDeposit:    req.ForceDeposit,
 	}
 
-	payerKey, err := d.store.GetSecret(ctx, "signing-service", "payer-key")
+	payer, err := d.keys.Get(ctx, "signing-service", "payer-key")
 	if err != nil {
 		return nil, fmt.Errorf("read the payer key: %w", err)
 	}
+	payerKey := payer.Value
 
 	// Without an explicit confirmation this reports what it would do and signs
 	// nothing. The operator sees the plan first, every time.

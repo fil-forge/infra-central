@@ -36,6 +36,7 @@ import (
 
 	"github.com/fil-forge/infra-central/internal/fund"
 	"github.com/fil-forge/infra-central/internal/onboard"
+	"github.com/fil-forge/infra-central/internal/secretstore"
 	"github.com/fil-forge/infra-central/internal/ssmstore"
 )
 
@@ -130,9 +131,12 @@ type Response struct {
 	DIDs map[string]string `json:"dids,omitempty"`
 	// Addresses maps a wallet name to its EIP-55 address, the value to fund.
 	Addresses map[string]string `json:"addresses,omitempty"`
+	// Secrets maps a service and key name to the full ARN of the Secrets
+	// Manager secret holding it. The apps root hands these to ECS.
+	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
-	// Created lists parameters this invocation minted. On a steady-state apply
+	// Created lists parameters and secrets this invocation minted. On a steady-state apply
 	// it is empty, which is the signal that nothing was regenerated.
 	Created []string `json:"created"`
 
@@ -185,10 +189,12 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
 
+	secretsClient := secretsmanager.NewFromConfig(awsCfg)
 	deps := &deps{
 		cfg:     cfg,
 		store:   ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
-		secrets: secretsmanager.NewFromConfig(awsCfg),
+		keys:    secretstore.New(secretsClient, cfg.Stage),
+		secrets: secretsClient,
 	}
 
 	// Every log line here announces the step about to start, never the one
@@ -242,9 +248,23 @@ func throttleTolerantRetries(o *ssm.Options) {
 	})
 }
 
-// deps is what both phases need: configuration and the two AWS clients.
+// deps is what every phase needs: configuration, the two stores and the
+// Secrets Manager client that reads the RDS master secret.
 type deps struct {
-	cfg     config
-	store   *ssmstore.Store
+	cfg   config
+	store *ssmstore.Store
+	// keys holds the service identities and the wallets.
+	keys    *secretstore.Store
 	secrets *secretsmanager.Client
+}
+
+// addSecret records the ARN of a secret the seed phase ensured.
+func (r *Response) addSecret(service, name, arn string) {
+	if r.Secrets == nil {
+		r.Secrets = map[string]map[string]string{}
+	}
+	if r.Secrets[service] == nil {
+		r.Secrets[service] = map[string]string{}
+	}
+	r.Secrets[service][name] = arn
 }

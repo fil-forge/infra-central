@@ -47,7 +47,7 @@ variable "environment" {
 }
 
 variable "secrets" {
-  description = "Environment variable name to SSM parameter ARN. ECS resolves these at task start."
+  description = "Environment variable name to SSM parameter ARN or full Secrets Manager secret ARN. ECS resolves these at task start."
   type        = map(string)
   default     = {}
 }
