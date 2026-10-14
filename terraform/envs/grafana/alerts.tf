@@ -874,6 +874,8 @@ resource "grafana_rule_group" "appliance" {
   # data that vanishes with the node, and are built to stay quiet when it does.
   # It cannot tell a dead box from a live one whose host exporter or Alloy has
   # stopped; both look the same from here, and both leave the node unwatched.
+  # A live node whose reconcile stamp has gone stale is "Appliance has stopped
+  # reconciling", at the end of this group.
   #
   # Absence is the signal, so there is no value to compare: the expression
   # tests for a series that was there and is not. Its 24h window is what makes
