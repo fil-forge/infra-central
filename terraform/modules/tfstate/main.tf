@@ -25,10 +25,10 @@ resource "aws_s3_bucket" "this" {
   tags = { Name = var.bucket_name }
 }
 
-# Unlike the stage buckets in modules/platform/storage, versioning here is the
-# point. A state file is not reproducible from anything else, and the failure
-# this protects against is real: a half-written state, or an operator pushing
-# the wrong file, is recoverable only from a previous version.
+# Versioning here is the point. A state file is not reproducible from anything
+# else, and the failure this protects against is real: a half-written state, or
+# an operator pushing the wrong file, is recoverable only from a previous
+# version.
 resource "aws_s3_bucket_versioning" "this" {
   bucket = aws_s3_bucket.this.id
 

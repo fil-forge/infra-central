@@ -97,10 +97,10 @@ module "platform" {
 
   # Staging keeps one database instance, while giving the shared Postgres and
   # OpenBao workload twice dev's memory and connection budget.
-  db_instance_class        = "db.t4g.small"
-  db_allocated_storage     = 20
-  db_multi_az              = false
-  db_backup_retention_days = 7
+  db_instance_class    = "db.t4g.small"
+  db_allocated_storage = 20
+  db_multi_az          = false
+  pitr_window_days     = 7
 
   # Staging holds the root of trust for an appliance. Protect its RDS instance,
   # ALB and DynamoDB tables from deletion, retain a final database snapshot and
