@@ -132,8 +132,12 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		Created:   []string{},
 	}
 
+	// Keys copied out of SSM, whose SSM copies are deleted only once everything
+	// else here has succeeded.
+	var movedKeys []keySpec
+
 	slog.Info("ensuring service identities", "services", len(identityServices))
-	freshIdentities, err := d.seedIdentities(ctx, resp)
+	freshIdentities, err := d.seedIdentities(ctx, resp, &movedKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +148,7 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 	}
 
 	slog.Info("ensuring wallets", "wallets", len(wallets))
-	if err := d.seedWallets(ctx, resp); err != nil {
+	if err := d.seedWallets(ctx, resp, &movedKeys); err != nil {
 		return nil, err
 	}
 
@@ -180,6 +184,11 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		resp.Databases = append(resp.Databases, pandoraDatabase)
 	}
 
+	slog.Info("deleting keys moved out of SSM", "keys", len(movedKeys))
+	if err := deleteMovedKeys(ctx, d.store, movedKeys); err != nil {
+		return nil, err
+	}
+
 	slog.Info("seed complete",
 		"created", len(resp.Created),
 		"identities", len(resp.DIDs),
@@ -189,11 +198,12 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 
 // seedIdentities returns the set of services whose key was minted this run, so
 // that the proofs those keys sign can be re-issued.
-func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]bool, error) {
+func (d *deps) seedIdentities(ctx context.Context, resp *Response, movedKeys *[]keySpec) (map[string]bool, error) {
 	fresh := map[string]bool{}
 
 	for _, service := range identityServices {
-		stored, created, err := ensureKey(ctx, d.keys, d.store, identitySpec(service), func() (string, error) {
+		spec := identitySpec(service)
+		stored, created, moved, err := ensureKey(ctx, d.keys, d.store, spec, func() (string, error) {
 			id, err := keygen.GenerateIdentity()
 			if err != nil {
 				return "", err
@@ -202,6 +212,9 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ensure identity for %s: %w", service, err)
+		}
+		if moved {
+			*movedKeys = append(*movedKeys, spec)
 		}
 		resp.addSecret(service, "identity", stored.ARN)
 
@@ -313,9 +326,9 @@ func (d *deps) seedProofs(ctx context.Context, resp *Response, freshIdentities m
 	return nil
 }
 
-func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
+func (d *deps) seedWallets(ctx context.Context, resp *Response, movedKeys *[]keySpec) error {
 	for _, spec := range wallets {
-		stored, created, err := ensureKey(ctx, d.keys, d.store, spec.keySpec(), func() (string, error) {
+		stored, created, moved, err := ensureKey(ctx, d.keys, d.store, spec.keySpec(), func() (string, error) {
 			w, err := keygen.GenerateEVMWallet()
 			if err != nil {
 				return "", err
@@ -324,6 +337,9 @@ func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
 		})
 		if err != nil {
 			return fmt.Errorf("ensure wallet %s/%s: %w", spec.service, spec.name, err)
+		}
+		if moved {
+			*movedKeys = append(*movedKeys, spec.keySpec())
 		}
 		resp.addSecret(spec.service, spec.name, stored.ARN)
 

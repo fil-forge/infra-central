@@ -328,9 +328,10 @@ The service identities and the two wallets are Secrets Manager secrets under
 `/forge-central/<stage>/<service>/`.
 
 A stage seeded before the keys moved holds them as SSM SecureStrings. Its next
-seed run copies each key into Secrets Manager, checks the DID or address the copy
-derives against the SSM record, and only then deletes the SecureString. A
-mismatch fails the run and leaves SSM untouched. Until a stage's seed result
+seed run copies each key into Secrets Manager and checks the DID or address the
+copy derives against the SSM record. It deletes the SecureStrings last, once the
+rest of the run has succeeded, so a failed run leaves ECS's parameters in place.
+A mismatch fails the run and leaves SSM untouched. Until a stage's seed result
 lists a key's secret, the apps root keeps pointing ECS at the SSM parameter.
 
 They also stay readable, which takes deliberate arrangement. SecureStrings and

@@ -72,10 +72,12 @@ var testKeySpec = keySpec{
 	legacyNames: []string{"key", "key-copy"},
 }
 
-// keyMoveOutcome is everything ensureKey can change, compared in one go.
+// keyMoveOutcome is everything ensureKey can change or report, compared in one
+// go.
 type keyMoveOutcome struct {
 	Failed  bool
 	Created bool
+	Moved   bool
 	Secrets map[string]string
 	SSM     map[string]string
 }
@@ -89,13 +91,14 @@ func TestEnsureKey(t *testing.T) {
 		wantResult keyMoveOutcome
 	}{
 		{
-			name:    "copies a key found only in SSM and deletes every SSM copy",
+			name:    "copies a key found only in SSM and leaves the SSM copies for later",
 			secrets: map[string]string{},
 			ssm:     map[string]string{"svc/key": "k1", "svc/key-copy": "k1-copy"},
 			public:  map[string]string{"svc/key.address": "public-of-k1"},
 			wantResult: keyMoveOutcome{
+				Moved:   true,
 				Secrets: map[string]string{"svc/key": "k1"},
-				SSM:     map[string]string{},
+				SSM:     map[string]string{"svc/key": "k1", "svc/key-copy": "k1-copy"},
 			},
 		},
 		{
@@ -121,13 +124,14 @@ func TestEnsureKey(t *testing.T) {
 			},
 		},
 		{
-			name:    "finishes a move that stopped before deleting the SSM copy",
+			name:    "reports a move that stopped before deleting the SSM copy",
 			secrets: map[string]string{"svc/key": "k1"},
 			ssm:     map[string]string{"svc/key": "k1"},
 			public:  map[string]string{"svc/key.address": "public-of-k1"},
 			wantResult: keyMoveOutcome{
+				Moved:   true,
 				Secrets: map[string]string{"svc/key": "k1"},
-				SSM:     map[string]string{},
+				SSM:     map[string]string{"svc/key": "k1"},
 			},
 		},
 		{
@@ -169,11 +173,11 @@ func TestEnsureKey(t *testing.T) {
 			keys := &fakeKeys{values: tc.secrets}
 			legacy := &fakeLegacy{secrets: tc.ssm, public: tc.public}
 
-			_, created, err := ensureKey(context.Background(), keys, legacy, testKeySpec, func() (string, error) {
+			_, created, moved, err := ensureKey(context.Background(), keys, legacy, testKeySpec, func() (string, error) {
 				return "minted", nil
 			})
 
-			got := keyMoveOutcome{Failed: err != nil, Created: created, Secrets: keys.values, SSM: legacy.secrets}
+			got := keyMoveOutcome{Failed: err != nil, Created: created, Moved: moved, Secrets: keys.values, SSM: legacy.secrets}
 			if !reflect.DeepEqual(got, tc.wantResult) {
 				t.Errorf("ensureKey() outcome = %+v, want %+v (err = %v)", got, tc.wantResult, err)
 			}
@@ -188,7 +192,7 @@ func TestEnsureKeyNeverPutsTheKeyInAnError(t *testing.T) {
 		public:  map[string]string{"svc/key.address": "public-of-other"},
 	}
 
-	_, _, err := ensureKey(context.Background(), keys, legacy, testKeySpec, func() (string, error) {
+	_, _, _, err := ensureKey(context.Background(), keys, legacy, testKeySpec, func() (string, error) {
 		return "minted", nil
 	})
 	if err == nil {
@@ -196,6 +200,20 @@ func TestEnsureKeyNeverPutsTheKeyInAnError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "very-secret-value") {
 		t.Errorf("ensureKey() error %q contains the key", err)
+	}
+}
+
+func TestDeleteMovedKeysDeletesEveryLegacyName(t *testing.T) {
+	legacy := &fakeLegacy{
+		secrets: map[string]string{"svc/key": "k1", "svc/key-copy": "k1-copy", "svc/other": "kept"},
+		public:  map[string]string{},
+	}
+
+	if err := deleteMovedKeys(context.Background(), legacy, []keySpec{testKeySpec}); err != nil {
+		t.Fatalf("deleteMovedKeys() error = %v", err)
+	}
+	if want := map[string]string{"svc/other": "kept"}; !reflect.DeepEqual(legacy.secrets, want) {
+		t.Errorf("SSM after deleteMovedKeys() = %v, want %v", legacy.secrets, want)
 	}
 }
 

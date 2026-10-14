@@ -40,25 +40,30 @@ type keyStore interface {
 }
 
 // ensureKey returns the key held in Secrets Manager, minting it only when it
-// exists nowhere, and reports whether this call minted it.
+// exists nowhere, and reports whether this call minted it and whether SSM still
+// holds copies to delete.
 //
 // Stages seeded before the keys moved still hold them as SSM SecureStrings.
-// Such a key is copied into Secrets Manager, checked against its public record,
-// and only then deleted from SSM, so each key has exactly one home afterwards.
-// A copied key is not reported as minted: its DID or address is unchanged, and
-// so are the proofs it signed.
+// Such a key is copied into Secrets Manager and checked against its public
+// record. A copied key is not reported as minted: its DID or address is
+// unchanged, and so are the proofs it signed.
+//
+// The SSM copies are left in place. Until the apps root applies, ECS still reads
+// them, and the apps apply runs only if the platform apply succeeds, so the
+// caller deletes them with deleteMovedKeys once the rest of the seed phase has
+// succeeded.
 //
 // The key's value never reaches a log line or an error message.
-func ensureKey(ctx context.Context, keys keyStore, legacy legacyStore, spec keySpec, generate func() (string, error)) (secretstore.Secret, bool, error) {
+func ensureKey(ctx context.Context, keys keyStore, legacy legacyStore, spec keySpec, generate func() (string, error)) (secret secretstore.Secret, created, moved bool, err error) {
 	secretName := spec.service + "/" + spec.name
 
 	secret, found, err := keys.Lookup(ctx, spec.service, spec.name)
 	if err != nil {
-		return secretstore.Secret{}, false, err
+		return secretstore.Secret{}, false, false, err
 	}
 	legacyValue, legacyFound, err := legacy.LookupSecret(ctx, spec.service, spec.legacyNames[0])
 	if err != nil {
-		return secretstore.Secret{}, false, err
+		return secretstore.Secret{}, false, false, err
 	}
 
 	switch {
@@ -66,40 +71,50 @@ func ensureKey(ctx context.Context, keys keyStore, legacy legacyStore, spec keyS
 		// An earlier run copied the key and stopped before deleting the
 		// parameter. Deleting is safe only if the two still agree.
 		if secret.Value != legacyValue {
-			return secretstore.Secret{}, false, fmt.Errorf(
+			return secretstore.Secret{}, false, false, fmt.Errorf(
 				"%s differs between Secrets Manager and SSM; refusing to delete either, resolve it by hand", secretName)
 		}
+		return secret, false, true, nil
 
 	case found:
-		return secret, false, nil
+		return secret, false, false, nil
 
 	case legacyFound:
 		if err := checkPublicRecord(ctx, legacy, spec, legacyValue); err != nil {
-			return secretstore.Secret{}, false, err
+			return secretstore.Secret{}, false, false, err
 		}
 		slog.Info("copying key from SSM to Secrets Manager", "key", secretName)
 		secret, _, err = keys.Create(ctx, spec.service, spec.name, legacyValue)
 		if err != nil {
-			return secretstore.Secret{}, false, err
+			return secretstore.Secret{}, false, false, err
 		}
 		if secret.Value != legacyValue {
-			return secretstore.Secret{}, false, fmt.Errorf(
+			return secretstore.Secret{}, false, false, fmt.Errorf(
 				"%s was created concurrently with a different value; refusing to delete the SSM copy", secretName)
 		}
+		return secret, false, true, nil
 
 	default:
 		value, err := generate()
 		if err != nil {
-			return secretstore.Secret{}, false, fmt.Errorf("generate %s: %w", secretName, err)
+			return secretstore.Secret{}, false, false, fmt.Errorf("generate %s: %w", secretName, err)
 		}
-		return keys.Create(ctx, spec.service, spec.name, value)
+		secret, created, err := keys.Create(ctx, spec.service, spec.name, value)
+		return secret, created, false, err
 	}
+}
 
-	slog.Info("deleting key parameters moved to Secrets Manager", "key", secretName)
-	if _, err := legacy.Delete(ctx, spec.service, spec.legacyNames...); err != nil {
-		return secretstore.Secret{}, false, err
+// deleteMovedKeys deletes the SSM copies of keys ensureKey moved to Secrets
+// Manager. A failure part-way leaves the rest in place, and the next seed run
+// finds them beside their secrets and deletes them then.
+func deleteMovedKeys(ctx context.Context, legacy legacyStore, moved []keySpec) error {
+	for _, spec := range moved {
+		slog.Info("deleting key parameters moved to Secrets Manager", "key", spec.service+"/"+spec.name)
+		if _, err := legacy.Delete(ctx, spec.service, spec.legacyNames...); err != nil {
+			return err
+		}
 	}
-	return secret, false, nil
+	return nil
 }
 
 // checkPublicRecord refuses a copy whose DID or address differs from the one
