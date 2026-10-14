@@ -1593,9 +1593,8 @@ resource "grafana_rule_group" "appliance" {
   # worth being plain about rather than claiming more. The deploy stamp is a
   # textfile-collector gauge on this same host exporter, so a wedged exporter on
   # a live box *is* the stamp going stale: this fires at about eight minutes
-  # naming the exporter, the node rule follows at about twenty-five under a
-  # summary that reads as though the box were gone, and the disk rule's
-  # no_data_state = "NoData" adds a third notification. Earlier and specific is
+  # naming the exporter, and the node rule follows at about twenty-five under a
+  # summary that reads as though the box were gone. Earlier and specific is
   # worth that; a quieter rule here would only mean learning it later and worse.
   rule {
     name           = "Appliance metrics scrape is failing"
