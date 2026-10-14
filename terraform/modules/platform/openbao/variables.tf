@@ -126,6 +126,12 @@ variable "namespace_name" {
   default = "forge-central.internal"
 }
 
+variable "start_after" {
+  description = "Whatever creates OpenBao's database. The task waits for it; see the ecs-service variable of the same name for why this is not a depends_on on the module call."
+  type        = any
+  default     = null
+}
+
 variable "enable_ui" {
   type    = bool
   default = false

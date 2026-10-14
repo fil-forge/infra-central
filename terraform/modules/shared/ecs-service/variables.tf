@@ -211,6 +211,22 @@ variable "task_policies" {
   default     = {}
 }
 
+variable "start_after" {
+  description = <<-EOT
+    Something the task needs before it can start, such as a database another
+    resource creates. Only the ECS service waits for it, and the value itself is
+    never used.
+
+    This is what to use instead of depends_on on the module call. A module-level
+    depends_on also applies to the IAM policy documents here, and OpenTofu
+    defers reading those to apply time whenever anything upstream of the
+    dependency has a change pending, so the plan shows both roles and their
+    policies as updated.
+  EOT
+  type        = any
+  default     = null
+}
+
 variable "desired_count" {
   description = "Above 1, concurrent starts race on the goose migration lock. Set the service's *_SKIP_MIGRATIONS before raising it."
   type        = number

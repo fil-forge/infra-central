@@ -201,5 +201,5 @@ resource "aws_ecs_service" "this" {
   # which the Postgres-backed services need for their migrations.
   health_check_grace_period_seconds = var.hostname == null ? null : var.health_check_start_period
 
-  depends_on = [aws_lb_listener_rule.this]
+  depends_on = [aws_lb_listener_rule.this, var.start_after]
 }
