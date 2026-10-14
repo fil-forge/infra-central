@@ -84,6 +84,22 @@ the query's labels, so it has no `stage`. It cannot be told apart from
 production, so IRM should page on a critical alert with no `stage` as well as on
 `stage = "prod"`.
 
+A rule's `severity` says how soon someone has to act if it fires in
+production. A rule has one severity for every stage, and it is routing, not
+the label, that keeps staging from paging.
+
+- **`critical`**: customers are affected now, or a loss is building up that
+  would grow before anyone saw it in working hours. Data at risk counts, and so
+  does revenue lost for each proving period Piri leaves unproven. Pages in
+  production.
+- **`warning`**: needs attention the same or the next working day. Notifies.
+- **`info`**: a trend to look at; nobody needs to act on it right away. IRM's
+  routes can treat it more quietly than a warning.
+
+A new rule is `critical` only when a person paged now can do something about it
+and waiting until working hours would cost something hard to recover. Otherwise
+it is a `warning`.
+
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
