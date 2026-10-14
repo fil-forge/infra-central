@@ -1689,9 +1689,10 @@ resource "grafana_rule_group" "appliance" {
   # challenge window had closed. Curio records both as successful task runs and
   # leaves its failure count alone.
   #
-  # All of these page (critical). Each one means proofs are failing or about to:
-  # a missed proof is a fault on chain, which costs the provider, and waiting
-  # for someone to notice costs more.
+  # All but one of these page (critical). Each one means proofs are failing or
+  # about to: a missed proof earns nothing for its period, and waiting for
+  # someone to notice costs more. The exception is "proof set is unrecoverable",
+  # a warning, for the reason that rule gives.
   #
   # One cause can raise more than one of these over time: a head that stays
   # stuck is first "chain head is stale", then "proving period has not
@@ -2123,13 +2124,21 @@ resource "grafana_rule_group" "appliance" {
   # rule above gives. Two things follow from reading a rise:
   #
   #   - A set that was already unrecoverable when a Piri with this metric first
-  #     reported is never paged for; graph the gauge to see the current state.
+  #     reported is never alerted on; graph the gauge to see the current state.
   #   - `increase` reads any drop as a counter reset, so removing one row by
   #     hand while others remain fires once, for an hour.
   #
   # no_data_state is OK: Piri reports the count, zero included, on every
   # collection, so an empty result is a Piri older than the metric, and a
   # healthy node evaluates to zero.
+  #
+  # A warning, not critical: by the time it fires there is nothing urgent left
+  # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
+  # Either the set's payment has ended or been terminated, so there is no
+  # revenue left to lose, or its sends have been rejected five times in a row
+  # over about half a day of backoff, and "Piri proving is failing" has paged
+  # for the rejections before the last. A cause that threatens the node's other
+  # sets shows up in their own rejections first.
   rule {
     name           = "Piri proof set is unrecoverable"
     condition      = "B"
@@ -2147,7 +2156,7 @@ resource "grafana_rule_group" "appliance" {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2220,7 +2229,7 @@ resource "grafana_rule_group" "appliance" {
   # collection. A node whose last proof set is disabled or unrecoverable loses
   # the period series within the day, which is before the threshold while 1.5
   # proving periods is longer than a day, as with mainnet's 2880 epochs; then
-  # this lapses rather than repeat the unrecoverable page.
+  # this lapses rather than repeat the unrecoverable alert.
   #
   # Critical, as the piri docs recommend: a Prove task that does not run misses
   # every proof on the node. `for` is 10m. The threshold is the grace; this only
@@ -2495,9 +2504,14 @@ resource "grafana_rule_group" "appliance_containers" {
   # `for = 5m` is load-bearing rather than debounce. On node death the absence
   # branch and the gate are driven by the same five-minute window on the same
   # stream, and `for` is what absorbs the skew between them so they lapse
-  # together instead of racing into a page. The rule beside this one runs
+  # together instead of racing into an alert. The rule beside this one runs
   # `for = 0m`; harmonising the two would turn every node death into a second
-  # page.
+  # alert.
+  #
+  # A warning, not critical: no container is known to have stopped, only that
+  # nothing is watching them. One on the request path that stops meanwhile
+  # still shows in its site's responses, which "Appliance site is failing most
+  # requests" pages on.
   #
   # Grouped by node as well as appliance, although cAdvisor's `up` carries no
   # node label today. `appliance` is <stage>-<region>, set through external
@@ -2535,7 +2549,7 @@ resource "grafana_rule_group" "appliance_containers" {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
