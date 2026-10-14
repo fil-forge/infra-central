@@ -85,7 +85,7 @@ registration writes central performs on its behalf.
 | piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
 | plc                  | 3000 | `/_health`     | yes      | nothing else                 |
 
-Two more names appear in the parameter store: **indexer** and **etracker**. They
+Two more names appear among the stage's keys: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
 validates two UCAN proofs at startup that must be signed by their keys, exactly
 as in smelt. Both are expected to become real services, so their keys are kept
@@ -985,9 +985,9 @@ aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
 
 A plain `delete-secret` keeps the name reserved for at least seven days, and the
 seed phase fails to mint the new key until the window ends. The forced delete
-cannot be undone, so check the stage name first. For the delegator and the
-signing service, delete `identity-multibase` too; the seed phase rewrites it from
-the new key either way.
+cannot be undone, so check the stage name first. The delegator's and the
+signing service's `identity-multibase` needs no delete: the seed phase rewrites
+it from the new key.
 
 Then force the seed phase to run again. A plain run will not do it: the phase is
 an `aws_lambda_invocation`, which re-invokes only when its input changes, and
