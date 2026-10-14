@@ -357,6 +357,12 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   | xargs -n 10 aws ssm delete-parameters --names
 ```
 
+In staging and prod, the platform root refuses to destroy at all. Sprue's buckets
+are versioned there, and their versioning and lifecycle resources carry
+`prevent_destroy`, so the plan fails before anything is deleted. Destroying such
+a stage starts with removing that guard in `terraform/modules/platform/storage`
+and purging every object version from both buckets, since `force_destroy` is off.
+
 ## Runbook
 
 ### Prerequisites

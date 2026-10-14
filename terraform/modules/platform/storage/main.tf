@@ -61,6 +61,13 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 # Keys are content addresses and sprue never deletes, so the only noncurrent
 # versions in normal operation are identical copies left by a rewrite of the
 # same message.
+#
+# Destroying this resource suspends versioning on the bucket, and a destroy
+# removes it before attempting the bucket. With force_destroy off, the bucket
+# delete then fails and leaves the bucket in place but unprotected.
+# prevent_destroy rejects such a plan before anything is changed, here and on
+# the lifecycle rule below. Destroying a versioned stage, or turning versioning
+# off, therefore starts with removing this guard.
 resource "aws_s3_bucket_versioning" "this" {
   for_each = var.versioning ? aws_s3_bucket.this : {}
 
@@ -69,12 +76,20 @@ resource "aws_s3_bucket_versioning" "this" {
   versioning_configuration {
     status = "Enabled"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
   for_each = aws_s3_bucket_versioning.this
 
   bucket = each.value.bucket
+
+  lifecycle {
+    prevent_destroy = true
+  }
 
   rule {
     id     = "expire-noncurrent-versions"
