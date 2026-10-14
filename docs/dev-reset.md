@@ -44,7 +44,7 @@ instance goes until the apply brings it back, which is fine in dev.
   `swarf`, `plc` and `openbao`, plus the master secret RDS manages.
 - The delegator's two DynamoDB tables. The allow list holds the old node's Piri
   DID, and recreating both empty costs nothing.
-- sprue's three S3 buckets. They hold no version history, so this is not
+- sprue's two S3 buckets. They hold no version history, so this is not
   reversible.
 - Two SSM entries under the region's prefix: the stored delegation
   `hilt-ingot-s3-proof` with its `.issuer` sidecar, and every Piri DID recorded
@@ -85,7 +85,7 @@ for table in fc-dev-delegator-allow-list fc-dev-delegator-provider-info; do
     --query 'TableDescription.TableStatus' --output text
 done
 
-for bucket in agent-message delegation upload-shards; do
+for bucket in agent-message delegation; do
   aws s3 rm "s3://fc-dev-${bucket}-${ACCOUNT}" --recursive
 done
 ```

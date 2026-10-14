@@ -111,7 +111,6 @@ module "sprue" {
     SPRUE_STORAGE_S3_REGION               = local.region
     SPRUE_STORAGE_S3_AGENT_MESSAGE_BUCKET = var.bucket_names["agent-message"]
     SPRUE_STORAGE_S3_DELEGATION_BUCKET    = var.bucket_names["delegation"]
-    SPRUE_STORAGE_S3_UPLOAD_SHARDS_BUCKET = var.bucket_names["upload-shards"]
 
     SPRUE_MAILER_TYPE = "nop"
     SPRUE_LOG_LEVEL   = var.log_level

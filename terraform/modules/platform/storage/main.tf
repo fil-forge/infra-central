@@ -9,9 +9,9 @@
 locals {
   name = "fc-${var.stage}"
 
-  # Sprue's three buckets. Names come from its defaults; the stage prefix and
+  # Sprue's two buckets. Names come from its defaults; the stage prefix and
   # account suffix make them globally unique.
-  buckets = ["agent-message", "delegation", "upload-shards"]
+  buckets = ["agent-message", "delegation"]
 }
 
 data "aws_caller_identity" "current" {}
@@ -24,12 +24,7 @@ resource "aws_s3_bucket" "this" {
   # Objects here are written by sprue and reproducible from its own state, so
   # a non-prod stage empties its buckets on destroy rather than failing the
   # apply and leaving them behind for someone to purge by hand.
-  #
-  # upload-shards has had no reader since fil-forge/sprue@5e20d47 and is about
-  # to be removed. The provider reads force_destroy from state when it deletes
-  # a bucket, so the flag has to be applied before the removal for staging and
-  # prod to delete a bucket that may still hold shards.
-  force_destroy = var.force_destroy || each.key == "upload-shards"
+  force_destroy = var.force_destroy
 
   tags = { Name = "${local.name}-${each.key}" }
 }
