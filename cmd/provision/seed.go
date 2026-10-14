@@ -112,7 +112,7 @@ type walletSpec struct {
 
 // These two hold real funds on Filecoin. Their private keys are the most
 // valuable material this function handles, and the reason every write goes
-// through EnsureSecret rather than an overwrite.
+// through ensureKey, which never overwrites.
 var wallets = []walletSpec{
 	{service: "signing-service", name: "payer-key", encode: (*keygen.EVMWallet).RawHex},
 	{service: "delegator", name: "transactor-key", encode: (*keygen.EVMWallet).Hex0x},
@@ -132,8 +132,12 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		Created:   []string{},
 	}
 
+	// Keys copied out of SSM, whose SSM copies are deleted only once everything
+	// else here has succeeded.
+	var movedKeys []keySpec
+
 	slog.Info("ensuring service identities", "services", len(identityServices))
-	freshIdentities, err := d.seedIdentities(ctx, resp)
+	freshIdentities, err := d.seedIdentities(ctx, resp, &movedKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +148,7 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 	}
 
 	slog.Info("ensuring wallets", "wallets", len(wallets))
-	if err := d.seedWallets(ctx, resp); err != nil {
+	if err := d.seedWallets(ctx, resp, &movedKeys); err != nil {
 		return nil, err
 	}
 
@@ -180,6 +184,11 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 		resp.Databases = append(resp.Databases, pandoraDatabase)
 	}
 
+	slog.Info("deleting keys moved out of SSM", "keys", len(movedKeys))
+	if err := deleteMovedKeys(ctx, d.store, movedKeys); err != nil {
+		return nil, err
+	}
+
 	slog.Info("seed complete",
 		"created", len(resp.Created),
 		"identities", len(resp.DIDs),
@@ -189,11 +198,12 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 
 // seedIdentities returns the set of services whose key was minted this run, so
 // that the proofs those keys sign can be re-issued.
-func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]bool, error) {
+func (d *deps) seedIdentities(ctx context.Context, resp *Response, movedKeys *[]keySpec) (map[string]bool, error) {
 	fresh := map[string]bool{}
 
 	for _, service := range identityServices {
-		pemValue, created, err := d.store.EnsureSecret(ctx, service, "identity", func() (string, error) {
+		spec := identitySpec(service)
+		stored, created, moved, err := ensureKey(ctx, d.keys, d.store, spec, func() (string, error) {
 			id, err := keygen.GenerateIdentity()
 			if err != nil {
 				return "", err
@@ -203,11 +213,15 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 		if err != nil {
 			return nil, fmt.Errorf("ensure identity for %s: %w", service, err)
 		}
+		if moved {
+			*movedKeys = append(*movedKeys, spec)
+		}
+		resp.addSecret(service, "identity", stored.ARN)
 
 		// Re-derive from whatever is stored rather than from what was just
 		// generated. On the idempotent path they are the same value; on a
 		// concurrent-write path the stored one is authoritative.
-		id, err := keygen.ParseIdentity([]byte(pemValue))
+		id, err := keygen.ParseIdentity([]byte(stored.Value))
 		if err != nil {
 			return nil, fmt.Errorf("parse stored identity for %s: %w", service, err)
 		}
@@ -215,9 +229,11 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 		// The multibase form is derived from the PEM, so rewriting it is
 		// reproducible rather than destructive.
 		if multibaseServices[service] {
-			if err := d.store.PutSecret(ctx, service, "identity-multibase", id.Multibase); err != nil {
+			multibase, err := d.keys.PutIfChanged(ctx, service, "identity-multibase", id.Multibase)
+			if err != nil {
 				return nil, err
 			}
+			resp.addSecret(service, "identity-multibase", multibase.ARN)
 		}
 
 		// The DID is stored as the durable public record of this identity,
@@ -226,7 +242,7 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 		// It is written once rather than on every apply: an unchanged key
 		// always derives the same DID, so the rewrite only spent a
 		// PutParameter against a 3 TPS quota. A rotation is the exception. The
-		// operator deletes the private parameter and re-applies, which mints a
+		// operator deletes the secret and re-applies, which mints a
 		// key deriving a different DID, and leaving the old one in place would
 		// publish a DID that no longer matches the identity behind it.
 		if created {
@@ -243,7 +259,7 @@ func (d *deps) seedIdentities(ctx context.Context, resp *Response) (map[string]b
 		resp.DIDs[service] = id.DID
 		if created {
 			fresh[service] = true
-			resp.Created = append(resp.Created, d.store.Path(service, "identity"))
+			resp.Created = append(resp.Created, d.keys.Name(service, "identity"))
 		}
 	}
 
@@ -276,11 +292,11 @@ func (d *deps) seedProofs(ctx context.Context, resp *Response, freshIdentities m
 
 	for _, proof := range keygen.Proofs(webDID) {
 		issue := func() (string, error) {
-			issuerPEM, err := d.store.GetSecret(ctx, proof.Issuer, "identity")
+			issuer, err := d.keys.Get(ctx, proof.Issuer, "identity")
 			if err != nil {
 				return "", fmt.Errorf("read %s identity to sign the %s proof: %w", proof.Issuer, proof.Name, err)
 			}
-			return keygen.IssueProof([]byte(issuerPEM), proof)
+			return keygen.IssueProof([]byte(issuer.Value), proof)
 		}
 
 		if freshIdentities[proof.Issuer] {
@@ -310,9 +326,9 @@ func (d *deps) seedProofs(ctx context.Context, resp *Response, freshIdentities m
 	return nil
 }
 
-func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
+func (d *deps) seedWallets(ctx context.Context, resp *Response, movedKeys *[]keySpec) error {
 	for _, spec := range wallets {
-		stored, created, err := d.store.EnsureSecret(ctx, spec.service, spec.name, func() (string, error) {
+		stored, created, moved, err := ensureKey(ctx, d.keys, d.store, spec.keySpec(), func() (string, error) {
 			w, err := keygen.GenerateEVMWallet()
 			if err != nil {
 				return "", err
@@ -322,8 +338,12 @@ func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
 		if err != nil {
 			return fmt.Errorf("ensure wallet %s/%s: %w", spec.service, spec.name, err)
 		}
+		if moved {
+			*movedKeys = append(*movedKeys, spec.keySpec())
+		}
+		resp.addSecret(spec.service, spec.name, stored.ARN)
 
-		w, err := parseWallet(spec, stored)
+		w, err := parseWallet(spec, stored.Value)
 		if err != nil {
 			return fmt.Errorf("parse stored wallet %s/%s: %w", spec.service, spec.name, err)
 		}
@@ -345,7 +365,7 @@ func (d *deps) seedWallets(ctx context.Context, resp *Response) error {
 
 		resp.Addresses[spec.service+"/"+spec.name] = w.Address
 		if created {
-			resp.Created = append(resp.Created, d.store.Path(spec.service, spec.name))
+			resp.Created = append(resp.Created, d.keys.Name(spec.service, spec.name))
 		}
 	}
 	return nil
@@ -358,6 +378,45 @@ func parseWallet(spec walletSpec, stored string) (*keygen.EVMWallet, error) {
 		return keygen.ParseEVMWalletHex0x(stored)
 	default:
 		return keygen.ParseEVMWalletRawHex(stored)
+	}
+}
+
+// identitySpec describes a service identity for ensureKey. A multibase
+// service's SSM copy of the same key goes with the PEM.
+func identitySpec(service string) keySpec {
+	legacyNames := []string{"identity"}
+	if multibaseServices[service] {
+		legacyNames = append(legacyNames, "identity-multibase")
+	}
+	return keySpec{
+		service:    service,
+		name:       "identity",
+		publicName: "identity.did",
+		derive: func(value string) (string, error) {
+			id, err := keygen.ParseIdentity([]byte(value))
+			if err != nil {
+				return "", err
+			}
+			return id.DID, nil
+		},
+		legacyNames: legacyNames,
+	}
+}
+
+// keySpec describes a wallet for ensureKey.
+func (spec walletSpec) keySpec() keySpec {
+	return keySpec{
+		service:    spec.service,
+		name:       spec.name,
+		publicName: spec.name + ".address",
+		derive: func(value string) (string, error) {
+			w, err := parseWallet(spec, value)
+			if err != nil {
+				return "", err
+			}
+			return w.Address, nil
+		},
+		legacyNames: []string{spec.name},
 	}
 }
 

@@ -1,8 +1,9 @@
 # The six ECS services.
 #
 # Everything here is derived from the platform workspace's outputs plus the SSM
-# parameters the provision Lambda wrote. No secret value appears in this
-# configuration; only parameter ARNs, which ECS resolves at task start.
+# parameters and Secrets Manager secrets the provision Lambda wrote. No secret
+# value appears in this configuration; only ARNs, which ECS resolves at task
+# start.
 #
 # Service-specific quirks worth knowing before reading further:
 #
@@ -26,6 +27,21 @@ locals {
   region     = data.aws_region.current.region
 
   ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge-central/${var.stage}"
+
+  # The identity and wallet keys live in Secrets Manager once a stage's seed
+  # phase has moved them there, and in SSM until then. ECS needs a Secrets
+  # Manager secret's full ARN, suffix included, which only the seed result
+  # knows.
+  key = { for pair in [
+    ["sprue", "identity"],
+    ["hilt", "identity"],
+    ["swarf", "identity"],
+    ["delegator", "identity-multibase"],
+    ["delegator", "transactor-key"],
+    ["signing-service", "identity-multibase"],
+    ["signing-service", "payer-key"],
+    ] : "${pair[0]}/${pair[1]}" => try(var.secret_arns[pair[0]][pair[1]], "${local.ssm}/${pair[0]}/${pair[1]}")
+  }
 
   # The services other services address by did:web. plc is public too, but it
   # has no did:web, so its hostname is set apart below.
@@ -123,7 +139,7 @@ module "sprue" {
 
   secrets = {
     SPRUE_STORAGE_POSTGRES_DSN = "${local.ssm}/sprue/postgres-dsn"
-    SPRUE_IDENTITY_KEY_PEM     = "${local.ssm}/sprue/identity"
+    SPRUE_IDENTITY_KEY_PEM     = local.key["sprue/identity"]
   }
 
   secret_files  = { SPRUE_IDENTITY_KEY_PEM = "identity.pem" }
@@ -205,7 +221,7 @@ module "hilt" {
     HILT_AUTH_PARTNER_KEY                = "${local.ssm}/hilt/partner-key"
     HILT_VAULT_OPENBAO_APPROLE_ROLE_ID   = "${local.ssm}/hilt/vault-role-id"
     HILT_VAULT_OPENBAO_APPROLE_SECRET_ID = "${local.ssm}/hilt/vault-secret-id"
-    HILT_IDENTITY_KEY_PEM                = "${local.ssm}/hilt/identity"
+    HILT_IDENTITY_KEY_PEM                = local.key["hilt/identity"]
     HILT_UPLOAD_PROOF                    = "${local.ssm}/hilt/upload-proof"
   }
 
@@ -263,7 +279,7 @@ module "swarf" {
 
   secrets = {
     SWARF_STORAGE_POSTGRES_DSN = "${local.ssm}/swarf/postgres-dsn"
-    SWARF_IDENTITY_KEY_PEM     = "${local.ssm}/swarf/identity"
+    SWARF_IDENTITY_KEY_PEM     = local.key["swarf/identity"]
   }
 
   secret_files  = { SWARF_IDENTITY_KEY_PEM = "identity.pem" }
@@ -333,8 +349,8 @@ module "delegator" {
   }
 
   secrets = {
-    REGISTRAR_DELEGATOR_KEY           = "${local.ssm}/delegator/identity-multibase"
-    REGISTRAR_CONTRACT_TRANSACTOR_KEY = "${local.ssm}/delegator/transactor-key"
+    REGISTRAR_DELEGATOR_KEY           = local.key["delegator/identity-multibase"]
+    REGISTRAR_CONTRACT_TRANSACTOR_KEY = local.key["delegator/transactor-key"]
     DELEGATOR_INDEXING_PROOF          = "${local.ssm}/delegator/indexing-service-proof"
     DELEGATOR_EGRESS_PROOF            = "${local.ssm}/delegator/egress-tracking-proof"
   }
@@ -416,8 +432,8 @@ module "signing_service" {
 
   # This service takes both keys inline, so it needs no file wrapper at all.
   secrets = {
-    SIGNING_SERVICE_SERVICE_KEY = "${local.ssm}/signing-service/identity-multibase"
-    SIGNING_SERVICE_SIGNING_KEY = "${local.ssm}/signing-service/payer-key"
+    SIGNING_SERVICE_SERVICE_KEY = local.key["signing-service/identity-multibase"]
+    SIGNING_SERVICE_SIGNING_KEY = local.key["signing-service/payer-key"]
   }
 
   health_check_command = "wget -q --spider http://127.0.0.1:7446/healthcheck"
