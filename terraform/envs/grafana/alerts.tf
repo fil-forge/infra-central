@@ -1001,7 +1001,8 @@ resource "grafana_rule_group" "appliance" {
   #
   # The two rules do not overlap: this one needs the series present, the one
   # above needs it absent. Recovery is a no-data event here too, since a fresh
-  # stamp fails the `> 900` filter, so no_data_state = OK is again what clears it.
+  # stamp fails the `> 900` filter, so no_data_state = OK is again what clears
+  # it.
   #
   # A warning, not critical: the node keeps serving what it already runs, and
   # what it misses is deploys, which can wait for working hours.
@@ -1775,7 +1776,7 @@ resource "grafana_rule_group" "appliance" {
 
   # The rules below read gauges Piri exports from its PDP pipeline, and follow
   # the alerts piri's docs/content/operator-guide/monitoring.md ("PDP Proving
-  # Health") sets out: one failure for each rule to page on. They are grouped by
+  # Health") sets out: one failure for each rule to alert on. They are grouped by
   # node as well as region for the reason the disk rule gives, and by proof set
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
@@ -2216,7 +2217,7 @@ resource "grafana_rule_group" "appliance" {
   #
   # The count does not go down on its own: Piri does not run Curio's data set
   # deletion, so the row stays until someone removes it by hand. A rule on the
-  # level would page forever after the first one, so this fires on a rise, for
+  # level would fire forever after the first one, so this fires on a rise, for
   # about an hour per newly unrecoverable set. `for` is 0m for the reason the
   # rule above gives. Two things follow from reading a rise:
   #
@@ -2233,9 +2234,11 @@ resource "grafana_rule_group" "appliance" {
   # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
   # Either the set's payment has ended or been terminated, so there is no
   # revenue left to lose, or its sends have been rejected five times in a row
-  # over about half a day of backoff, and "Piri proving is failing" has paged
-  # for the rejections before the last. A cause that threatens the node's other
-  # sets shows up in their own rejections first.
+  # over at least half a day of backoff, and "Piri proving is failing" has
+  # paged for the rejections before the last. A cause that threatens the node's
+  # other sets shows up in their own rejections first. This departs from the
+  # Critical the piri docs' table recommends for this condition, for that
+  # reason.
   rule {
     name           = "Piri proof set is unrecoverable"
     condition      = "B"
@@ -2449,10 +2452,10 @@ resource "grafana_rule_group" "appliance_containers" {
   # absent, so the rule is silent rather than firing for every container.
   #
   # Known blind spot: a node whose cAdvisor dies is deliberately not watched by
-  # this rule (see the `and on (node)` gate), and nothing else covers it.
-  # "Appliance has stopped reporting" reads the deploy stamp rather than
-  # cAdvisor, so a live node with a dead scrape goes unnoticed. Closing it needs
-  # a rule on the scrape's own health.
+  # this rule (see the `and on (node)` gate). "Appliance has stopped reporting"
+  # reads the deploy stamp rather than cAdvisor, so it does not notice a live
+  # node with a dead scrape either; the next rule, on the scrape's own health,
+  # is what covers it.
   rule {
     name           = "Appliance container is not running"
     condition      = "C"
@@ -2588,7 +2591,7 @@ resource "grafana_rule_group" "appliance_containers" {
   # disappears with the container and gives no series at all. The first branch
   # catches the former and the second the latter, so this holds either way.
   #
-  # The gate is what keeps a dead node from paging twice: no host scrape in the
+  # The gate is what keeps a dead node from alerting twice: no host scrape in the
   # last five minutes means the box is gone, which is "Appliance has stopped
   # reporting"'s to tell. `and` binds tighter than `or`, hence the parentheses
   # around the pair.
