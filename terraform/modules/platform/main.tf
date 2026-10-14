@@ -294,8 +294,12 @@ module "openbao" {
 
   log_forwarding = local.log_forwarding
 
-  # OpenBao's database is created by the seed phase.
-  depends_on = [aws_lambda_invocation.seed]
+  # OpenBao's database is created by the seed phase. An input rather than
+  # depends_on on this module: that would defer reading OpenBao's IAM policy
+  # documents to apply time whenever seed or anything upstream of it changes,
+  # including every provision image bump, and the plan would show OpenBao's
+  # roles and policies as updated.
+  start_after = aws_lambda_invocation.seed.id
 }
 
 # Initialises OpenBao, mounts KV v2 at forge-central/hilt and the transit

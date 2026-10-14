@@ -132,6 +132,8 @@ module "service" {
 
   log_forwarding = var.log_forwarding
 
+  start_after = var.start_after
+
   task_policies = { "service-permissions" = data.aws_iam_policy_document.seal.json }
 
   # Raising this needs ha_enabled in the storage stanza above. Until then a
