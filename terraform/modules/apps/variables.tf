@@ -163,9 +163,8 @@ variable "sprue_postgres_max_conns" {
 }
 
 variable "secret_arns" {
-  description = "Service to key name to the full ARN of the Secrets Manager secret holding that identity or wallet key, from the platform root's seed result. A key missing here is read from its SSM parameter, as on a stage whose seed phase has not yet moved it."
+  description = "Service to key name to the full ARN of the Secrets Manager secret holding that identity or wallet key, from the platform root's seed result. Every key a service reads must be listed; a missing one fails the plan."
   type        = map(map(string))
-  default     = {}
 }
 
 variable "log_forwarding" {
