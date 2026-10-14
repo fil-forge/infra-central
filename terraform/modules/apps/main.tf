@@ -28,20 +28,23 @@ locals {
 
   ssm = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/forge-central/${var.stage}"
 
-  # The identity and wallet keys live in Secrets Manager once a stage's seed
-  # phase has moved them there, and in SSM until then. ECS needs a Secrets
-  # Manager secret's full ARN, suffix included, which only the seed result
-  # knows.
-  key = { for pair in [
-    ["sprue", "identity"],
-    ["hilt", "identity"],
-    ["swarf", "identity"],
-    ["delegator", "identity-multibase"],
-    ["delegator", "transactor-key"],
-    ["signing-service", "identity-multibase"],
-    ["signing-service", "payer-key"],
-    ] : "${pair[0]}/${pair[1]}" => try(var.secret_arns[pair[0]][pair[1]], "${local.ssm}/${pair[0]}/${pair[1]}")
-  }
+  # The identity and wallet keys are Secrets Manager secrets. ECS needs a
+  # secret's full ARN, suffix included, which only the seed result knows. A key
+  # the seed result does not list fails the plan here instead of falling back to
+  # SSM. The map is flattened so that the error names the service and key.
+  secret_arn = merge([for service, names in var.secret_arns :
+    { for name, arn in names : "${service}/${name}" => arn }
+  ]...)
+
+  key = { for name in [
+    "sprue/identity",
+    "hilt/identity",
+    "swarf/identity",
+    "delegator/identity-multibase",
+    "delegator/transactor-key",
+    "signing-service/identity-multibase",
+    "signing-service/payer-key",
+  ] : name => local.secret_arn[name] }
 
   # The services other services address by did:web. plc is public too, but it
   # has no did:web, so its hostname is set apart below.

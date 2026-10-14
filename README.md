@@ -331,8 +331,9 @@ A stage seeded before the keys moved holds them as SSM SecureStrings. Its next
 seed run copies each key into Secrets Manager and checks the DID or address the
 copy derives against the SSM record. It deletes the SecureStrings last, once the
 rest of the run has succeeded, so a failed run leaves ECS's parameters in place.
-A mismatch fails the run and leaves SSM untouched. Until a stage's seed result
-lists a key's secret, the apps root keeps pointing ECS at the SSM parameter.
+A mismatch fails the run and leaves SSM untouched. The apps root reads the keys
+only from the seed result, so a stage whose seed result does not list a key's
+secret fails its apps plan, naming the key, instead of pointing ECS at SSM.
 
 They also stay readable, which takes deliberate arrangement. SecureStrings and
 secrets are encrypted under the account's AWS-managed SSM and Secrets Manager
@@ -744,6 +745,13 @@ not exist fails creating its first subscription filter. The stage's logs stay
 in CloudWatch, where `scripts/tail-logs.sh` reads them. A sandbox that needs
 its logs in Grafana follows step 5 of [adding a stage](#adding-a-stage)
 instead, at the cost of a commit.
+
+A sandbox seeded before the identity and wallet keys moved to Secrets Manager
+fails its apps plan, because its seed result lists none of their secrets. Bump
+`seed_trigger` in its `platform/main.tf` and apply the platform root, which
+runs the current seed phase and moves the keys; a new Lambda image alone does
+not re-run it (see [forcing a provision phase to
+re-run](#forcing-a-provision-phase-to-re-run)).
 
 What it costs is everything the dev stage gets from the workflow: a plan on every
 pull request, applies that cannot disagree with `main`, and an OpenTofu and
