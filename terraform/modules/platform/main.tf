@@ -254,10 +254,11 @@ resource "aws_lambda_invocation" "seed" {
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
   #
-  # module.provision is here for its role policy. function_name depends only on
-  # the function, so without it an apply that adds a grant and a phase that
-  # needs it could invoke the phase first and fail with AccessDenied.
-  depends_on = [module.database, module.aurora, module.pandora_db, module.provision]
+  # Not module.provision: OpenBao depends on this invocation, and a module-wide
+  # dependency would defer reading OpenBao's policy documents to apply time on
+  # every change to the provision module. function_name already waits for the
+  # role policy.
+  depends_on = [module.database, module.aurora, module.pandora_db]
 }
 
 module "openbao" {
