@@ -16,7 +16,7 @@ import (
 
 // Identity is an Ed25519 service identity in every serialization the Forge
 // services accept. smelt writes these to files on a VM; here they are held in
-// memory and handed to the SSM store, so nothing but the returned DID ever
+// memory and handed to Secrets Manager, so nothing but the returned DID ever
 // leaves the process.
 //
 // The two private serializations exist because the services disagree: hilt and
@@ -43,7 +43,7 @@ func GenerateIdentity() (*Identity, error) {
 }
 
 // ParseIdentity reconstructs an identity from a stored PKCS#8 PEM. This is the
-// idempotent path: when a key already exists in SSM the provision Lambda reads
+// idempotent path: when a key already exists the provision Lambda reads
 // it back and re-derives the public material rather than minting a new one.
 func ParseIdentity(privatePEM []byte) (*Identity, error) {
 	signer, err := identity.DecodeSignerFromPEM(privatePEM)

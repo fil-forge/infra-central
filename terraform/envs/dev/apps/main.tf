@@ -96,6 +96,11 @@ module "apps" {
   # subscription filters, and the apply after apply-dev-platform creates them.
   log_forwarding = try(local.platform.log_forwarding, null)
 
+  # The identity and wallet keys' secrets. try() for the same reason as
+  # log_forwarding: this root can plan against platform state from before the
+  # key existed. An empty map keeps every service on its SSM parameters.
+  secret_arns = try(local.platform.secret_arns, {})
+
   # Neither service is deployed yet. The delegator validates proofs signed by
   # these DIDs at startup, so the names have to be settled even though nothing
   # answers at them.

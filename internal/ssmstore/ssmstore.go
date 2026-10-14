@@ -1,11 +1,15 @@
-// Package ssmstore holds every secret this project generates.
+// Package ssmstore holds the secrets this project generates other than the
+// identity and wallet keys, which live in secretstore: database passwords and
+// DSNs, OpenBao and AppRole credentials, and the public records (DIDs,
+// addresses, proofs) derived from the keys.
 //
 // Two rules govern everything here.
 //
 // Nothing is ever regenerated. Writes use Overwrite=false, so an existing
 // parameter wins and the caller reads it back instead. This is what makes
-// `terraform apply` safe to re-run: a regenerated key would abandon a funded
-// wallet and change a DID that other services have already registered.
+// `terraform apply` safe to re-run: a regenerated password would lock a
+// service out of its database, and a regenerated proof would invalidate every
+// copy already handed out.
 //
 // Private and public material are separate parameters. Private values are
 // SecureString; public values (DIDs, addresses, UCAN proofs) are plain String,
@@ -144,8 +148,8 @@ func (s *Store) EnsurePublic(ctx context.Context, service, name string, generate
 //
 // Use this only for credentials that their issuer can mint again on demand,
 // such as an OpenBao AppRole secret_id. Losing one of those costs a round trip;
-// losing a wallet key costs the funds behind it. Anything irreplaceable must go
-// through EnsureSecret so that Overwrite=false protects it.
+// losing a database password locks its service out. Anything irreplaceable must
+// go through EnsureSecret so that Overwrite=false protects it.
 func (s *Store) PutSecret(ctx context.Context, service, name, value string) error {
 	path := s.Path(service, name)
 	_, err := s.client.PutParameter(ctx, &ssm.PutParameterInput{

@@ -116,6 +116,11 @@ output "wallet_addresses" {
   value       = try(local.seed.addresses, {})
 }
 
+output "secret_arns" {
+  description = "Service to key name to the full ARN of the Secrets Manager secret holding it. Empty until the seed phase has run a build that keeps the keys there."
+  value       = try(local.seed.secrets, {})
+}
+
 output "databases" {
   value = try(local.seed.databases, [])
 }

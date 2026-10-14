@@ -20,7 +20,7 @@ const piriWalletType = "delegated"
 // they cannot be derived from Anvil's publicly known accounts.
 //
 // The private key is held only in memory and serialized on demand; callers
-// store it in SSM as a SecureString and never log it. Only Address is safe to
+// store it in Secrets Manager and never log it. Only Address is safe to
 // return to Terraform.
 type EVMWallet struct {
 	priv    []byte // 32-byte secp256k1 private key

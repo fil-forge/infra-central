@@ -17,14 +17,16 @@ instance goes until the apply brings it back, which is fine in dev.
 ## What survives
 
 - **`signing-service/payer-key` and `delegator/transactor-key`.** Real funds
-  live at these addresses, and nothing here deletes or rotates them. Check both
+  live at these addresses, and nothing here deletes or rotates them. Both are
+  Secrets Manager secrets, and their addresses are SSM parameters. Check both
   balances before starting:
 
   ```bash
   aws ssm get-parameter --name /forge-central/dev/signing-service/payer-key.address
   aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
   ```
-- **Every central service's `identity` key and `postgres-dsn`.** The seed phase
+- **Every central service's `identity` key and `postgres-dsn`.** The identity
+  keys are Secrets Manager secrets, which the reset does not touch. The seed phase
   recreates each role on the new instance and applies the stored password
   unconditionally, so the DSNs the services already read keep working.
 - **`openbao/root-token`, `openbao/recovery-keys`, `hilt/vault-secret-id`.**
