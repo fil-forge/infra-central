@@ -97,9 +97,9 @@ module "platform" {
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.
-  db_instance_class        = "db.t4g.micro"
-  db_multi_az              = false
-  db_backup_retention_days = 1
+  db_instance_class = "db.t4g.micro"
+  db_multi_az       = false
+  pitr_window_days  = 1
 
   # Lets a dev stage actually be destroyed. Note that destroying it does not
   # remove the SSM parameters: the provision Lambda creates them, not

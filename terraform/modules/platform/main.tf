@@ -70,7 +70,7 @@ module "database" {
   instance_class        = var.db_instance_class
   allocated_storage     = var.db_allocated_storage
   multi_az              = var.db_multi_az
-  backup_retention_days = var.db_backup_retention_days
+  backup_retention_days = var.pitr_window_days
   deletion_protection   = var.protect_stateful_resources
   skip_final_snapshot   = !var.protect_stateful_resources
 }
@@ -93,7 +93,7 @@ module "aurora" {
 
   instance_class        = var.db_instance_class
   instance_count        = var.db_instance_count
-  backup_retention_days = var.db_backup_retention_days
+  backup_retention_days = var.pitr_window_days
   deletion_protection   = var.protect_stateful_resources
   skip_final_snapshot   = !var.protect_stateful_resources
 }
@@ -155,6 +155,8 @@ module "storage" {
   force_destroy          = !var.protect_stateful_resources
   point_in_time_recovery = var.protect_stateful_resources
   deletion_protection    = var.protect_stateful_resources
+  versioning             = var.protect_stateful_resources
+  pitr_window_days       = var.pitr_window_days
 }
 
 module "ingress" {

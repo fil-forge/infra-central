@@ -124,13 +124,14 @@ variable "db_multi_az" {
   default     = true
 }
 
-variable "db_backup_retention_days" {
-  type    = number
-  default = 7
+variable "pitr_window_days" {
+  description = "How far back the stage can be restored: the database's backup retention, the delegator's tables' point-in-time recovery period, and how long Sprue's buckets keep noncurrent object versions. Keeping them equal means all three can be restored to the same point. 1 to 35."
+  type        = number
+  default     = 7
 }
 
 variable "protect_stateful_resources" {
-  description = "Deletion protection on the database, the ALB and the delegator's DynamoDB tables, point-in-time recovery on those tables, and a final snapshot on destroy. Losing the database means losing OpenBao's storage and with it every appliance's ability to unseal."
+  description = "Deletion protection on the database, the ALB and the delegator's DynamoDB tables, point-in-time recovery on those tables, versioning on Sprue's buckets, and a final snapshot on destroy. Losing the database means losing OpenBao's storage and with it every appliance's ability to unseal."
   type        = bool
   default     = true
 }
