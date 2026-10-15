@@ -22,8 +22,9 @@
 # Usage:
 #   APP_SLUG=fil-forge-bot scripts/promote.sh <staging|prod> [--dry-run]
 #
-# --dry-run builds the commit on a scratch branch, prints it, and pushes, opens
-# and closes nothing.
+# --dry-run builds the commit, prints it, and pushes, opens and closes nothing.
+# Every run builds the commit in a temporary worktree and leaves the caller's
+# checkout, index and branches as they were.
 #
 # Reads from the environment:
 #   APP_SLUG       the GitHub App that opens the pull request and whose identity
@@ -47,7 +48,7 @@ usage() {
 }
 
 case "${1-}" in
-  -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   staging)   SOURCE=dev ;;
   prod)      SOURCE=staging ;;
   *)         usage ;;
@@ -227,24 +228,25 @@ if [ "$DRY_RUN" = false ]; then
   git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 fi
 
-# A scratch branch for a dry run, so the local bot/promote-* is never touched.
-work_branch=$BRANCH
-[ "$DRY_RUN" = false ] || work_branch=dry-run/promote-$TARGET
-git checkout --quiet -B "$work_branch" "$base"
+# The commit is built in a temporary worktree, detached at BASE, so the caller's
+# checkout, index and branches are never touched. Anything already staged in
+# the caller's index stays out of the commit, and no branch is created that an
+# earlier run could have left behind.
+work=$(mktemp -d)
+trap 'rm -f "$body"; git worktree remove --force "$work" 2>/dev/null || rm -rf "$work"' EXIT
+git worktree add --quiet --detach "$work" "$base"
 # Staged after each pin: set-pin.sh asserts its own edit is one line, against
-# the index.
+# the index. It edits the worktree it is run from.
 for move in "${moving[@]}"; do
-  scripts/set-pin.sh --stage "$TARGET" "${move%%:*}" "${move#*:}" >/dev/null
-  git add "$TARGET_FILE"
+  "$work/scripts/set-pin.sh" --stage "$TARGET" "${move%%:*}" "${move#*:}" >/dev/null
+  git -C "$work" add "$TARGET_FILE"
 done
-# Only what was staged above, whatever else the work tree holds.
-git commit --quiet --file <(echo "$SUBJECT"; echo; cat "$body")
+git -C "$work" commit --quiet --file <(echo "$SUBJECT"; echo; cat "$body")
+head=$(git -C "$work" rev-parse HEAD)
 
 if [ "$DRY_RUN" = true ]; then
-  echo "would push $BRANCH at $(git rev-parse --short HEAD), on ${base:0:7}:" >&2
-  git --no-pager show --stat --format='%n%B' HEAD
-  git checkout --quiet -
-  git branch --quiet -D "$work_branch"
+  echo "would push $BRANCH at ${head:0:7}, on ${base:0:7}:" >&2
+  git --no-pager show --stat --format='%n%B' "$head"
   exit 0
 fi
 
@@ -252,12 +254,12 @@ fi
 pushed=false
 if [ -n "$old_head" ] \
   && [ "$(git rev-parse "$old_head^")" = "$base" ] \
-  && git diff --quiet "$old_head" HEAD; then
+  && git diff --quiet "$old_head" "$head"; then
   echo "$BRANCH is already ${base:0:7} plus $SOURCE's pins"
 else
-  git push --force-with-lease="$BRANCH:$old_head" --quiet origin "HEAD:refs/heads/$BRANCH"
+  git push --force-with-lease="$BRANCH:$old_head" --quiet origin "$head:refs/heads/$BRANCH"
   pushed=true
-  echo "pushed $BRANCH at $(git rev-parse --short HEAD)"
+  echo "pushed $BRANCH at ${head:0:7}"
 fi
 
 if [ -z "$pr_url" ]; then
