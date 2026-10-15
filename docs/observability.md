@@ -89,9 +89,9 @@ production. A rule has one severity for every stage, and it is routing, not
 the label, that keeps staging from paging.
 
 - **`critical`**: customers are affected now, or something will be lost for
-  good before the next day unless someone acts: a proof set Curio gives up on,
-  failures counting toward that, or work Piri stops retrying. Pages in
-  production, and when the alert has no `stage`.
+  good before the next day unless someone acts: a proof set Curio is about to
+  give up on, failures counting toward that, or work Piri is about to stop
+  retrying. Pages in production, and when the alert has no `stage`.
 - **`warning`**: needs action the same or the next working day. That includes
   a loss that grows while it lasts but stops once the cause is fixed, such as a
   missed proving period's payment: mainnet's period is 24 hours, so the next
@@ -102,8 +102,8 @@ the label, that keeps staging from paging.
   routes can treat it more quietly than a warning.
 
 A rule is `critical` only when a person paged now can do something about it and
-waiting until working hours would cost something hard to recover. Otherwise it
-is a `warning`, or `info` if nobody needs to act on it.
+waiting until the next day would cost something that can't be recovered.
+Otherwise it is a `warning`, or `info` if nobody needs to act on it.
 
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
