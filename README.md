@@ -775,9 +775,10 @@ start empty, and nothing works until they hold funds:
 tofu -chdir=terraform/envs/dev/platform output wallet_addresses
 ```
 
-**Gas, for both wallets.** The delegator's transactor signs provider approvals
-and the payer signs PDP operations, so each needs tFIL on Calibration or FIL on
-mainnet. Faucet:
+**Gas, for both wallets.** The delegator's transactor sends provider approvals.
+The payer sends the three funding transactions below; its signatures on PDP
+operations cost no gas, because each Piri node submits those from its own
+wallet. Both need tFIL on Calibration or FIL on mainnet. Faucet:
 <https://faucet.calibnet.chainsafe-fil.io/>
 
 **USDFC, for the payer only.** Faucet:
