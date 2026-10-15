@@ -1653,10 +1653,15 @@ resource "grafana_rule_group" "appliance" {
   # challenge window had closed. Curio records both as successful task runs and
   # leaves its failure count alone.
   #
-  # All but one of these page (critical). Each one means proofs are failing or
-  # about to: a missed proof earns nothing for its period, and waiting for
-  # someone to notice costs more. The exception is "proof set is unrecoverable",
-  # a warning, for the reason that rule gives.
+  # Severities follow docs/observability.md: a rule pages (critical) when
+  # waiting until the next day could make a loss permanent, and is a warning
+  # when the loss is a delay that stops once the cause is fixed, about one
+  # proving period's payment a day. Three page: both chain-head rules, because
+  # Piri gives up adding pieces after a few hours without a head (FIL-1508),
+  # and "proving is failing", because five rejections end a proof set for good.
+  # The other three are warnings, for the reasons each gives. Each rule's
+  # description says how soon to act, and its runbook_url links to the rule's
+  # section of infra-nodes' RUNBOOK.
   #
   # One cause can raise more than one of these over time: a head that stays
   # stuck is first "chain head is stale", then "proving period has not
@@ -1670,6 +1675,12 @@ resource "grafana_rule_group" "appliance" {
   # The timestamp of the last tipset Piri's chain scheduler applied, against the
   # wall clock: Lotus stalled or unreachable, or Piri's subscription to it
   # stuck. Piri cannot schedule or submit proofs without a moving head.
+  #
+  # Critical: uploads and reads carry on, but Piri cannot add pieces on chain
+  # without a head either, and AddRoots gives up on each batch after about 3.4
+  # hours of retries (6.7 if Lotus answers but is stale), leaving it stranded
+  # until it is freed by hand (FIL-1508). Once that is fixed, this can be a
+  # warning: everything else catches up when the head moves.
   #
   # Five minutes is ten tipsets, but a run of null rounds can leave that long
   # between tipsets, and a slow chain scheduler handler that runs before the
@@ -1689,8 +1700,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not seen a new chain head for more than five minutes"
-      description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-chain-head-is-stale"
     }
 
     labels = {
@@ -1769,11 +1780,11 @@ resource "grafana_rule_group" "appliance" {
   # head means something.
   #
   # Five-minute windows are ten of Piri's thirty-second pushes. `for` is 10m, so
-  # a restart that takes a moment to reach Lotus does not fire. Critical, as
-  # "chain head is stale" is for the same cause: none of the proving rules below
-  # can fire for a node with no head, since they compare against it or wait on a
-  # proving send that never happens, so the only later page would be "Prove task
-  # has not run", which comes after a proof has been missed.
+  # a restart that takes a moment to reach Lotus does not fire. Critical, for
+  # the reason "chain head is stale" is: with no head, AddRoots gives up on its
+  # batches after a few hours (FIL-1508). None of the proving rules below can
+  # fire for a node with no head either, since they compare against it or wait
+  # on a proving send that never happens.
   #
   # no_data_state is OK, and not NoData, even though "no head" is what the rule
   # is about: the `unless` is what finds the missing head, so the result is
@@ -1789,8 +1800,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) is running but has not seen a chain head"
-      description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-is-reporting-but-has-no-chain-head"
     }
 
     labels = {
@@ -1881,6 +1892,11 @@ resource "grafana_rule_group" "appliance" {
   # against the same extrapolated head, and the set comes back into this rule
   # once the head is past it.
   #
+  # A warning: a stall loses about one proving period's payment a day and
+  # nothing more, since Curio takes the next window from the contract once
+  # scheduling runs again. Its causes that can lose more page on their own: a
+  # stuck head as "chain head is stale", a rejection as "proving is failing".
+  #
   # A healthy proof set is past its window for a minute or two each period,
   # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
   # the shortest non-zero pending period a five-minute group gives: two
@@ -1897,15 +1913,15 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day it stays stuck costs that proving period's payment, and nothing more is lost once scheduling runs again."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2000,6 +2016,10 @@ resource "grafana_rule_group" "appliance" {
   # pages after each failure rather than throughout. `for` is 0m: the hour
   # window is the debounce, and a single rejection is worth a page.
   #
+  # Critical: Curio gives up on the set for good on its fifth rejection, and
+  # the backoffs between them (100, 200, 400 and 800 epochs) let that come 12.5
+  # hours after the first, within a night.
+  #
   # no_data_state is OK: every proof set reports the count, zero included, so
   # an empty result means no proof sets or a Piri older than the metric, and a
   # healthy set evaluates to zero.
@@ -2012,8 +2032,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
-      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, check the proof set with `piri client pdp proofset state`, and check the wallet has FIL for gas."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, check the proof set with `piri client pdp proofset state`, and check the wallet has FIL for gas. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
     labels = {
@@ -2114,8 +2134,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped proving a proof set after an unrecoverable failure"
-      description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand. Act within a day: the loss has already happened."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proof-set-is-unrecoverable"
     }
 
     labels = {
@@ -2197,17 +2217,20 @@ resource "grafana_rule_group" "appliance" {
   # proving periods is longer than a day, as with mainnet's 2880 epochs; then
   # this lapses rather than repeat the unrecoverable alert.
   #
-  # Critical, as the piri docs recommend: a Prove task that does not run misses
-  # every proof on the node. `for` is 10m. The threshold is the grace; this only
-  # confirms it.
+  # A warning: by the time it fires at least one period's proof is missed, but
+  # nothing is lost for good while it holds, and proving resumes once the cause
+  # is fixed. The causes that can lose more page on their own, as "proving is
+  # failing" and "chain head is stale". This departs from the Critical the piri
+  # docs recommend, for that reason. `for` is 10m. The threshold is the grace;
+  # this only confirms it.
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
   #
   # Paused until Piri's Curio dependency parses PiecesAddedV2 events
   # (FIL-1222). Until then Piri never records the pieces it adds, every Prove
-  # run fails with "no subpiece found", and this rule would keep paging
-  # on-call for that known bug. The pull request that deploys the fix removes
+  # run fails with "no subpiece found", and this rule would keep firing for
+  # that known bug. The pull request that deploys the fix removes
   # is_paused.
   rule {
     name           = "Piri's Prove task has not run in 1.5 proving periods"
@@ -2219,15 +2242,15 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
-      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment, and proving resumes once the cause is fixed."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-prove-task-has-not-run-in-15-proving-periods"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
