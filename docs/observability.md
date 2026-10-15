@@ -88,11 +88,16 @@ A rule's `severity` says how soon someone has to act if it fires in
 production. A rule has one severity for every stage, and it is routing, not
 the label, that keeps staging from paging.
 
-- **`critical`**: customers are affected now, or a loss is building up that
-  would grow before anyone saw it in working hours. Data at risk counts, and so
-  does revenue lost for each proving period Piri leaves unproven. Pages in
+- **`critical`**: customers are affected now, or something will be lost for
+  good before the next day unless someone acts: a proof set Curio gives up on,
+  failures counting toward that, or work Piri stops retrying. Pages in
   production, and when the alert has no `stage`.
-- **`warning`**: needs attention the same or the next working day. Notifies.
+- **`warning`**: needs action the same or the next working day. That includes
+  a loss that grows while it lasts but stops once the cause is fixed, such as a
+  missed proving period's payment: mainnet's period is 24 hours, so the next
+  working day loses about one period. Weekends are a known gap
+  ([FIL-1509](https://linear.app/filecoin-foundation/issue/FIL-1509)).
+  Notifies.
 - **`info`**: a trend to look at; nobody needs to act on it right away. IRM's
   routes can treat it more quietly than a warning.
 
