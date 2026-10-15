@@ -1677,8 +1677,8 @@ resource "grafana_rule_group" "appliance" {
   # stuck. Piri cannot schedule or submit proofs without a moving head.
   #
   # Critical: uploads and reads carry on, but Piri cannot add pieces on chain
-  # without a head either, and AddRoots gives up on each batch after about 3.4
-  # hours of retries (6.7 if Lotus answers but is stale), leaving it stranded
+  # without a head either, and AddRoots gives up on each batch after about 3.5
+  # hours of retries (6.9 if Lotus answers but is stale), leaving it stranded
   # until it is freed by hand (FIL-1508). Once that is fixed, this can be a
   # warning: everything else catches up when the head moves.
   #
@@ -1894,8 +1894,11 @@ resource "grafana_rule_group" "appliance" {
   #
   # A warning: a stall loses about one proving period's payment a day and
   # nothing more, since Curio takes the next window from the contract once
-  # scheduling runs again. Its causes that can lose more page on their own: a
-  # stuck head as "chain head is stale", a rejection as "proving is failing".
+  # scheduling runs again. Its causes that can lose more mostly page on their
+  # own: a stuck head as "chain head is stale", a rejection as "proving is
+  # failing". The exception is a cause that also makes AddRoots fail with the
+  # head still moving, such as an empty wallet: AddRoots strands its batches
+  # after about 3.5 hours (FIL-1508), and nothing here pages for that.
   #
   # A healthy proof set is past its window for a minute or two each period,
   # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
@@ -2219,10 +2222,11 @@ resource "grafana_rule_group" "appliance" {
   #
   # A warning: by the time it fires at least one period's proof is missed, but
   # nothing is lost for good while it holds, and proving resumes once the cause
-  # is fixed. The causes that can lose more page on their own, as "proving is
-  # failing" and "chain head is stale". This departs from the Critical the piri
-  # docs recommend, for that reason. `for` is 10m. The threshold is the grace;
-  # this only confirms it.
+  # is fixed. The causes that can lose more mostly page on their own, as
+  # "proving is failing" and "chain head is stale", with the AddRoots exception
+  # "proving period has not advanced" gives. This departs from the Critical the
+  # piri docs recommend, for that reason. `for` is 10m. The threshold is the
+  # grace; this only confirms it.
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
