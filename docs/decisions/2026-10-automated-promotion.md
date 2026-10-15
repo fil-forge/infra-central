@@ -48,6 +48,13 @@ entered through a dev bump, and that bump's message names the commit the image w
 digest dispatched by hand, or seeded with its stage, has no such commit, and the pull request says
 so in place of a change list.
 
+The change list writes each squash-merged commit as a bare reference to its pull request, such as
+`fil-forge/hilt#58`, which GitHub renders as that pull request's title. Any other commit keeps its
+own title, in a code span. Each digest links to its version page on ghcr.io, or to the dev bump
+that carried it when the packages API has no page for it, and each commit range links to its
+compare view. When the source's pin is behind the target's or has diverged from it, the list says
+so, because merging would then roll the target back or drop its commits.
+
 ## A person holds a service back by pushing to the branch
 
 The bot leaves a branch alone while its pull request is open and the head commit's author or
