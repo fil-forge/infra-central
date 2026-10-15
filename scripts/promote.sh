@@ -172,8 +172,8 @@ digest_link() {
 # array and the notes written once.
 changes() {
   local from=$2 to=$3
-  # $title, $pr, $c and $n are jq's; the repository and the stage names reach
-  # jq through the environment.
+  # $compare, $commits, $title, $pr, $c, $n and $behind are jq's; the repository
+  # and the stage names reach jq through the environment.
   # shellcheck disable=SC2016
   gh api --paginate --slurp "repos/$1/compare/$from...$to?per_page=100" \
     | REPO=$1 SOURCE=$SOURCE TARGET=$TARGET jq -r '
