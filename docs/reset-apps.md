@@ -51,7 +51,7 @@ being dropped.
 On the appliance host, as the node operator:
 
 ```bash
-sudo scripts/host/reset-apps.sh
+scripts/host/reset-apps.sh
 ```
 
 It stops the apps, drops the Ingot and Piri databases, empties their data
