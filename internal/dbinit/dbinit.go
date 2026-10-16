@@ -179,6 +179,58 @@ func ensureOne(ctx context.Context, conn *pgx.Conn, db Database) error {
 	return nil
 }
 
+// Existing returns the names from this list that have a database today, in
+// the order given.
+func Existing(ctx context.Context, conn *pgx.Conn, names []string) ([]string, error) {
+	var existing []string
+	for _, name := range names {
+		var exists bool
+		if err := conn.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, name,
+		).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check database %s: %w", name, err)
+		}
+		if exists {
+			existing = append(existing, name)
+		}
+	}
+	return existing, nil
+}
+
+// Drop deletes a database and everything in it, ending any session still
+// connected to it. The role that owns it stays, with its password, so a
+// database recreated by Ensure is reachable through the DSN already stored.
+//
+// It reports false when there was no database to drop.
+func Drop(ctx context.Context, conn *pgx.Conn, name string) (bool, error) {
+	var owner string
+	err := conn.QueryRow(ctx,
+		`SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = $1`, name,
+	).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the owner of database %s: %w", name, err)
+	}
+
+	// Only the owner may drop a database, and the RDS master user is not a
+	// superuser. Membership in the owning role is enough, for the same reason
+	// Ensure grants it before CREATE DATABASE.
+	if _, err := conn.Exec(ctx, `GRANT `+pgx.Identifier{owner}.Sanitize()+` TO CURRENT_USER`); err != nil {
+		return false, fmt.Errorf("grant role %s to admin: %w", owner, err)
+	}
+
+	// FORCE ends the sessions still connected, which would otherwise make the
+	// drop fail. Like CREATE DATABASE, this cannot run inside a transaction.
+	if _, err := conn.Exec(ctx,
+		`DROP DATABASE IF EXISTS `+pgx.Identifier{name}.Sanitize()+` WITH (FORCE)`,
+	); err != nil {
+		return false, fmt.Errorf("drop database %s: %w", name, err)
+	}
+	return true, nil
+}
+
 func ensureLoginRole(ctx context.Context, conn *pgx.Conn, name, password string) error {
 	quotedName := pgx.Identifier{name}.Sanitize()
 

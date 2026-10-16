@@ -12,12 +12,14 @@
 // starts; but OpenBao must be running before it can be configured. Phase seed
 // runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
 //
-// Four more phases exist that Terraform must never invoke, because an apply must
+// Five more phases exist that Terraform must never invoke, because an apply must
 // not move money, issue a credential or delete a registration. Phase fund
 // deposits USDFC for the payer, appliance-token mints a regional appliance's
-// unseal credential, onboard admits an appliance and retire removes a region's
-// Ingot identity so it can be admitted again under a different DID. All four are
-// run by an operator through a script that shows the plan and asks first.
+// unseal credential, onboard admits an appliance, retire removes a region's
+// Ingot identity so it can be admitted again under a different DID, and
+// reset-apps wipes the apps' databases and hilt's tenant secrets on dev or
+// staging. All five are run by an operator through a script that shows the plan
+// and asks first.
 package main
 
 import (
@@ -103,7 +105,7 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token and onboard phases ---
+	// --- fund, appliance-token, onboard, retire and reset-apps phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
@@ -171,6 +173,11 @@ type Response struct {
 	// DIDs, row counts and parameter names.
 	RetirePlan   *RetirePlan   `json:"retire_plan,omitempty"`
 	RetireResult *RetireResult `json:"retire_result,omitempty"`
+
+	// ResetAppsPlan and ResetAppsResult belong to the reset-apps phase, and
+	// carry only database names and a count of secrets.
+	ResetAppsPlan   *ResetAppsPlan   `json:"reset_apps_plan,omitempty"`
+	ResetAppsResult *ResetAppsResult `json:"reset_apps_result,omitempty"`
 }
 
 func main() {
@@ -219,9 +226,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.onboardPhase(ctx, req)
 	case "retire":
 		return deps.retirePhase(ctx, req)
+	case "reset-apps":
+		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\" or \"retire\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
 }
 
