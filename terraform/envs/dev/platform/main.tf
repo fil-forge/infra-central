@@ -112,9 +112,11 @@ module "platform" {
 
   # Both invocations re-run only when their input changes, so replacing the
   # RDS instance does not run them on its own: the fresh instance would get no
-  # databases and OpenBao would never be initialised. Bump both together on
-  # every dev reset. See docs/dev-reset.md. seed_trigger was bumped alone once,
-  # to move the identity and wallet keys from SSM to Secrets Manager.
+  # databases and OpenBao would never be initialised. Bump both together when
+  # rebuilding dev's instance; see the appendix of docs/reset-apps.md. A
+  # reset-apps run keeps the instance and needs neither. seed_trigger was
+  # bumped alone once, to move the identity and wallet keys from SSM to
+  # Secrets Manager.
   seed_trigger  = "6"
   vault_trigger = "5"
 }
