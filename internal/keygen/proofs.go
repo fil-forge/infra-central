@@ -102,6 +102,7 @@ func HiltIngotS3Proof(consumer, hiltDIDWeb, ingotDID string) Proof {
 			"/s3/bucket/delete",
 			"/s3/bucket/info",
 			"/s3/bucket/list",
+			"/s3/bucket/policy",
 		},
 		// Textual, matching what smelt's generate-proofs.sh writes and what
 		// Ingot reads from a file.
