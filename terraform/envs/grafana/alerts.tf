@@ -2539,18 +2539,20 @@ resource "grafana_rule_group" "appliance_containers" {
   # region is in the grouping because the dashboard link below reads
   # $labels.region, and an annotation can only read a label the query emits;
   # without it the link carried the literal <no value>. node is in it because
-  # the rule beside this one groups by it. Neither splits a group, so neither
-  # changes when this fires.
+  # the rule beside this one groups by it, and because the grouping starts
+  # separating boxes the day a node value is per-box, with no edit here.
+  # Neither splits a group, so neither changes when this fires.
   #
   # None of the three tells two boxes in one region apart today, and node is
   # the label meant to: infra-nodes' design has node identify the box, and
   # names it as what tells apart two nodes sharing a stage, a region and a
   # service_name. Only its value falls short: it is the node's name, which
-  # distinguishes regions and not boxes. A second box in a region needs a node
-  # value of its own, not a new label -- and until it has one, the `unless`
-  # branch above would let a live sibling hold the 5m side populated and mask
-  # a dead cAdvisor. The branch beside it still catches a target that fails
-  # rather than vanishes: `up == bool 0` maxes to 1 across the pair.
+  # distinguishes stages and regions, not boxes. A second box in a region
+  # needs a node value of its own, not a new label -- and until it has one,
+  # the `unless` in the second branch below would let a live sibling hold the
+  # 5m side populated and mask a dead cAdvisor. The first branch still catches
+  # a target that fails rather than vanishes: `up == bool 0` maxes to 1 across
+  # the pair.
   #
   # The gate stays joined on appliance. Moving it to node would mean `on
   # (node)` and `max by (node)` together, as the rule beside this one does;
