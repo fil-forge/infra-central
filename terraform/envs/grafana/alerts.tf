@@ -1687,8 +1687,10 @@ resource "grafana_rule_group" "appliance" {
   # is stale, no chain head, Prove task has not run) also group by instance. A
   # node runs one Piri per storage volume, each reporting instance
   # <node>/piri-<n>, and grouping by node alone would let one healthy Piri hide
-  # another's stall. A Piri that still reports the node name as its instance is
-  # one series per node, as before.
+  # another's stall. A Piri that reports another instance is grouped by that.
+  # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
+  # node, is still one series per Piri. The node name, where Alloy overwrites
+  # instance, merges the node's Piris into one series, as before.
   #
   # The gauges are what Curio has recorded in its database, not chain state, so
   # none of these confirms that a proof landed. Two failures go unseen: a proof
