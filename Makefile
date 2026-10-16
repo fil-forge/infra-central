@@ -147,6 +147,18 @@ RETIRE_ARGS ?=
 retire-region:
 	scripts/retire-region.sh --stage $(STAGE) --region $(REGION) $(RETIRE_ARGS)
 
+# Wipe the apps' state on dev or staging and keep the platform. Reset the
+# appliance first; docs/reset-apps.md has the whole order.
+#
+#   make reset-apps STAGE=staging
+RESET_ARGS ?=
+
+.PHONY: reset-apps
+# AWS_REGION is passed explicitly: a value set in this file is not exported, and
+# an operator whose credentials come from the environment may have no region.
+reset-apps:
+	AWS_REGION=$(AWS_REGION) scripts/reset-apps.sh --stage $(STAGE) $(RESET_ARGS)
+
 .PHONY: test
 test:
 	go test ./...
