@@ -143,6 +143,7 @@ build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
+scripts/remove-piri.sh        removes one Piri from sprue, hilt, the delegator and the region record
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main

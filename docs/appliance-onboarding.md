@@ -171,8 +171,8 @@ Five things happen, and each one has a failure that names nothing useful if it i
   registered before hilt took storage nodes is repaired from the same record.
 
 The record is a temporary SSM-backed list, with one parameter for each Piri DID.
-Region retirement will use it to find the Piri providers that need
-deregistration. [FIL-1130](https://linear.app/filecoin-foundation/issue/FIL-1130)
+`make remove-piri` reads it to find a Piri's region and the region's other
+Piris. [FIL-1130](https://linear.app/filecoin-foundation/issue/FIL-1130)
 tracks replacing it with a proper registry of Piri nodes by region.
 
 The script reads all three services first and prints what it found before writing anything. A second
@@ -194,7 +194,8 @@ provider. Trusting that error is what smelt did once, and the mismatch it hid br
 afterwards. `make retire-region` on the region hilt names is what clears such a row.
 
 **sprue has the Piri registered at a different endpoint.** Re-registering would move where uploads
-are sent, so deregister the provider deliberately first if that is what you mean.
+are sent. If that is what you mean, remove the Piri with `make remove-piri` and onboard it again, as
+[Removing a Piri](#removing-a-piri) describes.
 
 ### The proof
 
@@ -202,6 +203,37 @@ What comes back is hilt's delegation to the appliance's Ingot, authorising `/s3/
 and the four `/s3/bucket/*` commands. Hand it to the appliance as the proof its Ingot presents. It is
 not a secret: a delegation is useless without the audience's own key. The `--proof-out` in the
 example above writes it to a file; without that flag it goes to stdout.
+
+## Removing a Piri
+
+```bash
+make remove-piri STAGE=dev REGION=us-east-9 PIRI_DID=did:key:z6Mk…
+```
+
+It takes one Piri out of everything central and the delegator hold for it, in this order:
+
+- hilt's storage node set for the region, given again without the Piri
+- sprue's provider row, with its endpoint and weights
+- the delegator's allow list
+- the delegator's provider info, the row the delegator writes when `piri init` registers
+- central's record of the region's Piris
+
+The record goes last because it is how a later run finds the region's other Piris, so a run that
+fails partway can be repeated. Whatever is already gone is reported absent and skipped.
+
+The script reads everything first and prints it. It refuses in two cases:
+
+- **The DID is recorded under another region.** Run it again with that region.
+- **hilt routes the region to this Piri alone.** hilt refuses an empty storage node set. Onboard
+  another Piri first, or, when the whole node is leaving, delete hilt's provider row with
+  `make retire-region` and run it again.
+
+The Piri's on-chain provider and its data sets stay as they are. They belong to the Piri's own
+wallet, which central does not hold.
+
+**Moving a Piri to a new URL** is a removal followed by onboarding with the Piri's proof. The removal
+clears the allow-list entry and the provider-info row too, so the Piri registers with the delegator
+again at its new URL on its next `piri init`.
 
 ## Changing an appliance's Ingot DID
 
@@ -259,7 +291,12 @@ The apply takes effect at the node's next unseal. Transit unseal happens at boot
 that is already running holds its key in memory and keeps serving traffic until it restarts, which
 an operator you are retiring against has no reason to do.
 
-Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last. None of the
-three has tooling for it yet, so every step is manual:
-[FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) carries the procedure and the
-tooling, and [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) hilt's half of it.
+Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last:
+
+1. `make remove-piri` for each of the region's Piris but the last.
+2. `make retire-region`, which deletes hilt's provider row for the region.
+3. `make remove-piri` for the last Piri, which hilt no longer routes to.
+4. The apply that retires the region.
+
+[FIL-1090](https://linear.app/filecoin-foundation/issue/FIL-1090) tracks turning this into one
+command.

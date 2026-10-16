@@ -136,6 +136,17 @@ onboard-appliance:
 	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
 	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
 
+# Remove one Piri from sprue, hilt's storage node set, the delegator's allow list
+# and provider info, and the region's record. Run it before onboarding a Piri at
+# a new URL, or to evict one.
+#
+#   make remove-piri STAGE=dev REGION=us-east-9 PIRI_DID=did:key:…
+REMOVE_ARGS ?=
+
+.PHONY: remove-piri
+remove-piri:
+	scripts/remove-piri.sh --stage $(STAGE) --region $(REGION) --piri-did $(PIRI_DID) $(REMOVE_ARGS)
+
 # Remove a region's Ingot identity from hilt and SSM, so it can be onboarded
 # again under a different DID. Run it before re-onboarding, or the onboard phase
 # returns the delegation it issued the first time.

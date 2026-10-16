@@ -84,7 +84,8 @@ Retirement does not deregister the node from sprue, hilt or the delegator, and t
 contains a node at its next unseal rather than immediately: an appliance that is already unsealed
 holds its key in memory and keeps receiving traffic until it restarts. Evicting a live node
 therefore starts at the registries, with sprue's deregister command and a delete against the
-delegator's allow list, and fires the lever after. Those steps stay manual. hilt's rows go with
+delegator's allow list, and fires the lever after. `make remove-piri` performs those steps for
+one Piri at a time. hilt's rows go with
 `make retire-region`, which is described below and deletes them along with the delegation central
 stored for that appliance.
 
