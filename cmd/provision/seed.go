@@ -453,10 +453,23 @@ func (d *deps) createDatabases(ctx context.Context, databases []dbinit.Database)
 }
 
 func (d *deps) ensureDatabases(ctx context.Context, target dbTarget, databases []dbinit.Database) error {
+	conn, err := d.connectAsMaster(ctx, target)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	return dbinit.Ensure(ctx, conn, databases)
+}
+
+// connectAsMaster opens a plain connection to the admin database as the RDS
+// master user. CREATE and DROP DATABASE cannot run inside a transaction, so
+// this is a connection rather than a pool.
+func (d *deps) connectAsMaster(ctx context.Context, target dbTarget) (*pgx.Conn, error) {
 	slog.Info("reading the RDS master secret", "secret", target.MasterSecret)
 	master, err := d.masterCredentials(ctx, target.MasterSecret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	adminDSN := dbinit.AdminDSN(target.Host, target.Port, d.cfg.DBAdminDatabase,
@@ -471,11 +484,9 @@ func (d *deps) ensureDatabases(ctx context.Context, target dbTarget, databases [
 
 	conn, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
-		return fmt.Errorf("connect to %s as master: %w", target.Host, err)
+		return nil, fmt.Errorf("connect to %s as master: %w", target.Host, err)
 	}
-	defer conn.Close(ctx)
-
-	return dbinit.Ensure(ctx, conn, databases)
+	return conn, nil
 }
 
 // seedPandora creates the compatibility server's database and its roles on
