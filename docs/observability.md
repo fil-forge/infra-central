@@ -84,6 +84,27 @@ the query's labels, so it has no `stage`. It cannot be told apart from
 production, so IRM should page on a critical alert with no `stage` as well as on
 `stage = "prod"`.
 
+A rule's `severity` says how soon someone has to act if it fires in
+production. A rule has one severity for every stage, and it is routing, not
+the label, that keeps staging from paging.
+
+- **`critical`**: customers are affected now, or something will be lost for
+  good before the next day unless someone acts: a proof set Curio is about to
+  give up on, failures counting toward that, or work Piri is about to stop
+  retrying. Pages in production, and when the alert has no `stage`.
+- **`warning`**: needs action the same or the next working day. That includes
+  a loss that grows while it lasts but stops once the cause is fixed, such as a
+  missed proving period's payment: mainnet's period is 24 hours, so the next
+  working day loses about one period. Weekends are a known gap
+  ([FIL-1509](https://linear.app/filecoin-foundation/issue/FIL-1509)).
+  Notifies.
+- **`info`**: a trend to look at; nobody needs to act on it right away. IRM's
+  routes can treat it more quietly than a warning.
+
+A rule is `critical` only when a person paged now can do something about it and
+waiting until the next day would cost something that can't be recovered.
+Otherwise it is a `warning`, or `info` if nobody needs to act on it.
+
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
