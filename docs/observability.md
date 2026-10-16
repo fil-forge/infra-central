@@ -137,6 +137,33 @@ parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with 
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
 
+## Adding an alert or panel
+
+What a change needs so that on-call hears when it breaks. Appliance services (Piri, Ingot and the
+rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
+live here.
+
+- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
+  and no-data handling fit; the appliance has three. Each rule needs:
+  - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
+  - a `severity` chosen by the severity definitions above;
+  - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
+    template over them, or as a literal for a rule that watches one stage; an appliance rule uses
+    `local.appliance_stage_label`;
+  - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
+    tree described above.
+
+  CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
+  rules at the end of their group, because the provider keeps each rule's uid by its position. Add
+  a row to the rule table above.
+- **Dashboard panels** go in the JSON under `terraform/envs/grafana/dashboards/`. Edit the JSON, or
+  export it from the UI, then run `scripts/normalise-dashboard.sh` and commit the result; `make
+  check` rejects a file that isn't normalised. Link a rule to its panel with `dashboard_url`,
+  `__dashboardUid__` and `__panelId__`, as the existing rules do.
+- **Telemetry.** Application metrics don't ship yet (see [What ships](#what-ships)), so a feature
+  whose health can only be seen from inside a service needs that service to export the metric
+  first.
+
 ## Logs
 
 One service:
