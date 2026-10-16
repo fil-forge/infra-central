@@ -1916,7 +1916,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day it stays stuck costs that proving period's payment, and nothing more is lost once scheduling runs again."
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day it stays stuck costs that proving period's payment, and nothing more is lost once scheduling runs again, unless Piri is also failing to add pieces, for example because the owner wallet is out of FIL. Then its pending batches strand after about 3.5 hours, so check the wallet first and see the runbook."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
@@ -2035,7 +2035,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
-      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, check the proof set with `piri client pdp proofset state`, and check the wallet has FIL for gas. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
+      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, and check the proof set with `piri client pdp proofset state`; the revert reason says what the contract refused. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
@@ -2223,9 +2223,9 @@ resource "grafana_rule_group" "appliance" {
   # A warning: by the time it fires at least one period's proof is missed, but
   # nothing is lost for good while it holds, and proving resumes once the cause
   # is fixed. The causes that can lose more mostly page on their own, as
-  # "proving is failing" and "chain head is stale", with the AddRoots exception
-  # "proving period has not advanced" gives. This departs from the Critical the
-  # piri docs recommend, for that reason. `for` is 10m. The threshold is the
+  # "proving is failing" and "chain head is stale", except the AddRoots case
+  # described under "proving period has not advanced". This departs from the
+  # Critical the piri docs recommend, for that reason. `for` is 10m. The threshold is the
   # grace; this only confirms it.
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
@@ -2246,7 +2246,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
-      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment, and proving resumes once the cause is fixed."
+      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment, and proving resumes once the cause is fixed, unless Piri is also failing to add pieces, for example because the owner wallet is out of FIL. Then its pending batches strand after about 3.5 hours, so check the wallet first and see the runbook."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-prove-task-has-not-run-in-15-proving-periods"
     }
 
