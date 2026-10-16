@@ -12,7 +12,7 @@
 #   - hilt's tenant secrets in OpenBao
 #   - the delegator's allow list and provider-info tables, emptied
 #   - sprue's buckets, every object version included
-#   - each appliance region's recorded Piri DIDs in SSM
+#   - every Piri DID recorded in SSM, in any region
 #
 # The databases and OpenBao are private to the VPC, so the provision Lambda's
 # reset-apps phase wipes those. The rest is done here with the aws CLI.
@@ -63,22 +63,6 @@ command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TFVARS="$ROOT/terraform/envs/$STAGE/platform/terraform.tfvars"
 [ -f "$TFVARS" ] || { echo "ERROR: no such stage '$STAGE': $TFVARS does not exist" >&2; exit 1; }
-
-# The regions whose Piri records are deleted: every label in appliance_regions.
-# The assignment may span several lines, as HCL allows, so everything from the
-# name up to the closing bracket is read, comments dropped, before the labels
-# are picked out. A while-read loop rather than mapfile, which the bash 3.2
-# macOS ships lacks.
-regions_hcl="$(awk '
-  /^[[:space:]]*appliance_regions[[:space:]]*=/ { found = 1; sub(/^[^=]*=/, "") }
-  found { sub(/#.*/, ""); print; if (/\]/) exit }
-' "$TFVARS")"
-[ -n "$regions_hcl" ] || { echo "ERROR: no appliance_regions in $TFVARS" >&2; exit 1; }
-
-REGIONS=()
-while IFS= read -r region; do
-  REGIONS+=("$region")
-done < <(grep -o '"[^"]*"' <<<"$regions_hcl" | tr -d '"')
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 CLUSTER="fc-${STAGE}"
@@ -179,21 +163,32 @@ purge_bucket() {
   echo "  ✓ purged $bucket ($deleted version(s))"
 }
 
-# delete_piri_records <region> — delete the region's Piri DIDs, ten names per
-# call, which is what DeleteParameters takes. The rest of the region's prefix
-# stays: its unseal-token accessor and the stored hilt delegation.
-delete_piri_records() {
-  local region="$1" path listing name names
-  path="/forge-central/${STAGE}/appliance/${region}/piri"
-  # Listed into a variable first: a failure inside a process substitution
-  # escapes set -e, and the region would be reported as having no records.
-  listing="$(aws ssm get-parameters-by-path --path "$path" --recursive \
-    --query 'Parameters[].Name' --output text)"
+# list_piri_records — print every Piri record the stage holds, one name per
+# line, in whichever region it was recorded.
+#
+# Read from SSM rather than from appliance_regions in the tfvars: the records
+# are what has to go, and a region dropped from the list may still hold some.
+# Only names under a region's piri/ go. The rest of each region's prefix stays:
+# its unseal-token accessor and the stored hilt delegation.
+#
+# Callers read this through a command substitution, where set -e does not
+# reach, so a failed listing returns explicitly rather than reporting a stage
+# with no records.
+list_piri_records() {
+  local listing
+  listing="$(aws ssm get-parameters-by-path --path "/forge-central/${STAGE}/appliance" \
+    --recursive --query 'Parameters[].Name' --output text)" || return 1
+  tr '\t' '\n' <<<"$listing" | grep -E "^/forge-central/${STAGE}/appliance/[^/]+/piri/" || true
+}
 
-  names=()
+# delete_piri_records — delete every Piri record, ten names per call, which is
+# what DeleteParameters takes.
+delete_piri_records() {
+  local listing name names=()
+  listing="$(list_piri_records)"
   while IFS= read -r name; do
-    names+=("$name")
-  done < <(tr '\t' '\n' <<<"$listing" | sed -e '/^None$/d' -e '/^$/d')
+    [ -n "$name" ] && names+=("$name")
+  done <<<"$listing"
 
   # The loop body never runs for an empty list, which matters: bash 3.2 under
   # set -u reports an empty array's expansion as an unbound variable.
@@ -201,7 +196,7 @@ delete_piri_records() {
   for ((i = 0; i < ${#names[@]}; i += 10)); do
     aws ssm delete-parameters --names "${names[@]:i:10}" >/dev/null
   done
-  echo "  ✓ deleted ${#names[@]} Piri record(s) for $region"
+  echo "  ✓ deleted ${#names[@]} Piri record(s)"
 }
 
 echo "=== Reset the apps of ${STAGE} ==="
@@ -219,7 +214,9 @@ jq -r '
 ' <<<"$plan"
 echo "  tables to empty:                ${TABLES[*]}"
 echo "  buckets to purge:               ${BUCKETS[*]}"
-echo "  regions to forget Piris for:    ${REGIONS[*]+${REGIONS[*]}}"
+piri_records="$(list_piri_records)"
+echo "  Piri records to delete:         $(grep -c . <<<"$piri_records" || true)"
+sed -e '/^$/d' -e 's|^|    |' <<<"$piri_records"
 echo "  services scaled to zero:        ${SERVICES[*]}"
 echo
 
@@ -259,7 +256,7 @@ jq -r '
 echo "[4/5] Emptying the stores outside the VPC…"
 for table in "${TABLES[@]}"; do empty_table "$table"; done
 for bucket in "${BUCKETS[@]}"; do purge_bucket "$bucket"; done
-for region in ${REGIONS[@]+"${REGIONS[@]}"}; do delete_piri_records "$region"; done
+delete_piri_records
 
 echo "[5/5] Scaling the app services back up…"
 scale 1

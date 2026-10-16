@@ -33,7 +33,7 @@ Every app service in the stage is down while it runs.
   stay, so staging's deletion protection does not get in the way.
 - Every object version in sprue's `agent-message` and `delegation` buckets.
   This is not reversible, versioning included.
-- Each appliance region's Piri DIDs under `appliance/<region>/piri/`.
+- Every Piri DID recorded under `appliance/<region>/piri/`, in any region.
 
 Each Piri whose data is wiped on the node leaves its data set on chain faulting,
 with about 0.9 USDFC of the payer's lockup stranded in it. `piri init` then
