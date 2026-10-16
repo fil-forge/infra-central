@@ -181,9 +181,8 @@ locals {
   # page where staging's notify, and a route can only tell them apart by a label
   # the alert carries. Central's rules take one from their queries. The
   # appliance's take it from the appliance label, <stage>-<region> by
-  # construction, cut at its first hyphen as the dashboard link below does.
-  # Adding it changed every appliance alert instance's identity once, when it
-  # landed.
+  # construction, cut at its first hyphen. Adding it changed every appliance
+  # alert instance's identity once, when it landed.
   #
   # An instance raised because the query failed or came back empty carries
   # none of the query's labels, so it has no stage, and a route that matches
@@ -200,9 +199,11 @@ locals {
   # own link showed the on-call an empty dashboard for a stage that had not
   # fired, which is the failure these rules exist to prevent, one level up.
   #
-  # A URL Grafana does not build can carry them. Central's rules already derive
-  # a stage label in their queries; the appliance's do not, and the appliance
-  # label is <stage>-<region>, so reReplaceAll cuts it at the first hyphen.
+  # A URL Grafana does not build can carry them, and both read the stage label
+  # above. The appliance's is derived from its appliance label rather than
+  # coming from its query, but by the time a notification renders there is no
+  # difference. This link cut the appliance label itself until that label
+  # existed.
   #
   # The __ pair stays. It is what ties a rule to its panel inside Grafana's own
   # UI, and removing it would empty panelURL in the payload again. This is the
@@ -211,7 +212,7 @@ locals {
   # The host repeats the provider's url in main.tf. There is one stack, and no
   # variable for it to share yet.
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
-  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
+  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ $labels.stage }}&var-region={{ $labels.region }}"
 
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
