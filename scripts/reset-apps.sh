@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --stage)   STAGE="$2"; shift 2 ;;
     --yes|-y)  ASSUME_YES=true; shift ;;
-    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -65,14 +65,20 @@ TFVARS="$ROOT/terraform/envs/$STAGE/platform/terraform.tfvars"
 [ -f "$TFVARS" ] || { echo "ERROR: no such stage '$STAGE': $TFVARS does not exist" >&2; exit 1; }
 
 # The regions whose Piri records are deleted: every label in appliance_regions.
-# A while-read loop rather than mapfile, which the bash 3.2 macOS ships lacks.
+# The assignment may span several lines, as HCL allows, so everything from the
+# name up to the closing bracket is read, comments dropped, before the labels
+# are picked out. A while-read loop rather than mapfile, which the bash 3.2
+# macOS ships lacks.
+regions_hcl="$(awk '
+  /^[[:space:]]*appliance_regions[[:space:]]*=/ { found = 1; sub(/^[^=]*=/, "") }
+  found { sub(/#.*/, ""); print; if (/\]/) exit }
+' "$TFVARS")"
+[ -n "$regions_hcl" ] || { echo "ERROR: no appliance_regions in $TFVARS" >&2; exit 1; }
+
 REGIONS=()
 while IFS= read -r region; do
   REGIONS+=("$region")
-done < <(
-  sed -n 's/^appliance_regions[[:space:]]*=[[:space:]]*\[\(.*\)\][[:space:]]*$/\1/p' "$TFVARS" \
-    | grep -o '"[^"]*"' | tr -d '"'
-)
+done < <(grep -o '"[^"]*"' <<<"$regions_hcl" | tr -d '"')
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 CLUSTER="fc-${STAGE}"
@@ -122,13 +128,12 @@ scale() {
   done
 }
 
-# wait_stable — wait until every app service runs its desired count of tasks:
-# none after scaling down, one after scaling back up. aws ecs wait rather than
-# scripts/wait-services-stable.sh, which needs bash 4 for mapfile.
+# wait_stable — wait until every service in the cluster runs its desired count
+# of tasks: none for the app services after scaling down, one after scaling
+# back up. The repository's waiter rather than aws ecs wait, whose budget is a
+# fixed ten minutes and whose timeout names no service.
 wait_stable() {
-  local names=() service
-  for service in "${SERVICES[@]}"; do names+=("${CLUSTER}-${service}"); done
-  aws ecs wait services-stable --cluster "$CLUSTER" --services "${names[@]}"
+  "$ROOT/scripts/wait-services-stable.sh" "$CLUSTER"
 }
 
 # empty_table <table> — delete every item, a page of 25 at a time, which is the

@@ -154,8 +154,10 @@ retire-region:
 RESET_ARGS ?=
 
 .PHONY: reset-apps
+# AWS_REGION is passed explicitly: a value set in this file is not exported, and
+# an operator whose credentials come from the environment may have no region.
 reset-apps:
-	scripts/reset-apps.sh --stage $(STAGE) $(RESET_ARGS)
+	AWS_REGION=$(AWS_REGION) scripts/reset-apps.sh --stage $(STAGE) $(RESET_ARGS)
 
 .PHONY: test
 test:
