@@ -70,6 +70,9 @@ resource "aws_lambda_function" "this" {
       # hilt already takes to resolve sprue's did:web document.
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
 
+      # Used only by the remove-piri phase, which Terraform never invokes.
+      FORGE_PROVIDER_INFO_TABLE = var.provider_info_table_name
+
       # Used only by the fund phase, which Terraform never invokes.
       FORGE_CHAIN_RPC_URL        = var.chain.rpc_url
       FORGE_CHAIN_ID             = tostring(var.chain.chain_id)

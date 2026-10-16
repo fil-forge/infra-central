@@ -110,11 +110,21 @@ variable "log_retention_days" {
 }
 
 variable "allow_list_table_name" {
-  description = "The delegator's allow-list table. Only the onboard phase writes it."
+  description = "The delegator's allow-list table. Only the onboard and remove-piri phases write it."
   type        = string
 }
 
 variable "allow_list_table_arn" {
+  description = "ARN of the same table, which is what the role is granted on."
+  type        = string
+}
+
+variable "provider_info_table_name" {
+  description = "The delegator's provider-info table. Only the remove-piri phase writes it, to delete a removed Piri's row."
+  type        = string
+}
+
+variable "provider_info_table_arn" {
   description = "ARN of the same table, which is what the role is granted on."
   type        = string
 }

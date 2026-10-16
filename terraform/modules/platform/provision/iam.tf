@@ -92,18 +92,34 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The delegator's allow list, written by the onboard phase. An appliance whose
-  # DID is absent from it is refused at `piri init` with a 403, and the
-  # delegator's own CLI needs a shell in its task that no service exposes.
+  # The delegator's allow list, written by the onboard phase and cleared by
+  # remove-piri. An appliance whose DID is absent from it is refused at `piri
+  # init` with a 403, and the delegator's own CLI needs a shell in its task that
+  # no service exposes.
   statement {
     sid = "WriteDelegatorAllowList"
 
     actions = [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
+      "dynamodb:DeleteItem",
     ]
 
     resources = [var.allow_list_table_arn]
+  }
+
+  # The delegator's provider info, one row per Piri that completed `piri init`.
+  # The delegator writes it; remove-piri deletes a removed Piri's row, which the
+  # delegator has no command for.
+  statement {
+    sid = "ClearDelegatorProviderInfo"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:DeleteItem",
+    ]
+
+    resources = [var.provider_info_table_arn]
   }
 
   # The RDS master credentials, which Terraform never sees because

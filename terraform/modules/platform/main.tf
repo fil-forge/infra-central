@@ -233,8 +233,10 @@ module "provision" {
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
 
-  allow_list_table_name = module.storage.allow_list_table_name
-  allow_list_table_arn  = module.storage.allow_list_table_arn
+  allow_list_table_name    = module.storage.allow_list_table_name
+  allow_list_table_arn     = module.storage.allow_list_table_arn
+  provider_info_table_name = module.storage.provider_info_table_name
+  provider_info_table_arn  = module.storage.provider_info_table_arn
 }
 
 # Mints every identity, wallet and password, and creates the per-service

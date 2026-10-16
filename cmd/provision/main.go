@@ -12,12 +12,13 @@
 // starts; but OpenBao must be running before it can be configured. Phase seed
 // runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
 //
-// Four more phases exist that Terraform must never invoke, because an apply must
+// Five more phases exist that Terraform must never invoke, because an apply must
 // not move money, issue a credential or delete a registration. Phase fund
 // deposits USDFC for the payer, appliance-token mints a regional appliance's
-// unseal credential, onboard admits an appliance and retire removes a region's
-// Ingot identity so it can be admitted again under a different DID. All four are
-// run by an operator through a script that shows the plan and asks first.
+// unseal credential, onboard admits an appliance, remove-piri takes one of its
+// Piris out again, and retire removes a region's Ingot identity so it can be
+// admitted again under a different DID. All five are run by an operator through
+// a script that shows the plan and asks first.
 package main
 
 import (
@@ -59,11 +60,12 @@ type Request struct {
 	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
 	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
 
-	// --- appliance-token and retire phases ---
+	// --- appliance-token, onboard, remove-piri and retire phases ---
 
 	// Region is the appliance's region label, naming its transit key and policy
-	// for the appliance-token phase, and the provider row and parameter prefix
-	// for retire.
+	// for the appliance-token phase, the region a Piri joins or leaves for
+	// onboard and remove-piri, and the provider row and parameter prefix for
+	// retire.
 	Region string `json:"region,omitempty"`
 
 	// --- appliance-token phase only ---
@@ -79,7 +81,7 @@ type Request struct {
 	// standing credentials for one node is a state nothing can reason about.
 	Reissue bool `json:"reissue,omitempty"`
 
-	// --- onboard phase only ---
+	// --- onboard phase, and PiriDID for remove-piri ---
 
 	// The appliance presenting itself. Piri's DID belongs to a key generated on
 	// the node, and the proof is signed by it, so neither is derivable here.
@@ -103,7 +105,7 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token and onboard phases ---
+	// --- fund, appliance-token, onboard, remove-piri and retire phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
@@ -171,6 +173,11 @@ type Response struct {
 	// DIDs, row counts and parameter names.
 	RetirePlan   *RetirePlan   `json:"retire_plan,omitempty"`
 	RetireResult *RetireResult `json:"retire_result,omitempty"`
+
+	// RemovePiriPlan and RemovePiriResult belong to the remove-piri phase, and
+	// carry only DIDs, endpoints and what was removed.
+	RemovePiriPlan   *onboard.RemovePlan   `json:"remove_piri_plan,omitempty"`
+	RemovePiriResult *onboard.RemoveResult `json:"remove_piri_result,omitempty"`
 }
 
 func main() {
@@ -217,11 +224,13 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.applianceToken(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
+	case "remove-piri":
+		return deps.removePiriPhase(ctx, req)
 	case "retire":
 		return deps.retirePhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\" or \"retire\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\", \"remove-piri\" or \"retire\"", req.Phase)
 	}
 }
 

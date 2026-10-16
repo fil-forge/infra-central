@@ -189,20 +189,7 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 		return onboard.Deps{}, fmt.Errorf("FORGE_ALLOW_LIST_TABLE is required for the onboard phase")
 	}
 
-	sprueIssuer, sprueDIDWeb, err := d.serviceIssuer(ctx, "sprue")
-	if err != nil {
-		return onboard.Deps{}, err
-	}
-	sprueClient, err := onboard.NewSprueClient(sprueDIDWeb, d.serviceURL("sprue"), sprueIssuer)
-	if err != nil {
-		return onboard.Deps{}, err
-	}
-
-	hiltIssuer, hiltDIDWeb, err := d.serviceIssuer(ctx, "hilt")
-	if err != nil {
-		return onboard.Deps{}, err
-	}
-	hiltClient, err := onboard.NewHiltClient(d.serviceURL("hilt"), hiltIssuer)
+	sprueClient, hiltClient, hiltDIDWeb, err := d.adminClients(ctx)
 	if err != nil {
 		return onboard.Deps{}, err
 	}
@@ -214,6 +201,30 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 		IssueProof: d.applianceProofIssuer(hiltDIDWeb),
 		PiriRecord: &piriRecords{store: d.store},
 	}, nil
+}
+
+// adminClients builds sprue's and hilt's admin clients, each signing with the
+// service's own key, and returns hilt's did:web beside them.
+func (d *deps) adminClients(ctx context.Context) (*onboard.SprueClient, *onboard.HiltClient, string, error) {
+	sprueIssuer, sprueDIDWeb, err := d.serviceIssuer(ctx, "sprue")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	sprueClient, err := onboard.NewSprueClient(sprueDIDWeb, d.serviceURL("sprue"), sprueIssuer)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	hiltIssuer, hiltDIDWeb, err := d.serviceIssuer(ctx, "hilt")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	hiltClient, err := onboard.NewHiltClient(d.serviceURL("hilt"), hiltIssuer)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	return sprueClient, hiltClient, hiltDIDWeb, nil
 }
 
 // proofIssuerKey names the parameter recording which hilt key signed a stored

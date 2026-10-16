@@ -48,6 +48,10 @@ type config struct {
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
 	// phase. Not validated at startup, because every other phase runs without it.
 	AllowListTable string
+
+	// ProviderInfoTable is the delegator's provider-info table, cleared by the
+	// remove-piri phase. Not validated at startup, for the same reason.
+	ProviderInfoTable string
 }
 
 func loadConfig() (config, error) {
@@ -61,6 +65,7 @@ func loadConfig() (config, error) {
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		ProviderInfoTable:   os.Getenv("FORGE_PROVIDER_INFO_TABLE"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
