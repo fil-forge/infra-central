@@ -29,6 +29,8 @@ type piriRecords struct {
 type publicStore interface {
 	EnsurePublic(ctx context.Context, service, name string, generate func() (string, error)) (string, bool, error)
 	ListPublic(ctx context.Context, service, subPrefix string) (map[string]string, error)
+	ListPublicTree(ctx context.Context, service string) (map[string]string, error)
+	Delete(ctx context.Context, service string, names ...string) ([]string, error)
 }
 
 // piriSubPrefix is where a region's Piri DIDs sit, one parameter each, under the
@@ -61,6 +63,43 @@ func (r *piriRecords) Record(ctx context.Context, region, piriDID string) error 
 	}
 	_, _, err = r.store.EnsurePublic(ctx, applianceService(region), name,
 		func() (string, error) { return piriDID, nil })
+	return err
+}
+
+// Regions lists every region of the stage a Piri DID is recorded under.
+//
+// Every region, not the one a caller names, so that removing a Piri under a
+// mistyped or wrong region is refused rather than read as "not recorded".
+func (r *piriRecords) Regions(ctx context.Context, piriDID string) ([]string, error) {
+	name, err := piriParameterName(piriDID)
+	if err != nil {
+		return nil, err
+	}
+
+	values, err := r.store.ListPublicTree(ctx, applianceServicePrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	var regions []string
+	for key, value := range values {
+		region, found := strings.CutSuffix(key, "/"+name)
+		if found && value == piriDID && !strings.Contains(region, "/") {
+			regions = append(regions, region)
+		}
+	}
+	sort.Strings(regions)
+	return regions, nil
+}
+
+// Remove deletes a Piri DID from a region's set. Removing one that is not
+// recorded succeeds.
+func (r *piriRecords) Remove(ctx context.Context, region, piriDID string) error {
+	name, err := piriParameterName(piriDID)
+	if err != nil {
+		return err
+	}
+	_, err = r.store.Delete(ctx, applianceService(region), name)
 	return err
 }
 

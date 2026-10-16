@@ -254,6 +254,38 @@ func (s *Store) ListPublic(ctx context.Context, service, subPrefix string) (map[
 	return values, nil
 }
 
+// ListPublicTree returns the values of every plaintext parameter under a
+// service's prefix, keyed by the name below that prefix, as in
+// "us-east-9/piri/z6Mk…" for the service "appliance".
+//
+// ListPublic keeps only the last segment, which is enough within one region.
+// Finding which regions hold a Piri needs the segments above it as well.
+func (s *Store) ListPublicTree(ctx context.Context, service string) (map[string]string, error) {
+	prefix := s.Prefix(service)
+
+	values := map[string]string{}
+	var token *string
+	for {
+		out, err := s.client.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
+			Path:      aws.String(prefix),
+			Recursive: aws.Bool(true),
+			NextToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", prefix, err)
+		}
+		for _, param := range out.Parameters {
+			name := strings.TrimPrefix(aws.ToString(param.Name), prefix+"/")
+			values[name] = aws.ToString(param.Value)
+		}
+		if out.NextToken == nil {
+			break
+		}
+		token = out.NextToken
+	}
+	return values, nil
+}
+
 // DeletePrefix removes every parameter under a service prefix and returns the
 // names it deleted.
 //

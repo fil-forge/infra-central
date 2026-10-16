@@ -78,10 +78,73 @@ func TestRecordWritesTheDIDUnderItsTail(t *testing.T) {
 	}
 }
 
+func TestRegionsFindsEveryRegionHoldingTheDID(t *testing.T) {
+	store := &fakePublicStore{tree: map[string]string{
+		"us-east-9/piri/z6MkOne":          "did:key:z6MkOne",
+		"eu-central-3/piri/z6MkOne":       "did:key:z6MkOne",
+		"eu-central-3/piri/z6MkTwo":       "did:key:z6MkTwo",
+		"us-east-9/unseal-token.accessor": "accessor",
+	}}
+
+	got, err := (&piriRecords{store: store}).Regions(context.Background(), "did:key:z6MkOne")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"eu-central-3", "us-east-9"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Regions() = %v, want %v", got, want)
+	}
+}
+
+func TestRegionsFindsNothingForAnUnrecordedDID(t *testing.T) {
+	store := &fakePublicStore{tree: map[string]string{
+		"us-east-9/piri/z6MkTwo": "did:key:z6MkTwo",
+	}}
+
+	got, err := (&piriRecords{store: store}).Regions(context.Background(), "did:key:z6MkOne")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Regions() = %v, want nothing", got)
+	}
+}
+
+func TestRemoveDeletesOnlyThatDID(t *testing.T) {
+	store := &fakePublicStore{params: map[string]string{
+		"piri/z6MkOne": "did:key:z6MkOne",
+		"piri/z6MkTwo": "did:key:z6MkTwo",
+	}}
+
+	if err := (&piriRecords{store: store}).Remove(context.Background(), "us-east-9", "did:key:z6MkOne"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"piri/z6MkTwo": "did:key:z6MkTwo"}
+	if !reflect.DeepEqual(store.params, want) {
+		t.Errorf("params = %v, want %v", store.params, want)
+	}
+}
+
 // fakePublicStore holds parameters by their name within one service, which is
-// the only service these tests use.
+// the only service these tests use. tree is what ListPublicTree returns, keyed
+// by the name below the service prefix.
 type fakePublicStore struct {
 	params map[string]string
+	tree   map[string]string
+}
+
+func (f *fakePublicStore) ListPublicTree(_ context.Context, _ string) (map[string]string, error) {
+	return f.tree, nil
+}
+
+func (f *fakePublicStore) Delete(_ context.Context, _ string, names ...string) ([]string, error) {
+	var deleted []string
+	for _, name := range names {
+		if _, found := f.params[name]; found {
+			delete(f.params, name)
+			deleted = append(deleted, name)
+		}
+	}
+	return deleted, nil
 }
 
 func (f *fakePublicStore) EnsurePublic(_ context.Context, _, name string, generate func() (string, error)) (string, bool, error) {

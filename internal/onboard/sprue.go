@@ -89,6 +89,20 @@ func (c *SprueClient) Register(ctx context.Context, providerDID, endpoint string
 	return nil
 }
 
+// Deregister removes a provider, its endpoint and its weights. sprue refuses a
+// DID it has no row for, so callers read with Provider first.
+func (c *SprueClient) Deregister(ctx context.Context, providerDID string) error {
+	parsed, err := did.Parse(providerDID)
+	if err != nil {
+		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
+	}
+
+	if _, err := c.client.AdminProviderDeregister(ctx, parsed); err != nil {
+		return fmt.Errorf("deregister %s: %w", providerDID, err)
+	}
+	return nil
+}
+
 // SetWeight sets a provider's scheduling and replication weights.
 func (c *SprueClient) SetWeight(ctx context.Context, providerDID string, weight, replicationWeight int) error {
 	parsed, err := did.Parse(providerDID)

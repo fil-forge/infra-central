@@ -15,7 +15,11 @@ package main
 // stored anywhere in AWS; it is delivered once to the node.
 const unsealTokenAccessorKey = "unseal-token.accessor"
 
+// applianceServicePrefix is the ssmstore service every region's prefix sits
+// under.
+const applianceServicePrefix = "appliance"
+
 // applianceService renders the ssmstore service prefix for a region.
 func applianceService(region string) string {
-	return "appliance/" + region
+	return applianceServicePrefix + "/" + region
 }

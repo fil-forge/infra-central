@@ -14,6 +14,7 @@ import (
 type dynamoAPI interface {
 	GetItem(ctx context.Context, in *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
+	DeleteItem(ctx context.Context, in *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error)
 }
 
 // DynamoAllowList is the delegator's allow list, written directly.
@@ -73,4 +74,10 @@ func (a *DynamoAllowList) Add(ctx context.Context, did string) error {
 		return fmt.Errorf("put %s into %s: %w", did, a.table, err)
 	}
 	return nil
+}
+
+// Remove takes a DID off the list. Deleting a DID that is not there succeeds,
+// as DynamoDB's DeleteItem does.
+func (a *DynamoAllowList) Remove(ctx context.Context, did string) error {
+	return deleteKey(ctx, a.client, a.table, "did", did)
 }
