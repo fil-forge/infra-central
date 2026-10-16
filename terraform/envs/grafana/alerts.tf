@@ -1035,7 +1035,8 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name and are told apart by node. An instant query, so no reduce stage.
+  # service_name and are told apart by node, once the second is given a node
+  # value of its own. An instant query, so no reduce stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -2544,8 +2545,8 @@ resource "grafana_rule_group" "appliance_containers" {
   # None of the three tells two boxes in one region apart today, and node is
   # the label meant to: infra-nodes' design has node identify the box, and
   # names it as what tells apart two nodes sharing a stage, a region and a
-  # service_name. Only its value falls short, taken from a directory path that
-  # distinguishes regions. A second box in a region therefore needs a node
+  # service_name. Only its value falls short: it is the node's name, which
+  # distinguishes regions and not boxes. A second box in a region needs a node
   # value of its own, not a new label -- and until it has one, the `unless`
   # branch above would let a live sibling hold the 5m side populated and mask
   # a dead cAdvisor. The branch beside it still catches a target that fails
