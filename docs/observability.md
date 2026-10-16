@@ -84,6 +84,27 @@ the query's labels, so it has no `stage`. It cannot be told apart from
 production, so IRM should page on a critical alert with no `stage` as well as on
 `stage = "prod"`.
 
+A rule's `severity` says how soon someone has to act if it fires in
+production. A rule has one severity for every stage, and it is routing, not
+the label, that keeps staging from paging.
+
+- **`critical`**: customers are affected now, or something will be lost for
+  good before the next day unless someone acts: a proof set Curio is about to
+  give up on, failures counting toward that, or work Piri is about to stop
+  retrying. Pages in production, and when the alert has no `stage`.
+- **`warning`**: needs action the same or the next working day. That includes
+  a loss that grows while it lasts but stops once the cause is fixed, such as a
+  missed proving period's payment: mainnet's period is 24 hours, so the next
+  working day loses about one period. Weekends are a known gap
+  ([FIL-1509](https://linear.app/filecoin-foundation/issue/FIL-1509)).
+  Notifies.
+- **`info`**: a trend to look at; nobody needs to act on it right away. IRM's
+  routes can treat it more quietly than a warning.
+
+A rule is `critical` only when a person paged now can do something about it and
+waiting until the next day would cost something that can't be recovered.
+Otherwise it is a `warning`, or `info` if nobody needs to act on it.
+
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
@@ -116,6 +137,33 @@ appliance label.
 parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with "no subpiece found".
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
+
+## Adding an alert or panel
+
+What a change needs so that on-call hears when it breaks. Appliance services (Piri, Ingot and the
+rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
+live here.
+
+- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
+  and no-data handling fit; the appliance has three. Each rule needs:
+  - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
+  - a `severity` chosen by the severity definitions above;
+  - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
+    template over them, or as a literal for a rule that watches one stage; an appliance rule uses
+    `local.appliance_stage_label`;
+  - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
+    tree described above.
+
+  CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
+  rules at the end of their group, because the provider keeps each rule's uid by its position. Add
+  a row to the rule table above.
+- **Dashboard panels** go in the JSON under `terraform/envs/grafana/dashboards/`. Edit the JSON, or
+  export it from the UI, then run `scripts/normalise-dashboard.sh` and commit the result; `make
+  check` rejects a file that isn't normalised. Link a rule to its panel with `dashboard_url`,
+  `__dashboardUid__` and `__panelId__`, as the existing rules do.
+- **Telemetry.** Application metrics don't ship yet (see [What ships](#what-ships)), so a feature
+  whose health can only be seen from inside a service needs that service to export the metric
+  first.
 
 ## Logs
 
