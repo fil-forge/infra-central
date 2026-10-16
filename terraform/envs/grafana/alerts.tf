@@ -1916,7 +1916,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day it stays stuck costs that proving period's payment, and nothing more is lost once scheduling runs again, unless Piri is also failing to add pieces, for example because the owner wallet is out of FIL. Then its pending batches strand after about 3.5 hours, so check the wallet first and see the runbook."
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
@@ -2225,8 +2225,8 @@ resource "grafana_rule_group" "appliance" {
   # is fixed. The causes that can lose more mostly page on their own, as
   # "proving is failing" and "chain head is stale", except the AddRoots case
   # described under "proving period has not advanced". This departs from the
-  # Critical the piri docs recommend, for that reason. `for` is 10m. The threshold is the
-  # grace; this only confirms it.
+  # Critical the piri docs recommend, for that reason. `for` is 10m. The
+  # threshold is the grace; this only confirms it.
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
@@ -2246,7 +2246,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
-      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment, and proving resumes once the cause is fixed, unless Piri is also failing to add pieces, for example because the owner wallet is out of FIL. Then its pending batches strand after about 3.5 hours, so check the wallet first and see the runbook."
+      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment. If the wallet is empty, Piri's pending piece additions have probably stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-prove-task-has-not-run-in-15-proving-periods"
     }
 
