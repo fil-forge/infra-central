@@ -2508,22 +2508,28 @@ resource "grafana_rule_group" "appliance_containers" {
   # `for = 0m`; harmonising the two would turn every node death into a second
   # page.
   #
-  # Grouped by node as well as appliance, although cAdvisor's `up` carries no
-  # node label today. `appliance` is <stage>-<region>, set through external
-  # labels on remote_write, so it can never tell two boxes in one region apart,
-  # and grouping by it alone would let a healthy sibling mask a dead cAdvisor
-  # through the `unless` above. Prometheus reads an absent label as empty, so
-  # this groups exactly as `by (appliance)` would until the host's Alloy sets
-  # node on the cAdvisor scrape, and becomes per box by itself on the day it
-  # does. No second edit, and nothing to remember.
+  # Grouped by region and node as well as appliance. `appliance` is
+  # <stage>-<region>, set through external labels on remote_write, so it can
+  # never tell two boxes in one region apart, and grouping by it alone would
+  # let a healthy sibling mask a dead cAdvisor through the `unless` above.
   #
-  # The gate cannot move early the same way. The host scrape already carries
-  # node, so joining on it now would match an empty string against a real one,
-  # find nothing, and leave this rule silently Normal for ever -- the same class
-  # of fault the rule exists to catch. It stays region-wide, which with two
-  # boxes means a live sibling holds it open; that is a far smaller gap than a
-  # masked detection, and the case it softens is a box entirely dead, which the
-  # node rule already covers.
+  # region is a function of appliance, so adding it splits no group and changes
+  # nothing about when this fires. It is in the grouping because the dashboard
+  # link below reads $labels.region, and an annotation can only read a label
+  # the query emits; without it the link carried the literal <no value>. The
+  # rule beside this one has grouped by region from the start.
+  #
+  # node is what would separate two boxes, and today it does not: every host's
+  # Alloy sets it to <stage>/<region>, the same granularity as appliance, so
+  # grouping by it is a no-op. It stays because that value is per-host config,
+  # so the rule starts separating boxes on the day one is given a name of its
+  # own, with no edit here.
+  #
+  # The gate stays joined on appliance. Both scrapes carry node now, so `on
+  # (node)` would match where it once would not, but narrowing the gate changes
+  # when this rule fires and that is not what this change is for. Region-wide
+  # means a live sibling holds the gate open; the case that softens is a box
+  # entirely dead, which the node rule already covers.
   rule {
     name           = "Appliance container telemetry has stopped"
     condition      = "C"
@@ -2567,16 +2573,16 @@ resource "grafana_rule_group" "appliance_containers" {
         legendFormat = "{{appliance}}"
         expr         = <<-PROMQL
           (
-            max by (appliance, node) (
+            max by (appliance, region, node) (
               up{${local.cadvisor_matcher}} == bool 0
             )
             or
             (
-              max by (appliance, node) (
+              max by (appliance, region, node) (
                 present_over_time(up{${local.cadvisor_matcher}}[24h])
               )
               unless
-              max by (appliance, node) (
+              max by (appliance, region, node) (
                 present_over_time(up{${local.cadvisor_matcher}}[5m])
               )
             )
