@@ -156,10 +156,12 @@ locals {
   # prometheus.relabel component that sets service_name on every series, so
   # their `up` carries it (infra-nodes docs/RUNBOOK.md, staging section). The
   # cAdvisor scrape is routed through the rules that read a container's Compose
-  # labels, which `up` does not have, so its `up` arrives carrying only the
-  # appliance label that remote_write puts on everything from the box, plus job
-  # and instance. Observed 2026-10-07: up{appliance="staging-eu-central-3",
-  # instance="ff", job="cadvisor"}.
+  # labels, which `up` does not have, so its `up` carries no service_name. It
+  # does carry the appliance label that remote_write puts on everything from
+  # the box, plus job, and the node, region and instance that the same relabel
+  # component sets statically. Observed on staging:
+  # up{appliance="staging-eu-central-3", instance="staging/eu-central-3",
+  # job="cadvisor", node="staging/eu-central-3", region="eu-central-3"}.
   #
   # Scoping matters here. The appliance's Alloy also ships telemetry for
   # workloads that are not ours and for remote targets, and every one of those
@@ -2499,28 +2501,31 @@ resource "grafana_rule_group" "appliance_containers" {
   # `for = 0m`; harmonising the two would turn every node death into a second
   # page.
   #
-  # Grouped by region and node as well as appliance. `appliance` is
-  # <stage>-<region>, set through external labels on remote_write, so it can
-  # never tell two boxes in one region apart, and grouping by it alone would
-  # let a healthy sibling mask a dead cAdvisor through the `unless` above.
+  # Grouped by region and node as well as appliance, though today all three
+  # say the same thing. `appliance` is <stage>-<region>, set through external
+  # labels on remote_write. node is the node's directory under nodes/ in
+  # infra-nodes, and that repo's README nests those by region label once a
+  # stage holds more than one, so it reads <stage>/<region>. region is a
+  # function of appliance. The three partition identically: one group per
+  # appliance, however this is written.
   #
-  # region is a function of appliance, so adding it splits no group and changes
-  # nothing about when this fires. It is in the grouping because the dashboard
-  # link below reads $labels.region, and an annotation can only read a label
-  # the query emits; without it the link carried the literal <no value>. The
-  # rule beside this one has grouped by region from the start.
+  # region is in the grouping because the dashboard link below reads
+  # $labels.region, and an annotation can only read a label the query emits;
+  # without it the link carried the literal <no value>. node is in it because
+  # the rule beside this one groups by it. Neither splits a group, so neither
+  # changes when this fires.
   #
-  # node is what would separate two boxes, and today it does not: every host's
-  # Alloy sets it to <stage>/<region>, the same granularity as appliance, so
-  # grouping by it is a no-op. It stays because that value is per-host config,
-  # so the rule starts separating boxes on the day one is given a name of its
-  # own, with no edit here.
+  # None of the three tells two boxes in one region apart, and nothing else in
+  # the appliance's telemetry does either -- instance is relabelled to
+  # <stage>/<region> too. infra-nodes' initial design states one Piri per
+  # region and leaves multi-piri to future work, so this is a label that does
+  # not exist rather than one this rule declines to use. A region that grows a
+  # second box needs one designed first: until then the `unless` above would
+  # let a live sibling mask a dead cAdvisor, with nothing here to show it.
   #
-  # The gate stays joined on appliance. Both scrapes carry node now, so `on
-  # (node)` would match where it once would not, but narrowing the gate changes
-  # when this rule fires and that is not what this change is for. Region-wide
-  # means a live sibling holds the gate open; the case that softens is a box
-  # entirely dead, which the node rule already covers.
+  # The gate stays joined on appliance. `on (node)` would match and would
+  # partition the same way, so it is not a narrower gate but another spelling
+  # of this one; it is left alone because changing it is not this change's job.
   rule {
     name           = "Appliance container telemetry has stopped"
     condition      = "C"
