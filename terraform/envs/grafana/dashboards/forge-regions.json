@@ -3351,7 +3351,7 @@
         "spec": {
           "id": 23,
           "title": "Ingot dead catalog share",
-          "description": "How much of the node's catalog on Forge is dead. The two walked lines cover the buckets with a completed catalog walk, each bucket's live and dead bytes from the same moment: all dead bytes, and the part that died after its segment shipped. The gap between them is, roughly, what those buckets' measured segments held dead on arrival. Died after shipping also includes every dead block of segments Ingot didn't measure, so it reads high while unmeasured bytes are large (\"Ingot catalog on Forge\"). Dead on arrival, measured segments, covers every bucket. The walked shares are floors: a walk counts a block once per link to it, so a block several others link to counts as live more than once, and a bucket whose walk reached more than it has shipped counts as none dead.",
+          "description": "How much of the node's catalog on Forge is dead. The two walked lines cover the buckets with a completed catalog walk, each bucket's live and dead bytes from the same moment: all dead bytes, and the part that died after its segment shipped. The gap between them is, roughly, what those buckets' measured segments held dead on arrival. Died after shipping also includes every dead block of segments Ingot didn't measure, so it reads high while unmeasured bytes are large (\"Ingot catalog on Forge\"). Dead on arrival, measured segments, covers every bucket. The dead line is a floor: a walk counts a block once per link to it, so a block several others link to counts as live more than once, and a bucket whose walk reached more than it has shipped counts as none dead. Died after shipping is one too, once unmeasured bytes are small.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -3515,7 +3515,7 @@
         "spec": {
           "id": 24,
           "title": "Ingot catalog walk coverage",
-          "description": "Catalog bytes on Forge, stacked by the state of each bucket's last catalog walk: current (the bucket's root hasn't moved since), stale (it has) or never walked. The dead figures speak only for current and stale buckets. Ingot walks a bucket only while it holds read authority borrowed from a recent request in the bucket's space, so a bucket with no request since Ingot started isn't walked, and one never walked stays in never. A stopped walker shows as bytes moving from current to stale as buckets take writes.",
+          "description": "Catalog bytes on Forge, stacked by the state of each bucket's last catalog walk: current (the bucket's root hasn't moved since), stale (it has) or never walked. The dead figures speak only for current and stale buckets. Ingot walks a bucket only while it holds read authority borrowed from a recent request in the bucket's space, so a bucket with no request since Ingot started isn't walked: one walked before then stays current or stale, and one never walked stays in never. A bucket goes stale with its next write and isn't walked again until catalog_walk_interval (6h by default) after its last walk, so stale bytes are normal. A stopped walker shows as stale bytes that don't return to current within that interval, while new buckets stay in never.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
