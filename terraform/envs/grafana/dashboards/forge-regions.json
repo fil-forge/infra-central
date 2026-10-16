@@ -3165,7 +3165,7 @@
         "spec": {
           "id": 22,
           "title": "Ingot catalog on Forge",
-          "description": "Catalog bytes Ingot has shipped to Forge and not released, summed over the node's buckets: the segments' CARs, not their index blobs. Nothing collects dead catalog blocks yet, so the shipped line only grows until a bucket is deleted. Dead on arrival is the part already superseded when its segment shipped, counted only over segments shipped since Ingot began measuring it. Dead counts only buckets with a completed catalog walk; \"Ingot catalog walk coverage\" says how much that leaves out. Ingot's README, \"Catalog storage\", says what each gauge measures.",
+          "description": "Catalog bytes Ingot has shipped to Forge and not released, summed over the node's buckets: the segments' CARs, not their index blobs. Nothing collects dead catalog blocks yet, so the shipped line only grows until a bucket is deleted. Dead on arrival is the part already superseded when its segment shipped, over the segments Ingot measured; unmeasured is the shipped bytes it didn't measure, such as every segment shipped before it began measuring. Dead counts only buckets with a completed catalog walk, as of that walk for a bucket whose root has moved since; \"Ingot catalog walk coverage\" says how much that leaves out. Ingot's README, \"Catalog storage\", says what each gauge measures.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -3240,6 +3240,30 @@
                       }
                     },
                     "refId": "C",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (node) (ingot_catalog_unmeasured_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{node}} unmeasured",
+                        "range": true
+                      }
+                    },
+                    "refId": "D",
                     "hidden": false
                   }
                 }
@@ -3327,36 +3351,12 @@
         "spec": {
           "id": 23,
           "title": "Ingot dead catalog share",
-          "description": "How much of the node's catalog on Forge is dead. Dead on arrival is over the shipped segments Ingot measured. Dead is over the buckets with a completed catalog walk, each bucket's live and dead bytes taken from the same moment. The gap between the two lines is catalog that died after it shipped, which only a collector could reclaim; what was dead on arrival, pruning at seal could keep off Forge instead.",
+          "description": "How much of the node's catalog on Forge is dead. The two walked lines cover the buckets with a completed catalog walk, each bucket's live and dead bytes from the same moment: all dead bytes, and the part that died after its segment shipped. The gap between them is, roughly, what those buckets' measured segments held dead on arrival. Died after shipping also includes every dead block of segments Ingot didn't measure, so it reads high while unmeasured bytes are large (\"Ingot catalog on Forge\"). Dead on arrival, measured segments, covers every bucket. The walked shares are floors: a walk counts a block once per link to it, so a block several others link to counts as live more than once, and a bucket whose walk reached more than it has shipped counts as none dead.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
               "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "spec": {
-                        "editorMode": "code",
-                        "exemplar": false,
-                        "expr": "sum by (node) (ingot_catalog_dead_on_arrival_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})\n/\n(sum by (node) (ingot_catalog_forge_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"} - ingot_catalog_unmeasured_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}) > 0)",
-                        "format": "time_series",
-                        "instant": false,
-                        "legendFormat": "{{node}} dead on arrival",
-                        "range": true
-                      }
-                    },
-                    "refId": "A",
-                    "hidden": false
-                  }
-                },
                 {
                   "kind": "PanelQuery",
                   "spec": {
@@ -3377,7 +3377,55 @@
                         "range": true
                       }
                     },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (node) (ingot_catalog_dead_after_ship_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})\n/\n(sum by (node) (ingot_catalog_live_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"} + ingot_catalog_dead_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}) > 0)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{node}} died after shipping, walked buckets",
+                        "range": true
+                      }
+                    },
                     "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "editorMode": "code",
+                        "exemplar": false,
+                        "expr": "sum by (node) (ingot_catalog_dead_on_arrival_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})\n/\n(sum by (node) (ingot_catalog_forge_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"} - ingot_catalog_unmeasured_bytes{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}) > 0)",
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{node}} dead on arrival, measured segments",
+                        "range": true
+                      }
+                    },
+                    "refId": "C",
                     "hidden": false
                   }
                 }
@@ -3467,7 +3515,7 @@
         "spec": {
           "id": 24,
           "title": "Ingot catalog walk coverage",
-          "description": "Catalog bytes on Forge, stacked by the state of each bucket's last catalog walk: current (the bucket's root hasn't moved since), stale (it has) or never walked. The dead figures speak only for current and stale buckets. Ingot walks a bucket only while it holds read authority borrowed from a recent request in the bucket's space, so a bucket nobody has used since Ingot started stays in never.",
+          "description": "Catalog bytes on Forge, stacked by the state of each bucket's last catalog walk: current (the bucket's root hasn't moved since), stale (it has) or never walked. The dead figures speak only for current and stale buckets. Ingot walks a bucket only while it holds read authority borrowed from a recent request in the bucket's space, so a bucket with no request since Ingot started isn't walked, and one never walked stays in never. A stopped walker shows as bytes moving from current to stale as buckets take writes.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -3581,7 +3629,7 @@
         "spec": {
           "id": 25,
           "title": "Ingot largest bucket catalogs",
-          "description": "The ten buckets with the most catalog bytes on Forge. Ingot labels each bucket by its space DID, never by its name.",
+          "description": "The ten buckets with the most catalog bytes on Forge. Ingot labels each bucket by its space DID, never by its name. The top ten is taken at each point, so over a long range the legend can list more than ten buckets, each with gaps where it fell out.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
