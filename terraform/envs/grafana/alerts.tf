@@ -181,11 +181,12 @@ locals {
 
   # The stage as a label of its own, for routing. Production critical alerts
   # page where staging's notify, and a route can only tell them apart by a label
-  # the alert carries. Central's rules take one from their queries. The
-  # appliance's take it from the appliance label, <stage>-<region> by
-  # construction, cut at its first hyphen as the dashboard link below does.
-  # Adding it changed every appliance alert instance's identity once, when it
-  # landed.
+  # the alert carries. Central's rules get one either way: some read it out of
+  # a query label, others set it here as a rule label. The appliance's all take
+  # it from the appliance label, <stage>-<region> by construction, cut at its
+  # first hyphen. The regions dashboard link below interpolates this same
+  # local, so the substitution has one home. Adding the label changed every
+  # appliance alert instance's identity once, when it landed.
   #
   # An instance raised because the query failed or came back empty carries
   # none of the query's labels, so it has no stage, and a route that matches
@@ -202,9 +203,28 @@ locals {
   # own link showed the on-call an empty dashboard for a stage that had not
   # fired, which is the failure these rules exist to prevent, one level up.
   #
-  # A URL Grafana does not build can carry them. Central's rules already derive
-  # a stage label in their queries; the appliance's do not, and the appliance
-  # label is <stage>-<region>, so reReplaceAll cuts it at the first hyphen.
+  # A URL Grafana does not build can carry them, but the two links get the
+  # stage differently, and the difference is not cosmetic. What decides it is
+  # where the stage comes from, not which group the rule sits in: an annotation
+  # can read a query label and cannot read a rule label. Grafana expands a
+  # rule's labels and its annotations in one pass from the same data -- the
+  # query's labels -- so a rule label is an output of that pass rather than an
+  # input to it. Prometheus's own alerting expands the two the same way, from
+  # the same data, so this is not a Grafana quirk to route around.
+  #
+  # The rules behind central_dashboard build their stage inside the query with
+  # label_replace, so it is one of the result's own labels and
+  # `{{ $labels.stage }}` resolves there. Every rule behind regions_dashboard
+  # takes its stage from appliance_stage_label, which is a rule label, so
+  # `{{ $labels.stage }}` would render the literal <no value> and send the
+  # on-call to the dashboard's default stage. Central's remaining rules set a
+  # rule label too and carry no dashboard link; one that gains a link has to
+  # interpolate rather than read, exactly as this does.
+  #
+  # So this interpolates appliance_stage_label in Terraform instead. What
+  # Grafana stores is byte for byte what it stored before the local was
+  # interpolated here; the point is that there is one copy of the substitution
+  # in this file rather than two.
   #
   # The __ pair stays. It is what ties a rule to its panel inside Grafana's own
   # UI, and removing it would empty panelURL in the payload again. This is the
@@ -213,7 +233,7 @@ locals {
   # The host repeats the provider's url in main.tf. There is one stack, and no
   # variable for it to share yet.
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
-  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ reReplaceAll \"-.*\" \"\" $labels.appliance }}&var-region={{ $labels.region }}"
+  regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage=${local.appliance_stage_label}&var-region={{ $labels.region }}"
 
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
