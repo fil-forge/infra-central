@@ -207,6 +207,9 @@ module "hilt" {
 
     HILT_PLC_DIRECTORY = local.plc_directory
 
+    HILT_REVOCATION_SERVICE_ID  = local.did.swarf
+    HILT_REVOCATION_SERVICE_URL = local.url.swarf
+
     HILT_UPLOAD_SERVICE_ID  = local.did.sprue
     HILT_UPLOAD_SERVICE_URL = local.url.sprue
     HILT_UPLOAD_PRODUCT_ID  = local.did.hilt
