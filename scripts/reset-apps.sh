@@ -138,7 +138,7 @@ wait_stable() {
 empty_table() {
   local table="$1" key page requests deleted=0
   key="$(aws dynamodb describe-table --table-name "$table" \
-    --query 'Table.KeySchema[?KeyType==`HASH`].AttributeName | [0]' --output text)"
+    --query "Table.KeySchema[?KeyType=='HASH'].AttributeName | [0]" --output text)"
 
   while :; do
     page="$(aws dynamodb scan --table-name "$table" \
