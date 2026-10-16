@@ -1601,11 +1601,13 @@ resource "grafana_rule_group" "appliance" {
   # The labelling convention, alerted on rather than written down.
   #
   # Every per-box rule in this file needs `node`, because `appliance` is
-  # <stage>-<region> and cannot tell two boxes in one region apart. The host and
-  # Caddy scrapes carry node because each is routed through a relabel component
-  # that sets it on every series; the cAdvisor scrape is routed through rules
-  # that read a container's Compose labels, which `up` does not have, so its
-  # `up` arrives without one. That is a convention living in a config outside
+  # <stage>-<region> and cannot tell two boxes in one region apart. All three
+  # scrapes set it: the host and Caddy each through a relabel component, and
+  # the cAdvisor scrape through the static rules its own relabel component
+  # adds, since `up` carries none of the Compose labels the rest of those
+  # rules read. What node carries today is a per-region value, which is a
+  # different problem from the label going missing and not the one this rule
+  # is about. That is a convention living in a config outside
   # these repositories, and conventions in prose get dropped when the config is
   # re-implemented -- which it will be, at the next box and again if the
   # appliance ever runs its own Alloy.
@@ -2523,11 +2525,10 @@ resource "grafana_rule_group" "appliance_containers" {
   #
   # Grouped by region and node as well as appliance, though today all three
   # say the same thing. `appliance` is <stage>-<region>, set through external
-  # labels on remote_write. node is the node's directory under nodes/ in
-  # infra-nodes, and that repo's README nests those by region label once a
-  # stage holds more than one, so it reads <stage>/<region>. region is a
-  # function of appliance. The three partition identically: one group per
-  # appliance, however this is written.
+  # labels on remote_write, and region is a function of it. node comes from
+  # FILONE_NODE, the node's directory under nodes/ in infra-nodes, and today
+  # that path names a stage and a region rather than a machine. So the three
+  # partition identically: one group per appliance, however this is written.
   #
   # region is in the grouping because the dashboard link below reads
   # $labels.region, and an annotation can only read a label the query emits;
@@ -2535,17 +2536,21 @@ resource "grafana_rule_group" "appliance_containers" {
   # the rule beside this one groups by it. Neither splits a group, so neither
   # changes when this fires.
   #
-  # None of the three tells two boxes in one region apart, and nothing else in
-  # the appliance's telemetry does either -- instance is relabelled to
-  # <stage>/<region> too. infra-nodes' initial design states one Piri per
-  # region and leaves multi-piri to future work, so this is a label that does
-  # not exist rather than one this rule declines to use. A region that grows a
-  # second box needs one designed first: until then the `unless` above would
-  # let a live sibling mask a dead cAdvisor, with nothing here to show it.
+  # None of the three tells two boxes in one region apart today, and node is
+  # the label meant to: infra-nodes' design has node identify the box, and
+  # names it as what tells apart two nodes sharing a stage, a region and a
+  # service_name. Only its value falls short, taken from a directory path that
+  # distinguishes regions. A second box in a region therefore needs a node
+  # value of its own, not a new label -- and until it has one, the `unless`
+  # branch above would let a live sibling hold the 5m side populated and mask
+  # a dead cAdvisor. The branch beside it still catches a target that fails
+  # rather than vanishes: `up == bool 0` maxes to 1 across the pair.
   #
-  # The gate stays joined on appliance. `on (node)` would match and would
-  # partition the same way, so it is not a narrower gate but another spelling
-  # of this one; it is left alone because changing it is not this change's job.
+  # The gate stays joined on appliance. Moving it to node would mean `on
+  # (node)` and `max by (node)` together, as the rule beside this one does;
+  # `on (node)` alone would find no node label on the right-hand side, match
+  # nothing, and leave this rule silently Normal. It is left as it is because
+  # changing it is not this change's job.
   rule {
     name           = "Appliance container telemetry has stopped"
     condition      = "C"
