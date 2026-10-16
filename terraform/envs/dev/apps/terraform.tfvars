@@ -19,7 +19,7 @@ image_digests = {
 
   swarf = "sha256:4807de8a7dd8c81ea26154447affebf5d912d1ea00bbd2e911fcc222950f4098"
 
-  delegator = "sha256:30b1757986ce213a8eecacbd7a463142a242b0f3932180796aad62c2f2ccc2fe"
+  delegator = "sha256:7fb4eb518859b62c11ddafaa3b88cdcf8c9623e8d7a68a366a6af647479f19b3"
 
   signing_service = "sha256:4493534d96a4f7f202e58f8811b7258da7feda4d79e710473c903f99ace76a98"
 
