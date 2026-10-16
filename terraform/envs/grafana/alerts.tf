@@ -158,8 +158,11 @@ locals {
   # cAdvisor scrape is routed through the rules that read a container's Compose
   # labels, which `up` does not have, so its `up` carries no service_name. It
   # does carry the appliance label that remote_write puts on everything from
-  # the box, plus job, and the node, region and instance that the same relabel
-  # component sets statically. Observed on staging:
+  # the box, plus job, and the node, region and instance that the cAdvisor
+  # relabel component sets as static rules of its own. That is the appliance's
+  # mechanism; dev runs no cAdvisor, and takes node and region from
+  # remote_write's external_labels as the piri_metric_matcher comment above
+  # describes. Observed on staging once those rules landed:
   # up{appliance="staging-eu-central-3", instance="staging/eu-central-3",
   # job="cadvisor", node="staging/eu-central-3", region="eu-central-3"}.
   #
@@ -1605,12 +1608,12 @@ resource "grafana_rule_group" "appliance" {
   # scrapes set it: the host and Caddy each through a relabel component, and
   # the cAdvisor scrape through the static rules its own relabel component
   # adds, since `up` carries none of the Compose labels the rest of those
-  # rules read. What node carries today is a per-region value, which is a
-  # different problem from the label going missing and not the one this rule
-  # is about. That is a convention living in a config outside
-  # these repositories, and conventions in prose get dropped when the config is
-  # re-implemented -- which it will be, at the next box and again if the
-  # appliance ever runs its own Alloy.
+  # rules read. That node's value is per-region today is a different problem
+  # from the label going missing, and not the one this rule is about. The
+  # labelling is a convention living in a config outside these repositories,
+  # and conventions in prose get dropped when the config is re-implemented --
+  # which it will be, at the next box and again if the appliance ever runs its
+  # own Alloy.
   #
   # So this fires while the convention is broken, and goes quiet when it is
   # kept. Prometheus reads an absent label as empty, so node="" selects exactly
@@ -2525,10 +2528,12 @@ resource "grafana_rule_group" "appliance_containers" {
   #
   # Grouped by region and node as well as appliance, though today all three
   # say the same thing. `appliance` is <stage>-<region>, set through external
-  # labels on remote_write, and region is a function of it. node comes from
-  # FILONE_NODE, the node's directory under nodes/ in infra-nodes, and today
-  # that path names a stage and a region rather than a machine. So the three
-  # partition identically: one group per appliance, however this is written.
+  # labels on remote_write, and region is a function of it. node is the node's
+  # name in infra-nodes -- dev for the dev node, staging/eu-central-3 for this
+  # appliance, which the host's own Alloy sets as a literal rather than from
+  # FILONE_NODE. Either way it names a stage and at most a region, never a
+  # machine. So the three partition identically: one group per appliance,
+  # however this is written.
   #
   # region is in the grouping because the dashboard link below reads
   # $labels.region, and an annotation can only read a label the query emits;
