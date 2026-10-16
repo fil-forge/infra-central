@@ -233,6 +233,12 @@ const proofIssuerKey = ".issuer"
 // key. The signing key's did:key is recorded beside the proof so a later run can
 // see the rotation and reissue, the same dependency the seed phase tracks for
 // the startup proofs.
+//
+// A stored delegation that lacks a command HiltIngotS3Proof now grants is
+// reissued too. Its command list was fixed when it was issued, so without a
+// reissue Ingot invokes the new command with no proof and hilt refuses it. The
+// old copy stays valid until the appliance swaps it for the new one, which
+// grants everything it did.
 func (d *deps) applianceProofIssuer(hiltDIDWeb string) func(context.Context, string, string) (string, error) {
 	return func(ctx context.Context, region, ingotDID string) (string, error) {
 		proof := keygen.HiltIngotS3Proof(applianceService(region), hiltDIDWeb, ingotDID)
@@ -260,25 +266,33 @@ func (d *deps) applianceProofIssuer(hiltDIDWeb string) func(context.Context, str
 			return stored, d.recordProofIssuer(ctx, proof, hiltIdentity.DID)
 		}
 
+		missing, err := keygen.MissingCommands(stored, proof)
+		if err != nil {
+			return "", err
+		}
 		issuer, found, err := d.store.LookupPublic(ctx, proof.Consumer, proof.Name+proofIssuerKey)
 		if err != nil {
 			return "", err
 		}
-		if found && issuer == hiltIdentity.DID {
+		switch {
+		case len(missing) > 0:
+			slog.Warn("the stored delegation lacks commands Ingot invokes, reissuing the appliance's delegation",
+				"region", region, "missing", missing)
+		case found && issuer == hiltIdentity.DID:
 			slog.Info("returning the delegation issued earlier", "region", region)
 			return stored, nil
-		}
-		if !found {
+		case !found:
 			// A proof stored before this record existed. Its issuer is unknown,
 			// and hilt's key is far more likely to be the original than a
 			// rotated one, so the record is stamped rather than the proof
 			// reissued: reissuing churns the bytes an appliance already holds.
 			slog.Info("recording which key signed the stored delegation", "region", region)
 			return stored, d.recordProofIssuer(ctx, proof, hiltIdentity.DID)
+		default:
+			slog.Warn("hilt's identity was rotated, reissuing the appliance's delegation",
+				"region", region, "was", issuer, "now", hiltIdentity.DID)
 		}
 
-		slog.Warn("hilt's identity was rotated, reissuing the appliance's delegation",
-			"region", region, "was", issuer, "now", hiltIdentity.DID)
 		reissued, err := keygen.IssueProof([]byte(hiltPEM), proof)
 		if err != nil {
 			return "", err
