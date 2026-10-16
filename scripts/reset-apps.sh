@@ -150,8 +150,12 @@ empty_table() {
 purge_bucket() {
   local bucket="$1" page objects count deleted=0
   while :; do
-    page="$(aws s3api list-object-versions --bucket "$bucket" --max-items 1000 --output json)"
-    objects="$(jq -c '{Objects: ([.Versions[]?, .DeleteMarkers[]?] | map({Key, VersionId})), Quiet: true}' <<<"$page")"
+    # One service page, whose MaxKeys bounds versions and delete markers
+    # together. The CLI's --max-items counts only versions and can return more
+    # than DeleteObjects takes, so the slice below is a second bound.
+    page="$(aws s3api list-object-versions --bucket "$bucket" \
+      --no-paginate --max-keys 1000 --output json)"
+    objects="$(jq -c '{Objects: ([.Versions[]?, .DeleteMarkers[]?] | map({Key, VersionId}) | .[:1000]), Quiet: true}' <<<"$page")"
     count="$(jq '.Objects | length' <<<"$objects")"
     [ "$count" -gt 0 ] || break
 
@@ -236,7 +240,7 @@ finished=false
 trap '[ "$finished" = true ] || {
   echo >&2
   echo "ERROR: the reset stopped partway, and the app services may still be at zero." >&2
-  echo "Rerun scripts/reset-apps.sh --stage ${STAGE} to finish." >&2
+  echo "Rerun make reset-apps STAGE=${STAGE} to finish; make supplies the AWS region." >&2
 }' EXIT
 
 echo "[2/5] Scaling ${SERVICES[*]} to zero…"
