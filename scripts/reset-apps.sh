@@ -123,9 +123,10 @@ wait_stable() {
 # empty_table <table> — delete every item, a page of 25 at a time, which is the
 # most one BatchWriteItem takes. The table itself stays, so this works under
 # deletion protection. Items the batch leaves unprocessed reappear in the next
-# scan.
+# scan. A line after each page shows the running total.
 empty_table() {
   local table="$1" key page requests deleted=0
+  echo "  emptying $table…"
   key="$(aws dynamodb describe-table --table-name "$table" \
     --query "Table.KeySchema[?KeyType=='HASH'].AttributeName | [0]" --output text)"
 
@@ -139,6 +140,7 @@ empty_table() {
       '{($table): [.Items[] | {DeleteRequest: {Key: .}}]}' <<<"$page")"
     aws dynamodb batch-write-item --request-items "$requests" >/dev/null
     deleted=$((deleted + $(jq '.Items | length' <<<"$page")))
+    echo "    deleted $deleted item(s) so far"
   done
   echo "  ✓ emptied $table ($deleted item(s))"
 }
@@ -147,8 +149,11 @@ empty_table() {
 # of up to 1000 at a time. Staging's buckets are versioned, and aws s3 rm would
 # only stack delete markers on top of the old versions. An unversioned bucket
 # lists each object once, with version ID "null", so the same call covers dev.
+# A bucket with a long history takes minutes, so a line after each page shows
+# the running total.
 purge_bucket() {
   local bucket="$1" page objects count deleted=0
+  echo "  purging $bucket…"
   while :; do
     # One service page, whose MaxKeys bounds versions and delete markers
     # together. The CLI's --max-items counts only versions and can return more
@@ -163,6 +168,7 @@ purge_bucket() {
       --query 'Errors' --output json | jq -e 'length == 0' >/dev/null \
       || { echo "ERROR: some objects in $bucket could not be deleted" >&2; return 1; }
     deleted=$((deleted + count))
+    echo "    deleted $deleted version(s) and delete marker(s) so far"
   done
   echo "  ✓ purged $bucket ($deleted version(s))"
 }
