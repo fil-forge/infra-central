@@ -127,7 +127,7 @@ func TestIssueProofEncodesABinaryDelegation(t *testing.T) {
 	}
 }
 
-// The five commands Ingot invokes on hilt, exactly as smelt's generate-proofs.sh
+// The commands Ingot invokes on hilt, exactly as smelt's generate-proofs.sh
 // delegates them. A missing one fails at the request Ingot makes, not at
 // onboarding, so the list is worth pinning.
 func TestHiltIngotS3ProofCoversEveryCommandIngotInvokes(t *testing.T) {
