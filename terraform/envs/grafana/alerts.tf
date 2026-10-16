@@ -1609,7 +1609,7 @@ resource "grafana_rule_group" "appliance" {
   # scrapes set it: the host and Caddy each through a relabel component, and
   # the cAdvisor scrape through the static rules its own relabel component
   # adds, since `up` carries none of the Compose labels the rest of those
-  # rules read. That node's value does not name a machine is a different
+  # rules read. No node value names a machine today, but that is a separate
   # problem from the label going missing, and not the one this rule is about.
   # The labelling is a convention living in a config outside these
   # repositories, and conventions in prose get dropped when the config is
