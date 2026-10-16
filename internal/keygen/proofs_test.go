@@ -139,6 +139,7 @@ func TestHiltIngotS3ProofCoversEveryCommandIngotInvokes(t *testing.T) {
 		"/s3/bucket/delete",
 		"/s3/bucket/info",
 		"/s3/bucket/list",
+		"/s3/bucket/policy",
 	}
 	if !reflect.DeepEqual(proof.commands, want) {
 		t.Errorf("commands = %v, want %v", proof.commands, want)
@@ -160,6 +161,57 @@ func TestHiltIngotS3ProofIsATextualContainer(t *testing.T) {
 
 	if strings.ContainsRune(out, 0) {
 		t.Error("the proof carries a NUL byte, so it is not the textual container Ingot reads")
+	}
+}
+
+// An appliance onboarded before Ingot invoked /s3/bucket/policy holds a
+// delegation without it, and onboarding has to see that to reissue it.
+func TestMissingCommandsReportsCommandsTheStoredProofLacks(t *testing.T) {
+	issuer, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+	current := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", issuer.DID)
+	older := current
+	older.commands = current.commands[:len(current.commands)-1]
+	stored, err := IssueProof(issuer.PrivatePEM, older)
+	if err != nil {
+		t.Fatalf("IssueProof: %v", err)
+	}
+
+	missing, err := MissingCommands(stored, current)
+	if err != nil {
+		t.Fatalf("MissingCommands: %v", err)
+	}
+	if want := []string{"/s3/bucket/policy"}; !reflect.DeepEqual(missing, want) {
+		t.Errorf("missing = %v, want %v", missing, want)
+	}
+}
+
+func TestMissingCommandsAcceptsAProofIssuedFromTheCurrentDefinition(t *testing.T) {
+	issuer, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", issuer.DID)
+	stored, err := IssueProof(issuer.PrivatePEM, proof)
+	if err != nil {
+		t.Fatalf("IssueProof: %v", err)
+	}
+
+	missing, err := MissingCommands(stored, proof)
+	if err != nil {
+		t.Fatalf("MissingCommands: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Errorf("missing = %v, want none", missing)
+	}
+}
+
+func TestMissingCommandsRejectsAnUndecodableProof(t *testing.T) {
+	proof := HiltIngotS3Proof("appliance/us-east-9", "did:web:hilt.dev.example", "did:web:us-east-9.s3.dev.example")
+	if _, err := MissingCommands("not a container", proof); err == nil {
+		t.Error("MissingCommands accepted bytes that are not a container")
 	}
 }
 
