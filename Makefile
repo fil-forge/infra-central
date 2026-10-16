@@ -19,6 +19,11 @@ SHELL := /bin/bash
 # AWS_ACCOUNT and its derivatives expand lazily so that only the targets that
 # reference them (publish, login) call the AWS CLI; `make test` and `make
 # check` stay offline.
+#
+# A value set in this file is not exported, so every target whose script calls
+# the AWS CLI passes AWS_REGION explicitly. Otherwise the CLI uses the region of
+# the operator's profile, or none at all when credentials come from the
+# environment, and cannot find the stage's provision Lambda.
 AWS_REGION  ?= us-east-2
 AWS_ACCOUNT ?= $(shell aws sts get-caller-identity --query Account --output text)
 ECR_REPO    ?= forge-central/provision
@@ -104,7 +109,7 @@ DEPOSIT   ?= 3
 
 .PHONY: fund-payer
 fund-payer:
-	scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
+	AWS_REGION=$(AWS_REGION) scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
 
 # Mint a regional appliance's unseal credential. The region's transit key must
 # already exist, which means its label committed to appliance_regions and merged.
@@ -117,7 +122,7 @@ TOKEN_ARGS ?=
 
 .PHONY: mint-appliance-token
 mint-appliance-token:
-	scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
+	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
 
 # Register an appliance with sprue, hilt and the delegator, and return the
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
@@ -132,7 +137,7 @@ ONBOARD_ARGS  ?=
 
 .PHONY: onboard-appliance
 onboard-appliance:
-	scripts/onboard-appliance.sh --stage $(STAGE) --region $(REGION) \
+	AWS_REGION=$(AWS_REGION) scripts/onboard-appliance.sh --stage $(STAGE) --region $(REGION) \
 	  --piri-did $(PIRI_DID) --piri-url $(PIRI_URL) \
 	  $(if $(PIRI_PROOF),--piri-proof-file $(PIRI_PROOF),) $(ONBOARD_ARGS)
 
@@ -145,7 +150,7 @@ RETIRE_ARGS ?=
 
 .PHONY: retire-region
 retire-region:
-	scripts/retire-region.sh --stage $(STAGE) --region $(REGION) $(RETIRE_ARGS)
+	AWS_REGION=$(AWS_REGION) scripts/retire-region.sh --stage $(STAGE) --region $(REGION) $(RETIRE_ARGS)
 
 # Wipe the apps' state on dev or staging and keep the platform. Reset the
 # appliance first; docs/reset-apps.md has the whole order.
@@ -154,8 +159,6 @@ retire-region:
 RESET_ARGS ?=
 
 .PHONY: reset-apps
-# AWS_REGION is passed explicitly: a value set in this file is not exported, and
-# an operator whose credentials come from the environment may have no region.
 reset-apps:
 	AWS_REGION=$(AWS_REGION) scripts/reset-apps.sh --stage $(STAGE) $(RESET_ARGS)
 
