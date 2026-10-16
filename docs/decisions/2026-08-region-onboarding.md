@@ -341,6 +341,10 @@ old key signed unverifiable: hilt's did:web document then publishes only the new
 key's did:key is stored beside the proof, so a later run compares the two and reissues when they
 differ. The seed phase tracks the same dependency for the startup proofs.
 
+A stored proof that lacks a command `HiltIngotS3Proof` now grants is reissued as well. The command
+list is part of the signed delegation, so returning the old copy would leave Ingot without a proof
+for the new command.
+
 ## OpenBao tests run in-process
 
 `internal/vaultinit`'s tests hand the fake server to the real OpenBao client through a custom
