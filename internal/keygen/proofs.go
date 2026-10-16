@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/fil-forge/ucantone/ucan/container"
 	"github.com/fil-forge/ucantool/pkg/ucandelegate"
 )
 
@@ -155,6 +156,32 @@ func IssueProof(issuerPEM []byte, proof Proof) (string, error) {
 		return "", fmt.Errorf("encode %s proof: %w", proof.Name, err)
 	}
 	return out.String(), nil
+}
+
+// MissingCommands lists the commands of proof that the stored delegation
+// container does not grant. A delegation's command list is fixed when it is
+// issued, so a stored proof that predates a command Ingot started invoking
+// lacks it, and Ingot's invocations of that command reach hilt with no proof.
+//
+// It reads only containers, the textual form HiltIngotS3Proof is stored in.
+func MissingCommands(stored string, proof Proof) ([]string, error) {
+	ct, err := container.Decode([]byte(stored))
+	if err != nil {
+		return nil, fmt.Errorf("decode the stored %s proof: %w", proof.Name, err)
+	}
+
+	granted := map[string]bool{}
+	for _, dlg := range ct.Delegations() {
+		granted[dlg.Command().String()] = true
+	}
+
+	var missing []string
+	for _, command := range proof.commands {
+		if !granted[command] {
+			missing = append(missing, command)
+		}
+	}
+	return missing, nil
 }
 
 // validateProof rejects a proof with a missing DID or command list before it

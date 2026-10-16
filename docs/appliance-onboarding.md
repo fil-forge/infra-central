@@ -229,6 +229,19 @@ The full sequence is retire, re-onboard with `--proof-out`, force a new deployme
 so they re-resolve the DID document, then hand the new proof to the node operator for
 `store-hilt-proof.sh` and `deploy-apps.sh`.
 
+## Granting Ingot a new hilt command
+
+The delegation's commands are fixed when it is issued. When Ingot starts invoking a new command on
+hilt, add it to `HiltIngotS3Proof` in `internal/keygen/proofs.go` and deploy the provision Lambda.
+Until then hilt refuses that command with "is not issued by subject and has no proofs", and Ingot
+answers the S3 request with a 500.
+
+Then re-onboard each region. Onboarding compares the stored delegation's commands with the current
+list and reissues it when one is missing; the log line is **"the stored delegation lacks commands
+Ingot invokes, reissuing the appliance's delegation"**. Pass `--proof-out` and hand the new proof to
+the node operator for `store-hilt-proof.sh` and `deploy-apps.sh`. The old proof keeps working for
+the commands it grants until the node swaps it.
+
 ## Retiring a region
 
 Move the label from `appliance_regions` to `retired_appliance_regions` in the same commit, and
