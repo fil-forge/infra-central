@@ -1683,6 +1683,13 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
+  # The three rules that watch Piri itself rather than a proof set (chain head
+  # is stale, no chain head, Prove task has not run) also group by instance. A
+  # node runs one Piri per storage volume, each reporting instance
+  # <node>/piri-<n>, and grouping by node alone would let one healthy Piri hide
+  # another's stall. A Piri that still reports the node name as its instance is
+  # one series per node, as before.
+  #
   # The gauges are what Curio has recorded in its database, not chain state, so
   # none of these confirms that a proof landed. Two failures go unseen: a proof
   # Curio sent that then failed on chain, and a Prove task that woke after its
@@ -1754,7 +1761,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          time() - max by (appliance, region, node) (
+          time() - max by (appliance, region, node, instance) (
             piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
@@ -1854,15 +1861,15 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             present_over_time(target_info{${local.piri_metric_matcher}}[5m])
           )
-          and on (appliance, region, node)
-          max by (appliance, region, node) (
+          and on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[5m])
           )
-          unless on (appliance, region, node)
-          max by (appliance, region, node) (
+          unless on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}[5m])
           )
         PROMQL
@@ -2275,13 +2282,13 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-            time() - max by (appliance, region, node) (
+            time() - max by (appliance, region, node, instance) (
               piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}, task_name="PDPv0_Prove"}
             )
           )
-          / on (appliance, region, node)
+          / on (appliance, region, node, instance)
           (
-            30 * max by (appliance, region, node) (
+            30 * max by (appliance, region, node, instance) (
               max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
             )
           )
