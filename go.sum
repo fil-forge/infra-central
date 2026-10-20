@@ -128,8 +128,8 @@ github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924 h1:MfnFGQosxj2KMz
 github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924/go.mod h1:zUFYuk+dDAFQUVPpTXPZJ7xV2RmN/QsGVb/xb1AmWt4=
 github.com/fil-forge/libforge v0.0.0-20261001200856-b2db386b1f96 h1:aeRNL0QKMNHa+LWX445Fn5PTScYciR4fDVvTb/cPBjU=
 github.com/fil-forge/libforge v0.0.0-20261001200856-b2db386b1f96/go.mod h1:sKml7ScjN2ov8F7jTuBIv823EgyWGTJG6cvA8ronPk4=
-github.com/fil-forge/sprue v0.0.0-20261020145016-db351b705f9b h1:pSqcsADyg1dN1fbt9iegBRgxqtLRvyZDm/vkNbc4m+0=
-github.com/fil-forge/sprue v0.0.0-20261020145016-db351b705f9b/go.mod h1:iBGw+Efevn7r8/YcB6+52bbXyKdtNzo7VqnzLScbJ/Q=
+github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595 h1:1A2BB9+6YfOnvvoavbqS1Jv3hOnvXSZqyQAuBctOwKk=
+github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595/go.mod h1:iBGw+Efevn7r8/YcB6+52bbXyKdtNzo7VqnzLScbJ/Q=
 github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8 h1:vTYyYXf/bhx4b9hZxIi+coLzGj8JwpUV2X0cdSV/D0A=
 github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8/go.mod h1:SHfS9ODaEQWe5OXWo3i/ueLLpgBBCz1226TpQe3tzxE=
 github.com/fil-forge/ucantool v0.1.0 h1:9WPjr2j+4zS2KVKx1KGWow9wrEh9ibU4yESahFIjito=

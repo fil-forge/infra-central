@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.79.3
 	github.com/ethereum/go-ethereum v1.17.8
 	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
-	github.com/fil-forge/sprue v0.0.0-20261020145016-db351b705f9b
+	github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595
 	github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8
 	github.com/fil-forge/ucantool v0.1.0
 	github.com/hashicorp/go-secure-stdlib/parseutil v0.2.0
