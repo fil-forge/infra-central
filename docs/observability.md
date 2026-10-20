@@ -119,6 +119,7 @@ appliance label.
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
+| Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
