@@ -126,7 +126,7 @@ wait_stable() {
 # scan. A line after each page shows the running total.
 empty_table() {
   local table="$1" key page requests deleted=0
-  echo "  emptying $table…"
+  echo "  emptying ${table}…"
   key="$(aws dynamodb describe-table --table-name "$table" \
     --query "Table.KeySchema[?KeyType=='HASH'].AttributeName | [0]" --output text)"
 
@@ -153,7 +153,7 @@ empty_table() {
 # the running total.
 purge_bucket() {
   local bucket="$1" page objects count deleted=0
-  echo "  purging $bucket…"
+  echo "  purging ${bucket}…"
   while :; do
     # One service page, whose MaxKeys bounds versions and delete markers
     # together. The CLI's --max-items counts only versions and can return more
