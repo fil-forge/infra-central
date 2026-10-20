@@ -89,6 +89,25 @@ func (c *SprueClient) Register(ctx context.Context, providerDID, endpoint string
 	return nil
 }
 
+// SetProofs replaces a registered provider's delegation with the one the
+// appliance signed.
+func (c *SprueClient) SetProofs(ctx context.Context, providerDID string, proof []byte) error {
+	parsed, err := did.Parse(providerDID)
+	if err != nil {
+		return fmt.Errorf("parse provider DID %q: %w", providerDID, err)
+	}
+
+	proofs, err := container.Decode(proof)
+	if err != nil {
+		return fmt.Errorf("decode the appliance's Piri proof: %w", err)
+	}
+
+	if _, err := c.client.AdminProviderProofsSet(ctx, parsed, proofs); err != nil {
+		return fmt.Errorf("set %s's proofs: %w", providerDID, err)
+	}
+	return nil
+}
+
 // SetWeight sets a provider's scheduling and replication weights.
 func (c *SprueClient) SetWeight(ctx context.Context, providerDID string, weight, replicationWeight int) error {
 	parsed, err := did.Parse(providerDID)
