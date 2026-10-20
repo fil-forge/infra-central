@@ -1713,9 +1713,9 @@ resource "grafana_rule_group" "appliance" {
   #
   # The three rules that watch Piri itself rather than a proof set (chain head
   # is stale, no chain head, Prove task has not run) also group by instance. A
-  # node runs one Piri per storage volume, each reporting instance
-  # <node>/piri-<n>, and grouping by node alone would let one healthy Piri hide
-  # another's stall. A Piri that reports another instance is grouped by that.
+  # node can run several Piris, each reporting instance <node>/piri-<n>, and
+  # grouping by node alone would let one healthy Piri hide another's stall. A
+  # Piri that reports another instance is grouped by that.
   # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
   # node, is still one series per Piri. The node name, where Alloy overwrites
   # instance, merges the node's Piris into one series, as before.
