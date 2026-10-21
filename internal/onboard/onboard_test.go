@@ -3,6 +3,7 @@ package onboard
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -49,6 +50,7 @@ func TestPlanFromListsEveryWriteInApplyOrderForAFreshAppliance(t *testing.T) {
 
 func TestPlanFromPlansNothingForARegisteredAppliance(t *testing.T) {
 	req := testRequest()
+	req.PiriProof = nil
 	state := &State{
 		Region:       req.Region,
 		AllowListed:  true,
@@ -65,10 +67,74 @@ func TestPlanFromPlansNothingForARegisteredAppliance(t *testing.T) {
 	}
 }
 
+// sprue has no read of a provider's proofs, so a registered provider is given
+// the delegation in the request on every run that carries one. That is how a
+// delegation reissued with new commands reaches sprue.
+func TestPlanFromReplacesTheDelegationOfARegisteredProvider(t *testing.T) {
+	req := testRequest()
+	state := &State{
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
+		PiriRecorded: true,
+	}
+
+	plan := PlanFrom(state, req)
+
+	want := []string{"replace did:key:zPiri's delegation in sprue with the one in the request"}
+	if !reflect.DeepEqual(plan.Actions, want) || len(plan.Blockers) != 0 {
+		t.Errorf("plan = %+v, want actions %v and no blockers", plan, want)
+	}
+}
+
+func TestApplyReplacesTheDelegationOfARegisteredProvider(t *testing.T) {
+	fakes := newFakes()
+	req := testRequest()
+	state := &State{
+		Region:       req.Region,
+		AllowListed:  true,
+		Sprue:        &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
+		HiltRegion:   req.Region,
+		HiltPolicy:   "did:key:zPolicy",
+		PiriRecorded: true,
+	}
+
+	result, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(fakes.sprue.setProof) != "proof-bytes" {
+		t.Errorf("sprue was given proof %q, want the request's", fakes.sprue.setProof)
+	}
+	if fakes.sprue.registeredDID != "" {
+		t.Errorf("registered %s again, want only the delegation replaced", fakes.sprue.registeredDID)
+	}
+	if !slices.Contains(result.Performed, "replaced did:key:zPiri's delegation in sprue") {
+		t.Errorf("performed = %v, want the replacement reported", result.Performed)
+	}
+}
+
+// A fresh provider is registered with the delegation, so it is not also
+// replaced.
+func TestApplyDoesNotReplaceTheDelegationOfAFreshProvider(t *testing.T) {
+	fakes := newFakes()
+	req := testRequest()
+
+	if _, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(&State{Region: req.Region}, req)); err != nil {
+		t.Fatal(err)
+	}
+	if fakes.sprue.setProof != nil {
+		t.Errorf("replaced the delegation of a provider that was just registered with it")
+	}
+}
+
 // The weights are two integers from the request, so a provider carrying
 // different ones is repaired rather than left alone.
 func TestPlanFromResetsMismatchedWeights(t *testing.T) {
 	req := testRequest()
+	req.PiriProof = nil // a registered provider given a delegation also has it replaced
 	state := &State{
 		Region:       req.Region,
 		AllowListed:  true,
@@ -128,6 +194,7 @@ func TestPlanFromBlocksASprueEndpointMismatch(t *testing.T) {
 // set rather than adding to it, so the first Piri has to be sent again.
 func TestPlanFromAddsASecondPiriToHiltsNodes(t *testing.T) {
 	req := testRequest()
+	req.PiriProof = nil // a registered provider given a delegation also has it replaced
 	req.PiriDID = "did:key:zPiri2"
 	state := &State{
 		Region:        req.Region,
@@ -183,6 +250,7 @@ func TestApplySendsHiltTheWholeNodeSetForASecondPiri(t *testing.T) {
 // what repairs it.
 func TestPlanFromSetsNodesForAProviderWithoutAPolicy(t *testing.T) {
 	req := testRequest()
+	req.PiriProof = nil // a registered provider given a delegation also has it replaced
 	state := &State{
 		Region:        req.Region,
 		AllowListed:   true,
@@ -204,6 +272,7 @@ func TestApplySetsNodesForAProviderWithoutAPolicy(t *testing.T) {
 	fakes := newFakes()
 	fakes.hilt.region = "us-east-9"
 	req := testRequest()
+	req.PiriProof = nil // a registered provider given a delegation also has it replaced
 	state := &State{
 		Region:        req.Region,
 		AllowListed:   true,
@@ -432,6 +501,7 @@ type fakeSprue struct {
 
 	registeredDID   string
 	registeredProof []byte
+	setProof        []byte
 	weight          int
 }
 
@@ -442,6 +512,11 @@ func (s *fakeSprue) Provider(ctx context.Context, did string) (*Provider, error)
 func (s *fakeSprue) Register(ctx context.Context, did, endpoint string, proof []byte) error {
 	s.registeredDID = did
 	s.registeredProof = proof
+	return nil
+}
+
+func (s *fakeSprue) SetProofs(ctx context.Context, did string, proof []byte) error {
+	s.setProof = proof
 	return nil
 }
 
