@@ -156,7 +156,8 @@ Five things happen, and each one has a failure that names nothing useful if it i
 
 - The **delegator's allow list** gets the Piri DID. Without it, `piri init` step 4 asks the
   delegator for approval and is refused with a `403`.
-- **sprue** gets the Piri registered at its public URL, with a weight. Without it, uploads fail with
+- **sprue** gets the Piri registered at its public URL, with a weight and the delegation the
+  appliance signed. Without it, uploads fail with
   `CandidateUnavailable: no storage providers available`.
 - **hilt** gets the Ingot registered for the region, with the Piri as its storage node. Without the
   registration, hilt rejects tenant creation for that region and every `/s3/*` call the Ingot makes.
@@ -183,6 +184,12 @@ something central no longer recognises.
 The sprue weights are the exception. They are written on every confirmed run, from the request or
 from the 100/100 default, so a rerun of a provider whose weights were tuned afterwards has to carry
 the current values in `ONBOARD_ARGS`, as `--weight` and `--replication-weight`.
+
+So is the Piri delegation, whenever the request carries `PIRI_PROOF`. sprue offers no read of the
+delegation it holds, so a rerun replaces it with the one in the request. That is how a delegation
+the node reissued reaches sprue: when infra-nodes adds a command to it, run `keygen.sh` and then
+`onboarding-request.sh` on the node, and onboard again with the new proof. A rerun without
+`PIRI_PROOF` leaves sprue's copy alone.
 
 ### When it refuses
 
