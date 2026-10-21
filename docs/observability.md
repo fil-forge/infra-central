@@ -127,6 +127,7 @@ appliance label.
 | Piri proving is failing                              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
+| Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
