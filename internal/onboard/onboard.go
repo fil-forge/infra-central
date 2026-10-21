@@ -7,7 +7,9 @@
 //   - its Piri DID is on the delegator's allow list, or `piri init` is refused
 //     with a 403 at the approval step
 //   - sprue knows its Piri as a provider with an endpoint and a weight, or
-//     uploads fail with CandidateUnavailable
+//     uploads fail with CandidateUnavailable, and holds the delegation the
+//     appliance signed most recently, or sprue invokes commands it was never
+//     granted
 //   - hilt knows its Ingot as the provider for its region, or hilt rejects every
 //     tenant in that region
 //   - its Piri is a storage node of that provider, or the region's routing
@@ -46,6 +48,8 @@ type AllowList interface {
 type SprueAdmin interface {
 	Provider(ctx context.Context, did string) (*Provider, error)
 	Register(ctx context.Context, did, endpoint string, proof []byte) error
+	// SetProofs replaces the delegation a registered provider granted sprue.
+	SetProofs(ctx context.Context, did string, proof []byte) error
 	SetWeight(ctx context.Context, did string, weight, replicationWeight int) error
 }
 
@@ -134,7 +138,8 @@ type State struct {
 type Plan struct {
 	State
 	// Actions describes each write in the order it will happen. Empty means the
-	// appliance is already registered and only the proof is returned.
+	// appliance is already registered, the request carries no Piri delegation,
+	// and only the proof is returned.
 	Actions []string `json:"actions"`
 	// Blockers are conditions no write can resolve. A plan with any of these
 	// performs nothing.
@@ -206,6 +211,12 @@ func PlanFrom(state *State, req Request) *Plan {
 		plan.Blockers = append(plan.Blockers, fmt.Sprintf(
 			"sprue has %s registered at %s, not %s; re-registering moves where uploads are sent, so deregister it deliberately first",
 			req.PiriDID, state.Sprue.Endpoint, req.PiriURL))
+	case len(req.PiriProof) > 0:
+		// sprue offers no read of a provider's proofs, so there is nothing to
+		// compare against. The appliance's delegation is the current one, so it
+		// replaces what sprue holds.
+		plan.Actions = append(plan.Actions,
+			fmt.Sprintf("replace %s's delegation in sprue with the one in the request", req.PiriDID))
 	}
 
 	if state.Sprue == nil ||
@@ -288,6 +299,11 @@ func Apply(ctx context.Context, deps Deps, req Request, plan *Plan) (*Result, er
 			return nil, fmt.Errorf("register %s with sprue: %w", req.PiriDID, err)
 		}
 		result.Performed = append(result.Performed, "registered "+req.PiriDID+" with sprue")
+	} else if len(req.PiriProof) > 0 {
+		if err := deps.Sprue.SetProofs(ctx, req.PiriDID, req.PiriProof); err != nil {
+			return nil, fmt.Errorf("replace %s's delegation in sprue: %w", req.PiriDID, err)
+		}
+		result.Performed = append(result.Performed, "replaced "+req.PiriDID+"'s delegation in sprue")
 	}
 
 	// The weights are set on every run that reaches here. They are two integers

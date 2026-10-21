@@ -2448,6 +2448,183 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Ingot's multipart acceptance queue is stuck. Ingot accepts a multipart
+  # upload's parts in the background while the client is still uploading, and
+  # reports how long the oldest part still waiting for that has waited
+  # (fil-forge/ingot's README, "Multipart"). A part is normally accepted within
+  # seconds, so ten minutes means the acceptor is failing or not running:
+  # CompleteMultipartUpload then answers OperationAborted, which the AWS CLI
+  # treats as a failed upload. The failed-pass rate on the same panel says
+  # which.
+  #
+  # Ingot measures the age every 30s and the gauge already carries how long the
+  # part has waited, so for = 5m only rides out one slow sweep. no_data_state is
+  # OK: an Ingot without the metric, or without metrics at all, is the
+  # container rule's business, not this one's.
+  rule {
+    name           = "Ingot multipart acceptance is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has a multipart part waiting over 10 minutes for acceptance"
+      description      = "The oldest part waiting for acceptance has waited over 10 minutes. CompleteMultipartUpload answers OperationAborted for an upload with such a part, which the AWS CLI treats as a failed upload. Failing acceptor passes point at the upload service or the storage provider; Ingot's logs ('multipart accept pass failed') say what failed."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=26"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "26"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_multipart_parked_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
+
+  # Piri holds each accepted blob for pdp.aggregation.commp.delay before a
+  # CommP task may claim it, so a blob deleted soon after upload costs no
+  # CommP and no on-chain root. Once past the delay a blob is claimed by the
+  # task engine's next poll, seconds later, so the age of the oldest due blob
+  # stays near zero. Ten minutes past due is the task engine down, or every
+  # poll finding other work first; CommP itself being slow does not show here,
+  # since a claimed blob leaves the gauge. The blob stays retrievable, and
+  # nothing is lost while it waits: a warning. `for` is 10m on top of the
+  # threshold's ten minutes, so a single slow poll does not page.
+  #
+  # no_data_state is OK: a node with nothing due has no series worth
+  # alerting on, and "Appliance has stopped reporting" covers a silent node.
+  rule {
+    name           = "Piri CommP claims have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has blobs past the CommP delay that no CommP task has claimed for over 10 minutes"
+      description      = "Accepted blobs are past pdp.aggregation.commp.delay and no PDPCommP task is picking them up, so they are not entering aggregation or being proven. The task engine claims due blobs on every poll, so check that Piri's harmonytask engine is running and not saturated: `piri status` in the Piri container, and the PDPCommP task's logs. Setting the delay to 0 does not help; the claims themselves have stopped."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=28"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "28"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            piri_pdp_commp_due_blobs_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
