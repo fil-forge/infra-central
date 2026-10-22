@@ -2630,20 +2630,20 @@ resource "grafana_rule_group" "appliance" {
   # segment holding them ships to Forge, so a copy of the database holds the
   # catalog that exists nowhere but the host's disk (fil-forge/ingot's
   # logstore/README.md). Segments seal within seconds and ship right after, so
-  # the oldest journaled block is normally seconds old. Ingot gives up on a
-  # segment after a few failed ship attempts, or when its bucket's ship queue
-  # is full, and leaves it unshipped until it restarts, so half an hour means a
-  # segment is stuck, not slow. A restart queues the unshipped segments again,
-  # newest first and only as many as the queue holds, so after a long outage it
-  # can take more than one restart. Nothing is lost while a segment waits,
-  # since its blocks are on disk and in Postgres: a warning. The age is
-  # measured, not inferred from a rate, so for = 5m only rides out a slow
-  # scrape.
+  # the oldest journaled block is normally seconds old. A ship that fails is
+  # retried, a few times at once and then by a sweep each minute until it
+  # lands, so half an hour means shipping is failing, not slow. Nothing is
+  # lost while a segment waits, since its blocks are on disk and in Postgres:
+  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # rides out a slow scrape.
   #
-  # A restart does not clear one case: a segment whose file is gone from disk.
-  # Ingot drops the segment's row at startup but keeps its journaled blocks,
-  # the only copy left, and nothing rebuilds the segment from them yet
-  # (FIL-1601), so the age keeps climbing.
+  # A restart is the wrong remedy. Ingot signs a ship with authority it keeps
+  # in memory from the bucket's recent writes, and a restart clears it, so an
+  # idle bucket's segments then wait for its next write. Two cases outlast
+  # the sweep: a segment whose file is gone from disk (Ingot drops its row at
+  # startup but keeps its journaled blocks, the only copy left, and nothing
+  # rebuilds the segment from them yet, FIL-1601), and one whose ship fails on
+  # its own every time. Both need the Ingot team.
   #
   # no_data_state is OK, as for the multipart rule: an Ingot without the
   # metric is the container rule's business.
@@ -2656,7 +2656,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship. The blocks are safe on disk and in Postgres, but that part of the catalog is not reaching Forge. Ingot's logs say why: 'logstore: ship attempt failed' and 'ship exhausted retries' (usually the upload service or the storage provider), 'flush queue full' (more unshipped segments than a bucket's queue holds) or 'logstore: mark shipped' (the segment shipped but Postgres was not updated). With none of these, a ship may be hung. Once the cause is fixed, restart Ingot, which queues its unshipped segments again. If it logs 'flush queue full' at startup, restart it again once those ships finish, until it no longer does. If it logs 'DB segment row without on-disk file', the segment's file is gone and a restart will not clear this: its journaled blocks are the only copy left, so do not delete them."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship. The blocks are safe on disk and in Postgres, but that part of the catalog is not reaching Forge. Ingot retries unshipped segments every minute on its own, and the age falls within minutes of the cause clearing. Do not restart Ingot: it holds the authority it ships with in memory, and a restart leaves idle buckets' segments waiting for their next write. Ingot's logs say what is failing. 'logstore: ship attempt failed' carries the error: usually the upload service or the storage provider; 'no ship authority' means a bucket with no write since that authority lapsed, whose segments ship after its next write; any other error that keeps failing one segment needs escalating. 'logstore: mark shipped' means the segment reached Forge but Postgres was not updated. If Ingot has logged 'DB segment row without on-disk file' at any startup since the age began climbing, the segment's file is gone and nothing will clear this: its journaled blocks are the only copy left, so do not delete them, and escalate."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "31"
