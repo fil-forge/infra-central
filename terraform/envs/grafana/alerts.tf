@@ -2634,6 +2634,99 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Every PDP task and every blob/accept on a Piri shares one Postgres pool,
+  # sized by pool_max_conns on its Postgres URL. pgx counts the acquires that
+  # had to wait because no connection was free; this is their share of all
+  # acquires over 15 minutes. Waits during a burst are expected, so require
+  # this rolling share to stay above a tenth for 30 minutes before warning
+  # about accepts and PDP tasks queueing for connections and slowing each
+  # other down. The fix is a bigger pool_max_conns,
+  # within what Postgres's max_connections leaves for the other services on
+  # the host.
+  #
+  # no_data_state is OK: a Piri with no acquires in the window divides by zero
+  # and produces no series, and "Appliance has stopped reporting" covers a
+  # silent node.
+  rule {
+    name           = "Piri Postgres pool is saturated"
+    condition      = "B"
+    for            = "30m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has had a 15-minute rolling Postgres acquire wait share above 10% for 30 minutes"
+      description      = "blob/accept and the PDP tasks are queueing for connections from Piri's PDP Postgres pool, so each slows the other down and an accept can time out waiting. Raise pool_max_conns on the Piri's Postgres URL in infra-nodes, keeping the Piris' pools plus Ingot's within Postgres's max_connections, and re-run init so the new URL reaches the node. The mean wait panel beside this one says how long the queueing is costing."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "31"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node) (
+            rate(piri_pdp_db_pool_acquires_waited_total{${local.piri_metric_matcher}}[15m])
+          )
+          /
+          sum by (appliance, region, node) (
+            rate(piri_pdp_db_pool_acquires_total{${local.piri_metric_matcher}}[15m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
