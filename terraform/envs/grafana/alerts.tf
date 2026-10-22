@@ -2625,6 +2625,95 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Ingot journals each commit's new catalog blocks in Postgres until the log
+  # segment holding them ships to Forge, so a copy of the database holds the
+  # catalog that exists nowhere but the host's disk (fil-forge/ingot's
+  # logstore/README.md). Segments seal within seconds and ship right after, so
+  # the oldest journaled block is normally seconds old. Ingot gives up on a
+  # segment after a few failed ship attempts and leaves it unshipped until it
+  # restarts, so half an hour means a segment is stuck, not slow. Nothing is
+  # lost while it waits, since the blocks are on disk and in Postgres: a
+  # warning. The age is measured, not inferred from a rate, so for = 5m only
+  # rides out a slow scrape.
+  #
+  # no_data_state is OK, as for the multipart rule: an Ingot without the
+  # metric is the container rule's business.
+  rule {
+    name           = "Ingot catalog shipping has stalled"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship. The blocks are safe on disk and in Postgres, but that part of the catalog is not reaching Forge. Ingot's logs ('logstore: ship attempt failed', 'ship exhausted retries') say what failed, usually the upload service or the storage provider. Once that is fixed, restart Ingot: it re-ships every sealed segment that has not shipped."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "31"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_catalog_journal_oldest_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
