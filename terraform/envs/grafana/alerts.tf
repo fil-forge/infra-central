@@ -2629,10 +2629,10 @@ resource "grafana_rule_group" "appliance" {
   # Every PDP task and every blob/accept on a Piri shares one Postgres pool,
   # sized by pool_max_conns on its Postgres URL. pgx counts the acquires that
   # had to wait because no connection was free; this is their share of all
-  # acquires over 15 minutes. Waits during a burst are expected, so the
-  # threshold is a tenth sustained for a further 15 minutes, which is accepts
-  # and PDP tasks queueing for connections and slowing each other down. Nothing
-  # is lost while they queue: a warning. The fix is a bigger pool_max_conns,
+  # acquires over 15 minutes. Waits during a burst are expected, so require
+  # this rolling share to stay above a tenth for 30 minutes before warning
+  # about accepts and PDP tasks queueing for connections and slowing each
+  # other down. The fix is a bigger pool_max_conns,
   # within what Postgres's max_connections leaves for the other services on
   # the host.
   #
@@ -2642,12 +2642,12 @@ resource "grafana_rule_group" "appliance" {
   rule {
     name           = "Piri Postgres pool is saturated"
     condition      = "B"
-    for            = "15m"
+    for            = "30m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has had over a tenth of its Postgres acquires wait for a free connection for 30 minutes"
+      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has had a 15-minute rolling Postgres acquire wait share above 10% for 30 minutes"
       description      = "blob/accept and the PDP tasks are queueing for connections from Piri's PDP Postgres pool, so each slows the other down and an accept can time out waiting. Raise pool_max_conns on the Piri's Postgres URL in infra-nodes, keeping the Piris' pools plus Ingot's within Postgres's max_connections, and re-run init so the new URL reaches the node. The mean wait panel beside this one says how long the queueing is costing."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
       __dashboardUid__ = "forge-regions"
