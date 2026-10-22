@@ -2639,14 +2639,21 @@ resource "grafana_rule_group" "appliance" {
   #
   # A restart is the wrong way to retry. Ingot signs a ship with authority it
   # keeps in memory from the bucket's recent writes, and a restart clears it,
-  # so an idle bucket's segments then wait for its next write. It is the
-  # remedy for one case: a ship that hangs (its HTTP clients set no timeout)
-  # blocks the bucket's queue and sweep alike, and logs nothing. Three other
-  # cases outlast the sweep and need the Ingot team: a segment whose file is
-  # gone from disk (Ingot drops its row at startup but keeps its journaled
-  # blocks, the only copy left, and nothing rebuilds the segment from them
-  # yet, FIL-1601), one whose ship fails on its own every time, and an Ingot
-  # configured with catalog_plane.ship false, which never ships at all.
+  # so an idle bucket's segments then wait for its next write. After an
+  # outage longer than that authority's hour, every idle bucket with a
+  # backlog waits the same way, so the alert can outlast its cause by days
+  # with nothing to do. A restart is the remedy for one case: a ship that
+  # hangs (its HTTP clients set no timeout) blocks the bucket's queue and
+  # sweep alike and logs nothing. Two cases need Ingot's maintainers: a
+  # segment whose file is gone from disk (Ingot drops its row at startup but
+  # keeps its journaled blocks, the only copy left, and nothing rebuilds the
+  # segment from them yet, FIL-1601), and one whose ship fails on its own
+  # every time. An Ingot configured with catalog_plane.ship false never ships,
+  # so the rule never clears there; no deployed node sets it.
+  #
+  # The gauge is the oldest block across every bucket, while the logs mix
+  # them all, so the runbook finds the stuck segment first, in Postgres: a
+  # journal row with no segment row is the missing-file case.
   #
   # no_data_state is OK, as for the multipart rule: an Ingot without the
   # metric is the container rule's business.
@@ -2659,7 +2666,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship. The blocks are safe on disk and in Postgres, but that part of the catalog is not reaching Forge. Ingot retries unshipped segments every minute on its own: once the cause clears, the age starts falling within a couple of minutes and keeps falling as the backlog ships. Don't restart Ingot to retry: it holds the authority it ships with in memory, and a restart leaves idle buckets' segments waiting for their next write. Ingot's logs say what is failing. 'logstore: ship attempt failed' carries the error: usually the upload service or the storage provider. 'no ship authority' in it means the bucket had no write in the hour before (or since a restart); its segments ship within a minute of its next write, and nothing on-call does speeds that up. 'logstore: mark shipped' means a segment reached Forge but Postgres was not updated. Escalate any error that keeps failing the same segment. If the age climbs with no ship error logged ('flush queue full' at most), a ship may be hung: escalate, since only a restart clears it. If Ingot has also logged 'DB segment row without on-disk file' at a startup, the segment's file is gone and nothing will clear this: its journaled blocks are the only copy left, so do not delete them, and escalate. An Ingot with catalog_plane.ship set to false never ships, so this alert never clears there."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. Find the stuck segment on the box with docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT j.bucket, j.seq, min(j.created_at) AS since, s.state FROM ingot.catalog_journal j LEFT JOIN ingot.segments s USING (seq) GROUP BY 1, 2, 4 ORDER BY since LIMIT 5', then read that bucket's lines in {service_name=\"appliance-{{ $labels.appliance }}-ingot\"} |= \"logstore:\". 1) state is empty: the segment's file is gone and the journal holds the only copy. Don't delete it; escalate to Ingot's maintainers. 2) 'ship attempt failed' naming the upload service or a storage provider: fix that, and this clears within minutes. 3) 'no ship authority': the bucket ships within a minute of its next write, however long that takes. Nothing to do. 4) 'mark shipped': Postgres isn't taking the ship's stamp; check Postgres. 5) Any other error repeating for that seq: escalate to Ingot's maintainers. 6) Nothing for that bucket in ten minutes but 'flush queue full': a ship has hung. Restart Ingot, the one case a restart fixes."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "31"
