@@ -2718,6 +2718,95 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Trial accounts are limited to 2 TiB of egress, and nothing enforces that
+  # yet, so this tells someone to look before a tenant reaches it. Ingot counts
+  # the object bytes each bucket sends, labelled by tenant DID; summing every
+  # region's buckets by tenant over 30 days, it fires at 1.5 TiB. The metric
+  # cannot tell a trial tenant from a paying one, so a paying tenant that
+  # downloads that much fires it too, which is why it is info.
+  #
+  # The stage comes from the appliance label, carried through the sum, since a
+  # tenant's buckets can be in several regions of one stage. no_data_state is
+  # OK: a stage with no downloads in 30 days has no series.
+  rule {
+    name           = "Tenant object egress is near the trial limit"
+    condition      = "B"
+    for            = "0m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Tenant {{ $labels.tenant }} has downloaded {{ humanize1024 $values.A.Value }}B of objects in the last 30 days, near the trial limit of 2 TiB"
+      description      = "If the tenant is on a trial, decide whether to disable it before it passes 2 TiB. The panel shows the tenants downloading the most from each region."
+      dashboard_url    = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage={{ $labels.stage }}&viewPanel=35"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "35"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = "{{ $labels.stage }}"
+      severity  = "info"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (stage, tenant) (
+            label_replace(
+              increase(ingot_s3_bucket_object_egress_bytes_total{${local.ingot_matcher}}[30d]),
+              "stage", "$1", "appliance", "([^-]+)-.*"
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1649267441664] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
