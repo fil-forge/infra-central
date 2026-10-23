@@ -1000,10 +1000,10 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name, and no label separates them today. Grouping by appliance,
-  # region and node together means the groups split as soon as one of them
-  # carries a per-box value, with no edit here. An instant query, so no reduce
-  # stage.
+  # service_name, and no label on those series separates them today -- Alloy
+  # sets instance to the node name too. Grouping by appliance, region and node
+  # together means the groups split as soon as one of them carries a per-box
+  # value, with no edit here. An instant query, so no reduce stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -2942,8 +2942,7 @@ resource "grafana_rule_group" "appliance_containers" {
   # without it the link carried the literal <no value>. node is in it because
   # the rule beside this one groups by it, and because the grouping separates
   # boxes as soon as any of the three carries a per-box value, with no edit
-  # here.
-  # Neither splits a group, so neither changes when this fires.
+  # here. Neither splits a group, so neither changes when this fires.
   #
   # None of the three tells two boxes in one region apart today: none of
   # their values names more than a stage and a region. Which label should
