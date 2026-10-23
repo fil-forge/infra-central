@@ -2638,18 +2638,20 @@ resource "grafana_rule_group" "appliance" {
   # rides out a slow scrape.
   #
   # A restart is the wrong way to retry. Ingot signs a ship with authority it
-  # keeps in memory from the bucket's recent writes, and a restart clears it,
-  # so an idle bucket's segments then wait for its next write. After an
-  # outage longer than that authority's hour, every idle bucket with a
-  # backlog waits the same way, so the alert can outlast its cause by days
-  # with nothing to do. A restart is the remedy for one case: a ship that
-  # hangs (its HTTP clients set no timeout) blocks the bucket's queue and
-  # sweep alike and logs nothing. Two cases need Ingot's maintainers: a
-  # segment whose file is gone from disk (Ingot drops its row at startup but
-  # keeps its journaled blocks, the only copy left, and nothing rebuilds the
-  # segment from them yet, FIL-1601), and one whose ship fails on its own
-  # every time. An Ingot configured with catalog_plane.ship false never ships,
-  # so the rule never clears there; no deployed node sets it.
+  # keeps in memory from the bucket's recent writes, and a restart clears it, so
+  # an idle bucket's segments then wait for its next write. After an outage
+  # longer than that authority's hour, every idle bucket with a backlog waits
+  # the same way, so the alert can outlast its cause by days with nothing to do.
+  # If that ever matters, the fix is in hilt, which holds the tenant's keys and
+  # could mint Ingot a narrow ship-only delegation when it has none; it has no
+  # endpoint for that yet. A restart is the remedy for one case: a ship that
+  # hangs (its HTTP clients set no timeout) blocks the bucket's queue and sweep
+  # alike and logs nothing. Two cases need Ingot's maintainers: a segment whose
+  # file is gone from disk (Ingot drops its row at startup but keeps its
+  # journaled blocks, the only copy left, and nothing rebuilds the segment from
+  # them yet, FIL-1601), and one whose ship fails on its own every time. An
+  # Ingot configured with catalog_plane.ship false never ships, so the rule
+  # never clears there; no deployed node sets it.
   #
   # The gauge is the oldest block across every bucket, while the logs mix
   # them all, so the runbook finds the stuck segment first, in Postgres: a
