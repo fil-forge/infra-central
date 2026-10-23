@@ -893,44 +893,38 @@ resource "grafana_rule_group" "appliance" {
   folder_uid       = grafana_folder.alerts.uid
   interval_seconds = 300
 
-  # Two failures, not one, and they need different queries.
+  # The node has gone away: nothing from its host exporter in the last fifteen
+  # minutes, though it reported some time in the last day. This is the rule
+  # that catches a whole appliance going dark: the other appliance rules read
+  # data that vanishes with the node, and are built to stay quiet when it does.
+  # It cannot tell a dead box from a live one whose host exporter or Alloy has
+  # stopped; both look the same from here, and both leave the node unwatched.
+  # A live node whose reconcile stamp has gone stale is "Appliance has stopped
+  # reconciling", at the end of this group.
   #
-  # The timer stops but the box stays up. This is the common one, and the
-  # absence shape misses it completely: deploy_last_success_timestamp is a
-  # textfile-collector gauge (infra-nodes scripts/host/lib.sh), so node_exporter
-  # re-exports it from the stamp file on every scrape whether or not the timer
-  # ran. The series stays present and only its *value* goes stale, so
-  # present_over_time never lapses. The age is the signal, and it is the
-  # repository's own documented one -- infra-nodes docs/observability.md gives
-  # `time() - deploy_last_success_timestamp{project="reconcile"} > 15 * 60`, and
-  # the Regions dashboard's "Time since last deploy" panel draws exactly that
-  # against a 15-minute threshold line.
+  # Absence is the signal, so there is no value to compare: the expression
+  # tests for a series that was there and is not. Its 24h window is what makes
+  # it self-cleaning, since a node decommissioned longer ago than that falls out
+  # of both sides on its own. The result is 1, so the threshold stage is `gt 0`.
   #
-  # The node goes away entirely. Then there is no series to take an age of, the
-  # left side returns nothing, and no_data_state = OK would keep the rule quiet
-  # about a node that has vanished. So the absence shape is kept as the second
-  # branch of an `or`: reported some time in the last day, not in the last
-  # fifteen minutes. Its 24h window is what makes it self-cleaning, since a node
-  # decommissioned longer ago than that falls out of both sides on its own.
+  # Recovery is a no-data event: a node that reports again satisfies both
+  # present_over_time clauses, the `unless` cancels them, and nothing is left.
+  # no_data_state = OK is what turns that into Normal. An instant query, so no
+  # reduce stage: a range query reduced with `last` would keep the last point
+  # it fired on for the window's length after the node came back.
   #
-  # Either branch produces a value greater than zero -- an age in seconds, or 1
-  # -- so the threshold stage stays `gt 0` and does not care which fired.
-  #
-  # Recovery is a no-data event, not a falling value. A fresh stamp fails the
-  # `> 900` filter and the node is present again, so both branches return
-  # nothing and there is no series left to go below a threshold.
-  # no_data_state = OK is what turns that into Normal; Alerting or NoData here
-  # would leave the rule firing after the node had recovered.
+  # Critical: a node that has gone dark may be serving nothing, and nothing
+  # else would say so.
   rule {
     name           = "Appliance has stopped reporting"
-    condition      = "C"
+    condition      = "B"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Alerting"
 
     annotations = {
       summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
-      description      = "The reconcile stamp is more than fifteen minutes old, or the node has stopped reporting altogether. The timer runs every five, so either the node has stopped reconciling or its telemetry has stopped arriving."
+      description      = "Nothing from this node's host exporter has arrived for fifteen minutes. Either the node is down or unreachable, or its host exporter or Alloy has stopped, and the dashboards can no longer tell which."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
       __dashboardUid__ = "forge-regions"
@@ -953,30 +947,22 @@ resource "grafana_rule_group" "appliance" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 3600
+        from = 600
         to   = 0
       }
 
       model = jsonencode(merge(local.query_defaults, {
         refId        = "A"
-        instant      = false
-        range        = true
+        instant      = true
+        range        = false
         legendFormat = "{{appliance}}"
         expr         = <<-PROMQL
-          (
-            max by (node, region, appliance) (
-              time() - deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}
-            ) > 900
+          max by (node, region, appliance) (
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
           )
-          or
-          (
-            max by (node, region, appliance) (
-              present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
-            )
-            unless
-            max by (node, region, appliance) (
-              present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
-            )
+          unless
+          max by (node, region, appliance) (
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
           )
         PROMQL
       }))
@@ -994,36 +980,15 @@ resource "grafana_rule_group" "appliance" {
 
       model = jsonencode({
         refId         = "B"
-        type          = "reduce"
-        expression    = "A"
-        reducer       = "last"
-        datasource    = { type = "__expr__", uid = "__expr__" }
-        intervalMs    = 1000
-        maxDataPoints = 43200
-      })
-    }
-
-    data {
-      ref_id         = "C"
-      query_type     = "expression"
-      datasource_uid = "__expr__"
-
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-
-      model = jsonencode({
-        refId         = "C"
         type          = "threshold"
-        expression    = "B"
+        expression    = "A"
         datasource    = { type = "__expr__", uid = "__expr__" }
         intervalMs    = 1000
         maxDataPoints = 43200
         conditions = [{
           type      = "query"
           operator  = { type = "and" }
-          query     = { params = ["C"] }
+          query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
         }]
@@ -1520,11 +1485,10 @@ resource "grafana_rule_group" "appliance" {
   # fires. That deduplicates node death and nothing else, and the common case is
   # worth being plain about rather than claiming more. The deploy stamp is a
   # textfile-collector gauge on this same host exporter, so a wedged exporter on
-  # a live box *is* the stamp going stale: this fires at about eight minutes
-  # naming the exporter, the node rule follows at about twenty-five under a
-  # summary that reads as though the box were gone, and the disk rule's
-  # no_data_state = "NoData" adds a third notification. Earlier and specific is
-  # worth that; a quieter rule here would only mean learning it later and worse.
+  # a live box takes the stamp with it: this fires at about eight minutes
+  # naming the exporter, and "Appliance has stopped reporting" follows at about
+  # twenty-five. Earlier and specific is worth that; a quieter rule here would
+  # only mean learning it later and worse.
   rule {
     name           = "Appliance metrics scrape is failing"
     condition      = "B"
@@ -1706,10 +1670,20 @@ resource "grafana_rule_group" "appliance" {
 
   # The rules below read gauges Piri exports from its PDP pipeline, and follow
   # the alerts piri's docs/content/operator-guide/monitoring.md ("PDP Proving
-  # Health") sets out: one failure for each rule to page on. They are grouped by
+  # Health") sets out: one failure for each rule to alert on. They are grouped by
   # node as well as region for the reason the disk rule gives, and by proof set
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
+  #
+  # The three rules that watch Piri itself rather than a proof set (chain head
+  # is stale, no chain head, Prove task has not run) also group by instance. A
+  # node can run several Piris, each reporting instance <node>/piri-<n>, and
+  # grouping by node alone would let one healthy Piri hide another's stall. A
+  # Piri that reports another instance is grouped by that.
+  # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
+  # node, is still one series per Piri. The node name, where Alloy overwrites
+  # instance, merges the node's Piris into one series, as before. The CommP and
+  # Postgres pool rules further down group by instance for the same reason.
   #
   # The gauges are what Curio has recorded in its database, not chain state, so
   # none of these confirms that a proof landed. Two failures go unseen: a proof
@@ -1717,9 +1691,15 @@ resource "grafana_rule_group" "appliance" {
   # challenge window had closed. Curio records both as successful task runs and
   # leaves its failure count alone.
   #
-  # All of these page (critical). Each one means proofs are failing or about to:
-  # a missed proof is a fault on chain, which costs the provider, and waiting
-  # for someone to notice costs more.
+  # Severities follow docs/observability.md: a rule pages (critical) when
+  # waiting until the next day could make a loss permanent, and is a warning
+  # when the loss is a delay that stops once the cause is fixed, about one
+  # proving period's payment a day. Three page: both chain-head rules, because
+  # Piri gives up adding pieces after a few hours without a head (FIL-1508),
+  # and "proving is failing", because five rejections end a proof set for good.
+  # The other three are warnings, for the reasons each gives. Each rule's
+  # description says how soon to act, and its runbook_url links to the rule's
+  # section of infra-nodes' RUNBOOK.
   #
   # One cause can raise more than one of these over time: a head that stays
   # stuck is first "chain head is stale", then "proving period has not
@@ -1733,6 +1713,12 @@ resource "grafana_rule_group" "appliance" {
   # The timestamp of the last tipset Piri's chain scheduler applied, against the
   # wall clock: Lotus stalled or unreachable, or Piri's subscription to it
   # stuck. Piri cannot schedule or submit proofs without a moving head.
+  #
+  # Critical: uploads and reads carry on, but Piri cannot add pieces on chain
+  # without a head either, and AddRoots gives up on each batch after about 3.5
+  # hours of retries (6.9 if Lotus answers but is stale), leaving it stranded
+  # until it is freed by hand (FIL-1508). Once that is fixed, this can be a
+  # warning: everything else catches up when the head moves.
   #
   # Five minutes is ten tipsets, but a run of null rounds can leave that long
   # between tipsets, and a slow chain scheduler handler that runs before the
@@ -1752,8 +1738,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not seen a new chain head for more than five minutes"
-      description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-chain-head-is-stale"
     }
 
     labels = {
@@ -1782,7 +1768,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          time() - max by (appliance, region, node) (
+          time() - max by (appliance, region, node, instance) (
             piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
@@ -1832,11 +1818,11 @@ resource "grafana_rule_group" "appliance" {
   # head means something.
   #
   # Five-minute windows are ten of Piri's thirty-second pushes. `for` is 10m, so
-  # a restart that takes a moment to reach Lotus does not fire. Critical, as
-  # "chain head is stale" is for the same cause: none of the proving rules below
-  # can fire for a node with no head, since they compare against it or wait on a
-  # proving send that never happens, so the only later page would be "Prove task
-  # has not run", which comes after a proof has been missed.
+  # a restart that takes a moment to reach Lotus does not fire. Critical, for
+  # the reason "chain head is stale" is: with no head, AddRoots gives up on its
+  # batches after a few hours (FIL-1508). None of the proving rules below can
+  # fire for a node with no head either, since they compare against it or wait
+  # on a proving send that never happens.
   #
   # no_data_state is OK, and not NoData, even though "no head" is what the rule
   # is about: the `unless` is what finds the missing head, so the result is
@@ -1852,8 +1838,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) is running but has not seen a chain head"
-      description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-is-reporting-but-has-no-chain-head"
     }
 
     labels = {
@@ -1882,15 +1868,15 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             present_over_time(target_info{${local.piri_metric_matcher}}[5m])
           )
-          and on (appliance, region, node)
-          max by (appliance, region, node) (
+          and on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[5m])
           )
-          unless on (appliance, region, node)
-          max by (appliance, region, node) (
+          unless on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}[5m])
           )
         PROMQL
@@ -1944,6 +1930,14 @@ resource "grafana_rule_group" "appliance" {
   # against the same extrapolated head, and the set comes back into this rule
   # once the head is past it.
   #
+  # A warning: a stall loses about one proving period's payment a day and
+  # nothing more, since Curio takes the next window from the contract once
+  # scheduling runs again. Its causes that can lose more mostly page on their
+  # own: a stuck head as "chain head is stale", a rejection as "proving is
+  # failing". The exception is a cause that also makes AddRoots fail with the
+  # head still moving, such as an empty wallet: AddRoots strands its batches
+  # after about 3.5 hours (FIL-1508), and nothing here pages for that.
+  #
   # A healthy proof set is past its window for a minute or two each period,
   # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
   # the shortest non-zero pending period a five-minute group gives: two
@@ -1960,15 +1954,15 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2063,6 +2057,10 @@ resource "grafana_rule_group" "appliance" {
   # pages after each failure rather than throughout. `for` is 0m: the hour
   # window is the debounce, and a single rejection is worth a page.
   #
+  # Critical: Curio gives up on the set for good on its fifth rejection, and
+  # the backoffs between them (100, 200, 400 and 800 epochs) let that come 12.5
+  # hours after the first, within a night.
+  #
   # no_data_state is OK: every proof set reports the count, zero included, so
   # an empty result means no proof sets or a Piri older than the metric, and a
   # healthy set evaluates to zero.
@@ -2075,8 +2073,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
-      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, check the proof set with `piri client pdp proofset state`, and check the wallet has FIL for gas."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, and check the proof set with `piri client pdp proofset state`; the revert reason says what the contract refused. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
     labels = {
@@ -2146,18 +2144,28 @@ resource "grafana_rule_group" "appliance" {
   #
   # The count does not go down on its own: Piri does not run Curio's data set
   # deletion, so the row stays until someone removes it by hand. A rule on the
-  # level would page forever after the first one, so this fires on a rise, for
+  # level would fire forever after the first one, so this fires on a rise, for
   # about an hour per newly unrecoverable set. `for` is 0m for the reason the
   # rule above gives. Two things follow from reading a rise:
   #
   #   - A set that was already unrecoverable when a Piri with this metric first
-  #     reported is never paged for; graph the gauge to see the current state.
+  #     reported is never alerted on; graph the gauge to see the current state.
   #   - `increase` reads any drop as a counter reset, so removing one row by
   #     hand while others remain fires once, for an hour.
   #
   # no_data_state is OK: Piri reports the count, zero included, on every
   # collection, so an empty result is a Piri older than the metric, and a
   # healthy node evaluates to zero.
+  #
+  # A warning, not critical: by the time it fires there is nothing urgent left
+  # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
+  # Either the set's payment has ended or been terminated, so there is no
+  # revenue left to lose, or its sends have been rejected five times in a row
+  # over at least half a day of backoff, and "Piri proving is failing" has
+  # paged for the rejections before the last. A cause that threatens the node's
+  # other sets shows up in their own rejections first. This departs from the
+  # Critical the piri docs' table recommends for this condition, for that
+  # reason.
   rule {
     name           = "Piri proof set is unrecoverable"
     condition      = "B"
@@ -2167,15 +2175,15 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped proving a proof set after an unrecoverable failure"
-      description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand. Act within a day: the loss has already happened."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proof-set-is-unrecoverable"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2248,19 +2256,23 @@ resource "grafana_rule_group" "appliance" {
   # collection. A node whose last proof set is disabled or unrecoverable loses
   # the period series within the day, which is before the threshold while 1.5
   # proving periods is longer than a day, as with mainnet's 2880 epochs; then
-  # this lapses rather than repeat the unrecoverable page.
+  # this lapses rather than repeat the unrecoverable alert.
   #
-  # Critical, as the piri docs recommend: a Prove task that does not run misses
-  # every proof on the node. `for` is 10m. The threshold is the grace; this only
-  # confirms it.
+  # A warning: by the time it fires at least one period's proof is missed, but
+  # nothing is lost for good while it holds, and proving resumes once the cause
+  # is fixed. The causes that can lose more mostly page on their own, as
+  # "proving is failing" and "chain head is stale", except the AddRoots case
+  # described under "proving period has not advanced". This departs from the
+  # Critical the piri docs recommend, for that reason. `for` is 10m. The
+  # threshold is the grace; this only confirms it.
   #
   # no_data_state is OK: a node that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
   #
   # Paused until Piri's Curio dependency parses PiecesAddedV2 events
   # (FIL-1222). Until then Piri never records the pieces it adds, every Prove
-  # run fails with "no subpiece found", and this rule would keep paging
-  # on-call for that known bug. The pull request that deploys the fix removes
+  # run fails with "no subpiece found", and this rule would keep firing for
+  # that known bug. The pull request that deploys the fix removes
   # is_paused.
   rule {
     name           = "Piri's Prove task has not run in 1.5 proving periods"
@@ -2272,15 +2284,15 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
-      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment. If the wallet is empty, Piri's pending piece additions have probably stranded, about 3.5 hours after they began failing; the runbook says how to free them."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-prove-task-has-not-run-in-15-proving-periods"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2303,13 +2315,13 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-            time() - max by (appliance, region, node) (
+            time() - max by (appliance, region, node, instance) (
               piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}, task_name="PDPv0_Prove"}
             )
           )
-          / on (appliance, region, node)
+          / on (appliance, region, node, instance)
           (
-            30 * max by (appliance, region, node) (
+            30 * max by (appliance, region, node, instance) (
               max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
             )
           )
@@ -2344,6 +2356,387 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # The reconcile timer has stopped but the box stays up. This is the common
+  # failure, and absence misses it completely: deploy_last_success_timestamp is
+  # a textfile-collector gauge (infra-nodes scripts/host/lib.sh), so
+  # node_exporter re-exports it from the stamp file on every scrape whether or
+  # not the timer ran. The series stays present and only its *value* goes stale,
+  # so "Appliance has stopped reporting" never fires. The age is the signal, and
+  # it is the repository's own documented one -- infra-nodes
+  # docs/observability.md gives `time() -
+  # deploy_last_success_timestamp{project="reconcile"} > 15 * 60`, and the
+  # Regions dashboard's "Time since last deploy" panel draws exactly that
+  # against a 15-minute threshold line.
+  #
+  # The two rules do not overlap: this one needs the series present, "Appliance
+  # has stopped reporting" needs it absent. Recovery is a no-data event here
+  # too, since a fresh stamp fails the `> 900` filter, so no_data_state = OK is
+  # again what clears it.
+  #
+  # An instant query, so no reduce stage.
+  #
+  # A warning, not critical: the node keeps serving what it already runs, and
+  # what it misses is deploys, which can wait for working hours.
+  #
+  # Last in the group, away from its pair, so that adding it moved no other
+  # rule: the provider keeps a rule's uid by its position in the list, and a
+  # rule inserted mid-group would hand each later rule its predecessor's uid.
+  rule {
+    name           = "Appliance has stopped reconciling"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reconciling"
+      description      = "The node is still reporting, but its reconcile stamp is more than fifteen minutes old. The timer runs every five, so the node has stopped applying deploys: it keeps serving what it already runs, and new releases and config do not reach it."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "13"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          max by (node, region, appliance) (
+            time() - deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}
+          ) > 900
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Ingot's multipart acceptance queue is stuck. Ingot accepts a multipart
+  # upload's parts in the background while the client is still uploading, and
+  # reports how long the oldest part still waiting for that has waited
+  # (fil-forge/ingot's README, "Multipart"). A part is normally accepted within
+  # seconds, so ten minutes means the acceptor is failing or not running:
+  # CompleteMultipartUpload then answers OperationAborted, which the AWS CLI
+  # treats as a failed upload. The failed-pass rate on the same panel says
+  # which.
+  #
+  # Ingot measures the age every 30s and the gauge already carries how long the
+  # part has waited, so for = 5m only rides out one slow sweep. no_data_state is
+  # OK: an Ingot without the metric, or without metrics at all, is the
+  # container rule's business, not this one's.
+  rule {
+    name           = "Ingot multipart acceptance is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has a multipart part waiting over 10 minutes for acceptance"
+      description      = "The oldest part waiting for acceptance has waited over 10 minutes. CompleteMultipartUpload answers OperationAborted for an upload with such a part, which the AWS CLI treats as a failed upload. Failing acceptor passes point at the upload service or the storage provider; Ingot's logs ('multipart accept pass failed') say what failed."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=26"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "26"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_multipart_parked_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
+
+  # Piri holds each accepted blob for pdp.aggregation.commp.delay before a
+  # CommP task may claim it, so a blob deleted soon after upload costs no
+  # CommP and no on-chain root. Once past the delay a blob is claimed by the
+  # task engine's next poll, seconds later, so the age of the oldest due blob
+  # stays near zero. Ten minutes past due is the task engine down, or every
+  # poll finding other work first; CommP itself being slow does not show here,
+  # since a claimed blob leaves the gauge. The blob stays retrievable, and
+  # nothing is lost while it waits: a warning. `for` is 10m on top of the
+  # threshold's ten minutes, so a single slow poll does not page.
+  #
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri on a node has its own task engine, and one stalled Piri gets an alert
+  # of its own.
+  #
+  # no_data_state is OK: a Piri with nothing due has no series worth
+  # alerting on, and "Appliance has stopped reporting" covers a silent node.
+  rule {
+    name           = "Piri CommP claims have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has blobs past the CommP delay that no CommP task has claimed for over 10 minutes"
+      description      = "Accepted blobs are past pdp.aggregation.commp.delay and no PDPCommP task is picking them up, so they are not entering aggregation or being proven. The task engine claims due blobs on every poll, so check that Piri's harmonytask engine is running and not saturated: `piri status` in the Piri container, and the PDPCommP task's logs. Setting the delay to 0 does not help; the claims themselves have stopped."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=28"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "28"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_commp_due_blobs_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
+
+  # Every PDP task and every blob/accept on a Piri shares one Postgres pool,
+  # sized by pool_max_conns on its Postgres URL. pgx counts the acquires that
+  # had to wait because no connection was free; this is their share of all
+  # acquires over 15 minutes. Waits during a burst are expected, so require
+  # this rolling share to stay above a tenth for 30 minutes before warning
+  # about accepts and PDP tasks queueing for connections and slowing each
+  # other down. The fix is a bigger pool_max_conns,
+  # within what Postgres's max_connections leaves for the other services on
+  # the host.
+  #
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri has its own pool, and summing a node's Piris together would let two
+  # idle pools dilute a saturated one below the threshold.
+  #
+  # no_data_state is OK: a Piri with no acquires in the window divides zero by
+  # zero, and the NaN never crosses the threshold; a Piri with no pool counters
+  # at all produces no series, and "Appliance has stopped reporting" covers a
+  # silent node.
+  rule {
+    name           = "Piri Postgres pool is saturated"
+    condition      = "B"
+    for            = "30m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has had a 15-minute rolling Postgres acquire wait share above 10% for 30 minutes"
+      description      = "blob/accept and the PDP tasks are queueing for connections from Piri's PDP Postgres pool, so each slows the other down and an accept can time out waiting. Raise pool_max_conns on the Piri's Postgres URL in infra-nodes, keeping the Piris' pools plus Ingot's within Postgres's max_connections, and re-run init so the new URL reaches the node. The mean wait panel beside this one says how long the queueing is costing."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "31"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            rate(piri_pdp_db_pool_acquires_waited_total{${local.piri_metric_matcher}}[15m])
+          )
+          /
+          sum by (appliance, region, node, instance) (
+            rate(piri_pdp_db_pool_acquires_total{${local.piri_metric_matcher}}[15m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
@@ -2371,10 +2764,10 @@ resource "grafana_rule_group" "appliance_containers" {
   # absent, so the rule is silent rather than firing for every container.
   #
   # Known blind spot: a node whose cAdvisor dies is deliberately not watched by
-  # this rule (see the `and on (node)` gate), and nothing else covers it.
-  # "Appliance has stopped reporting" reads the deploy stamp rather than
-  # cAdvisor, so a live node with a dead scrape goes unnoticed. Closing it needs
-  # a rule on the scrape's own health.
+  # this rule (see the `and on (node)` gate). "Appliance has stopped reporting"
+  # reads the deploy stamp rather than cAdvisor, so it does not notice a live
+  # node with a dead scrape either; the next rule, on the scrape's own health,
+  # is what covers it.
   rule {
     name           = "Appliance container is not running"
     condition      = "C"
@@ -2510,7 +2903,7 @@ resource "grafana_rule_group" "appliance_containers" {
   # disappears with the container and gives no series at all. The first branch
   # catches the former and the second the latter, so this holds either way.
   #
-  # The gate is what keeps a dead node from paging twice: no host scrape in the
+  # The gate is what keeps a dead node from alerting twice: no host scrape in the
   # last five minutes means the box is gone, which is "Appliance has stopped
   # reporting"'s to tell. `and` binds tighter than `or`, hence the parentheses
   # around the pair.
@@ -2523,9 +2916,14 @@ resource "grafana_rule_group" "appliance_containers" {
   # `for = 5m` is load-bearing rather than debounce. On node death the absence
   # branch and the gate are driven by the same five-minute window on the same
   # stream, and `for` is what absorbs the skew between them so they lapse
-  # together instead of racing into a page. The rule beside this one runs
+  # together instead of racing into an alert. The rule beside this one runs
   # `for = 0m`; harmonising the two would turn every node death into a second
-  # page.
+  # alert.
+  #
+  # A warning, not critical: no container is known to have stopped, only that
+  # nothing is watching them. One on the request path that stops meanwhile
+  # still shows in its site's responses, which "Appliance site is failing most
+  # requests" pages on.
   #
   # Grouped by region and node as well as appliance, though today all three
   # say the same thing. `appliance` is <stage>-<region>, set through external
@@ -2579,7 +2977,7 @@ resource "grafana_rule_group" "appliance_containers" {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {

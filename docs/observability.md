@@ -119,6 +119,7 @@ appliance label.
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
+| Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
@@ -126,8 +127,11 @@ appliance label.
 | Piri proving is failing                              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
+| Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
+| Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
+| Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
