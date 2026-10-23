@@ -4478,10 +4478,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "sum by (node) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node) (rate(piri_pdp_db_pool_acquires_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
+                        "expr": "sum by (node, instance) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node, instance) (rate(piri_pdp_db_pool_acquires_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{instance}}",
                         "range": true
                       }
                     },
@@ -4596,10 +4596,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "sum by (node) (rate(piri_pdp_db_pool_acquire_wait_seconds_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
+                        "expr": "sum by (node, instance) (rate(piri_pdp_db_pool_acquire_wait_seconds_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node, instance) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{instance}}",
                         "range": true
                       }
                     },

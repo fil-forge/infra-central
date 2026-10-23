@@ -1682,7 +1682,8 @@ resource "grafana_rule_group" "appliance" {
   # Piri that reports another instance is grouped by that.
   # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
   # node, is still one series per Piri. The node name, where Alloy overwrites
-  # instance, merges the node's Piris into one series, as before.
+  # instance, merges the node's Piris into one series, as before. The CommP and
+  # Postgres pool rules further down group by instance for the same reason.
   #
   # The gauges are what Curio has recorded in its database, not chain state, so
   # none of these confirms that a proof landed. Two failures go unseen: a proof
@@ -2653,8 +2654,9 @@ resource "grafana_rule_group" "appliance" {
   # Piri has its own pool, and summing a node's Piris together would let two
   # idle pools dilute a saturated one below the threshold.
   #
-  # no_data_state is OK: a Piri with no acquires in the window divides by zero
-  # and produces no series, and "Appliance has stopped reporting" covers a
+  # no_data_state is OK: a Piri with no acquires in the window divides zero by
+  # zero, and the NaN never crosses the threshold; a Piri with no pool counters
+  # at all produces no series, and "Appliance has stopped reporting" covers a
   # silent node.
   rule {
     name           = "Piri Postgres pool is saturated"
