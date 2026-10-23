@@ -2557,7 +2557,11 @@ resource "grafana_rule_group" "appliance" {
   # nothing is lost while it waits: a warning. `for` is 10m on top of the
   # threshold's ten minutes, so a single slow poll does not page.
   #
-  # no_data_state is OK: a node with nothing due has no series worth
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri on a node has its own task engine, and one stalled Piri gets an alert
+  # of its own.
+  #
+  # no_data_state is OK: a Piri with nothing due has no series worth
   # alerting on, and "Appliance has stopped reporting" covers a silent node.
   rule {
     name           = "Piri CommP claims have stalled"
@@ -2600,7 +2604,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             piri_pdp_commp_due_blobs_oldest_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
@@ -2644,6 +2648,10 @@ resource "grafana_rule_group" "appliance" {
   # other down. The fix is a bigger pool_max_conns,
   # within what Postgres's max_connections leaves for the other services on
   # the host.
+  #
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri has its own pool, and summing a node's Piris together would let two
+  # idle pools dilute a saturated one below the threshold.
   #
   # no_data_state is OK: a Piri with no acquires in the window divides by zero
   # and produces no series, and "Appliance has stopped reporting" covers a
@@ -2689,11 +2697,11 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          sum by (appliance, region, node) (
+          sum by (appliance, region, node, instance) (
             rate(piri_pdp_db_pool_acquires_waited_total{${local.piri_metric_matcher}}[15m])
           )
           /
-          sum by (appliance, region, node) (
+          sum by (appliance, region, node, instance) (
             rate(piri_pdp_db_pool_acquires_total{${local.piri_metric_matcher}}[15m])
           )
         PROMQL
