@@ -1000,9 +1000,10 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name, and no label separates them today. Grouping by all three
-  # means the groups split as soon as one of them carries a per-box value,
-  # with no edit here. An instant query, so no reduce stage.
+  # service_name, and no label separates them today. Grouping by appliance,
+  # region and node together means the groups split as soon as one of them
+  # carries a per-box value, with no edit here. An instant query, so no reduce
+  # stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -1569,17 +1570,18 @@ resource "grafana_rule_group" "appliance" {
 
   # The labelling convention, alerted on rather than written down.
   #
-  # Every appliance rule groups by `node`, so a scrape arriving without it
-  # lands in a group of its own and joins to nothing that has it. All three
+  # Every other appliance rule groups by `node`, so a scrape arriving without
+  # it lands in a group of its own and joins to nothing that has it. This rule
+  # is the exception: it selects node="" to find those scrapes. All three
   # scrapes set it: the host and Caddy each through a relabel component, and
   # the cAdvisor scrape through the static rules its own relabel component
-  # adds, since `up` carries none of the Compose labels the rest of those
-  # rules read. No node value names a machine today, but that is a separate
-  # problem from the label going missing, and not the one this rule is about.
-  # The labelling is a convention living in a config outside these
-  # repositories, and conventions in prose get dropped when the config is
-  # re-implemented -- which it will be, at the next box and again if the
-  # appliance ever runs its own Alloy.
+  # adds, since `up` carries none of the Compose labels the rest of those rules
+  # read. No node value names a machine today, but that is a separate problem
+  # from the label going missing, and not the one this rule is about. The
+  # labelling is a convention living in a config outside these repositories,
+  # and conventions in prose get dropped when the config is re-implemented --
+  # which it will be, at the next box and again if the appliance ever runs its
+  # own Alloy.
   #
   # So this fires while the convention is broken, and goes quiet when it is
   # kept. Prometheus reads an absent label as empty, so node="" selects exactly
@@ -1602,7 +1604,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "{{ $labels.appliance }} is shipping telemetry with no node label"
-      description = "A scrape on this appliance is arriving without the node label these rules group by. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
+      description = "A scrape on this appliance is arriving without the node label the other appliance rules group by. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
