@@ -1000,8 +1000,9 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name, and nothing here distinguishes them today. node is the
-  # finest grouping these rules carry. An instant query, so no reduce stage.
+  # service_name, and no label separates them today. Grouping by all three
+  # means the groups split as soon as one of them carries a per-box value,
+  # with no edit here. An instant query, so no reduce stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -1568,8 +1569,8 @@ resource "grafana_rule_group" "appliance" {
 
   # The labelling convention, alerted on rather than written down.
   #
-  # Every rule in this file that groups finer than the region needs `node`,
-  # since `appliance` is <stage>-<region> and goes no finer. All three
+  # Every appliance rule groups by `node`, so a scrape arriving without it
+  # lands in a group of its own and joins to nothing that has it. All three
   # scrapes set it: the host and Caddy each through a relabel component, and
   # the cAdvisor scrape through the static rules its own relabel component
   # adds, since `up` carries none of the Compose labels the rest of those
@@ -2942,13 +2943,14 @@ resource "grafana_rule_group" "appliance_containers" {
   # here.
   # Neither splits a group, so neither changes when this fires.
   #
-  # None of the three tells two boxes in one region apart today: every value
-  # names a stage and at most a region. Which label should name a box is
-  # still being settled, so this states the gap rather than anticipating the
-  # fix. Until one of them carries a per-box value, the `unless` in the
-  # second branch below would let a live sibling hold the 5m side populated
-  # and mask a dead cAdvisor. The first branch still catches a target that
-  # fails rather than vanishes: `up == bool 0` maxes to 1 across the pair.
+  # None of the three tells two boxes in one region apart today: none of
+  # their values names more than a stage and a region. Which label should
+  # name a box is still being settled, so this states the gap rather than
+  # anticipating the fix. Until one of them carries a per-box value, the
+  # `unless` in the second branch below would let a live sibling hold the
+  # 5m side populated and mask a dead cAdvisor. The first branch still
+  # catches a target that fails rather than vanishes: `up == bool 0` maxes
+  # to 1 across the pair.
   #
   # The gate stays joined on appliance. Moving it to node would mean `on
   # (node)` and `max by (node)` together, as the rule beside this one does;
