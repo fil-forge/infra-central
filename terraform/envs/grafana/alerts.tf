@@ -2651,18 +2651,21 @@ resource "grafana_rule_group" "appliance" {
   # journaled blocks, the only copy left, and nothing rebuilds the segment from
   # them yet, FIL-1601), and one whose ship fails on its own every time. An
   # Ingot configured with catalog_plane.ship false never ships, so the rule
-  # never clears there; no deployed node sets it. Nor does a bucket whose
-  # DeleteBucket failed partway, until the client retries the delete or
-  # writes to it again.
+  # never clears there; no deployed node sets it. A bucket whose DeleteBucket
+  # failed partway also stops shipping, until the client retries the delete
+  # or writes to it again; it reads as the runbook's hung ship, where a
+  # restart is harmless.
   #
   # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
   # one pass while the queue waits, so a draining backlog and a hung ship both
   # log nothing but 'flush queue full'. The runbook tells them apart by
-  # progress: whether the oldest seq moves on.
+  # progress: whether the bucket's oldest seq moves on.
   #
-  # The gauge is the oldest block across every bucket, while the logs mix
-  # them all, so the runbook finds the stuck segment first, in Postgres: a
-  # journal row with no segment row is the missing-file case.
+  # The gauge is the oldest block across every bucket, and several buckets can
+  # be stuck at once for different reasons, so the runbook lists every bucket
+  # with unshipped segments from Postgres and works through each with that
+  # bucket's own log lines. A journal row with no segment row is the
+  # missing-file case.
   #
   # no_data_state is OK, as for the multipart rule: an Ingot without the
   # metric is the container rule's business.
@@ -2675,7 +2678,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. Find the stuck segment on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT j.bucket, j.seq, min(j.created_at) AS since, s.state FROM ingot.catalog_journal j LEFT JOIN ingot.segments s USING (seq) GROUP BY 1, 2, 4 ORDER BY since LIMIT 5'`, then read that bucket's lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. 1) state is empty: the segment's file is gone and the journal holds the only copy. Don't delete it; escalate to Ingot's maintainers. 2) 'no ship authority': the bucket's authority lapsed (an hour after its last write, or at a restart). It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first, and a long backlog can take an hour to drain; the rest move to 2). 4) 'mark shipped': Postgres isn't taking the ship's stamp. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that seq: escalate to Ingot's maintainers. 6) Nothing for that bucket but 'flush queue full', and the same seq still oldest when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`, the one case a restart fixes; the bucket then ships as in 2). A backlog that is shipping also logs nothing, but its oldest seq moves on and the age on panel 31 falls, so don't restart while either is happening."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT j.bucket, min(j.seq) AS oldest_seq, min(j.created_at) AS since, count(DISTINCT j.seq) AS segments, bool_or(s.seq IS NULL) AS file_gone FROM ingot.catalog_journal j LEFT JOIN ingot.segments s USING (seq) GROUP BY 1 ORDER BY since'`. Work through every bucket whose since is over 30 minutes old, since one bucket in 2) can hide another's problem, reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. 1) file_gone is true: a segment's file is gone and the journal holds the only copy. Don't delete it; escalate to Ingot's maintainers. 2) 'no ship authority': the bucket's authority lapsed (an hour after its last write, or at a restart). It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped': Postgres isn't taking the ship's stamp. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`, the one case a restart fixes; the bucket then ships as in 2). A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while it does."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "31"
