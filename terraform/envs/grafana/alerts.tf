@@ -1000,8 +1000,10 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name and are told apart by node, once the second is given a node
-  # value of its own. An instant query, so no reduce stage.
+  # service_name, and no label on those series separates them today -- Alloy
+  # sets instance to the node name too. Grouping by appliance, region and node
+  # together means the groups split as soon as one of them carries a per-box
+  # value, with no edit here. An instant query, so no reduce stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -1568,17 +1570,18 @@ resource "grafana_rule_group" "appliance" {
 
   # The labelling convention, alerted on rather than written down.
   #
-  # Every per-box rule in this file needs `node`, because `appliance` is
-  # <stage>-<region> and cannot tell two boxes in one region apart. All three
-  # scrapes set it: the host and Caddy each through a relabel component, and
-  # the cAdvisor scrape through the static rules its own relabel component
-  # adds, since `up` carries none of the Compose labels the rest of those
-  # rules read. That node's value is per-region today is a different problem
-  # from the label going missing, and not the one this rule is about. The
-  # labelling is a convention living in a config outside these repositories,
-  # and conventions in prose get dropped when the config is re-implemented --
-  # which it will be, at the next box and again if the appliance ever runs its
-  # own Alloy.
+  # Every other appliance rule groups by `node`, so a scrape arriving without
+  # it lands in a group apart from the labelled ones and joins to nothing that
+  # has it. This rule is the exception: it selects node="" to find those
+  # scrapes. All three scrapes set it: the host and Caddy each through a
+  # relabel component, and the cAdvisor scrape through the static rules its own
+  # relabel component adds, since `up` carries none of the Compose labels the
+  # rest of those rules read. No node value names a machine today, but that is
+  # a separate problem from the label going missing, and not the one this rule
+  # is about. The labelling is a convention living in a config outside these
+  # repositories, and conventions in prose get dropped when the config is
+  # re-implemented -- which it will be, at the next box and again if the
+  # appliance ever runs its own Alloy.
   #
   # So this fires while the convention is broken, and goes quiet when it is
   # kept. Prometheus reads an absent label as empty, so node="" selects exactly
@@ -1601,7 +1604,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "{{ $labels.appliance }} is shipping telemetry with no node label"
-      description = "A scrape on this appliance is arriving without the node label every per-box rule needs. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
+      description = "A scrape on this appliance is arriving without the node label the other appliance rules group by. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
@@ -2937,20 +2940,18 @@ resource "grafana_rule_group" "appliance_containers" {
   # region is in the grouping because the dashboard link below reads
   # $labels.region, and an annotation can only read a label the query emits;
   # without it the link carried the literal <no value>. node is in it because
-  # the rule beside this one groups by it, and because the grouping starts
-  # separating boxes the day a node value is per-box, with no edit here.
-  # Neither splits a group, so neither changes when this fires.
+  # the rule beside this one groups by it, and because the grouping separates
+  # boxes as soon as any of the three carries a per-box value, with no edit
+  # here. Neither splits a group, so neither changes when this fires.
   #
-  # None of the three tells two boxes in one region apart today, and node is
-  # the label meant to: infra-nodes' design has node identify the box, and
-  # names it as what tells apart two nodes sharing a stage, a region and a
-  # service_name. Only its value falls short: it is the node's name, which
-  # distinguishes stages and regions, not boxes. A second box in a region
-  # needs a node value of its own, not a new label -- and until it has one,
-  # the `unless` in the second branch below would let a live sibling hold the
-  # 5m side populated and mask a dead cAdvisor. The first branch still catches
-  # a target that fails rather than vanishes: `up == bool 0` maxes to 1 across
-  # the pair.
+  # None of the three tells two boxes in one region apart today: none of
+  # their values names more than a stage and a region. Which label should
+  # name a box is still being settled, so this states the gap rather than
+  # anticipating the fix. Until one of them carries a per-box value, the
+  # `unless` in the second branch below would let a live sibling hold the
+  # 5m side populated and mask a dead cAdvisor. The first branch still
+  # catches a target that fails rather than vanishes: `up == bool 0` maxes
+  # to 1 across the pair.
   #
   # The gate stays joined on appliance. Moving it to node would mean `on
   # (node)` and `max by (node)` together, as the rule beside this one does;
