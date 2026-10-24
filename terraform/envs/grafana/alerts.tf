@@ -2737,6 +2737,127 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Ingot journals each commit's new catalog blocks in Postgres until the log
+  # segment holding them ships to Forge, so a copy of the database holds the
+  # catalog that exists nowhere but the host's disk (fil-forge/ingot's
+  # logstore/README.md). Segments seal within seconds and ship right after, so
+  # the oldest journaled block is normally seconds old. A ship that fails is
+  # retried, a few times at once and then by a sweep each minute until it
+  # lands, so half an hour means shipping is failing, not slow. Nothing is
+  # lost while a segment waits, since its blocks are on disk and in Postgres:
+  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # rides out a slow scrape.
+  #
+  # A restart is the wrong way to retry. Ingot signs a ship with authority it
+  # keeps in memory from the bucket's recent writes, and a restart clears it, so
+  # an idle bucket's segments then wait for its next write. After an outage
+  # longer than that authority's hour, every idle bucket with a backlog waits
+  # the same way, so the alert can outlast its cause by days with nothing to do.
+  # If that ever matters, the fix is in hilt, which holds the tenant's keys and
+  # could mint Ingot a narrow ship-only delegation when it has none; it has no
+  # endpoint for that yet. A restart is the remedy for one case: a ship that
+  # hangs (its HTTP clients set no timeout) blocks the bucket's queue and sweep
+  # alike and logs nothing. Two cases need Ingot's maintainers: a segment whose
+  # file is gone from disk (Ingot drops its row at startup but keeps its
+  # journaled blocks, the only copy left, and nothing rebuilds the segment from
+  # them yet, FIL-1601), and one whose ship fails on its own every time. An
+  # Ingot configured with catalog_plane.ship false never ships, so the rule
+  # never clears there; no deployed node sets it. A bucket whose DeleteBucket
+  # failed partway also stops shipping, until the client retries the delete
+  # or writes to it again; it reads as the runbook's hung ship, where a
+  # restart is harmless.
+  #
+  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
+  # one pass while the queue waits, so a draining backlog and a hung ship both
+  # log nothing but 'flush queue full'. The runbook tells them apart by
+  # progress: whether the bucket's oldest seq moves on.
+  #
+  # The gauge is the oldest block across every bucket, and several buckets can
+  # be stuck at once for different reasons, so the runbook lists every bucket
+  # with unshipped segments from Postgres and works through each with that
+  # bucket's own log lines. A journal row with no segment row is the
+  # missing-file case. Such a bucket holds the gauge over the threshold until
+  # its segment is rebuilt, so the rule stays firing on that node, and a later
+  # stall there sends no new notification.
+  #
+  # no_data_state is OK, as for the multipart rule: an Ingot without the
+  # metric is the container rule's business.
+  rule {
+    name           = "Ingot catalog shipping has stalled"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT j.bucket, min(j.seq) AS oldest_seq, now() - min(j.created_at) AS age, count(DISTINCT j.seq) AS segments, bool_or(s.seq IS NULL) AS file_gone FROM ingot.catalog_journal j LEFT JOIN ingot.segments s USING (seq) GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) file_gone is true: a segment's file is gone and the journal holds the only copy. Don't delete it; escalate to Ingot's maintainers. 2) 'no ship authority': the bucket's authority lapsed (an hour after its last write, or at a restart). It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped': Postgres isn't taking the ship's stamp. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`, the one case a restart fixes; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "34"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_catalog_journal_oldest_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
