@@ -4478,10 +4478,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "sum by (node) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node) (rate(piri_pdp_db_pool_acquires_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
+                        "expr": "sum by (node, instance) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node, instance) (rate(piri_pdp_db_pool_acquires_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{instance}}",
                         "range": true
                       }
                     },
@@ -4596,10 +4596,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "sum by (node) (rate(piri_pdp_db_pool_acquire_wait_seconds_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
+                        "expr": "sum by (node, instance) (rate(piri_pdp_db_pool_acquire_wait_seconds_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))\n/ sum by (node, instance) (rate(piri_pdp_db_pool_acquires_waited_total{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"}[5m]))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{instance}}",
                         "range": true
                       }
                     },
@@ -4710,10 +4710,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max by (node) (piri_pdp_db_pool_connections{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\", state=\"acquired\"})",
+                        "expr": "max by (node, instance) (piri_pdp_db_pool_connections{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\", state=\"acquired\"})",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}} in use",
+                        "legendFormat": "{{instance}} in use",
                         "range": true
                       }
                     },
@@ -4734,10 +4734,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max by (node) (piri_pdp_db_pool_max_connections{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "expr": "max by (node, instance) (piri_pdp_db_pool_max_connections{job=\"forge/piri\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}} max",
+                        "legendFormat": "{{instance}} max",
                         "range": true
                       }
                     },

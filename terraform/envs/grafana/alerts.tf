@@ -1675,6 +1675,16 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
+  # The three rules that watch Piri itself rather than a proof set (chain head
+  # is stale, no chain head, Prove task has not run) also group by instance. A
+  # node can run several Piris, each reporting instance <node>/piri-<n>, and
+  # grouping by node alone would let one healthy Piri hide another's stall. A
+  # Piri that reports another instance is grouped by that.
+  # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
+  # node, is still one series per Piri. The node name, where Alloy overwrites
+  # instance, merges the node's Piris into one series, as before. The CommP and
+  # Postgres pool rules further down group by instance for the same reason.
+  #
   # The gauges are what Curio has recorded in its database, not chain state, so
   # none of these confirms that a proof landed. Two failures go unseen: a proof
   # Curio sent that then failed on chain, and a Prove task that woke after its
@@ -1758,7 +1768,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          time() - max by (appliance, region, node) (
+          time() - max by (appliance, region, node, instance) (
             piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
@@ -1858,15 +1868,15 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             present_over_time(target_info{${local.piri_metric_matcher}}[5m])
           )
-          and on (appliance, region, node)
-          max by (appliance, region, node) (
+          and on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[5m])
           )
-          unless on (appliance, region, node)
-          max by (appliance, region, node) (
+          unless on (appliance, region, node, instance)
+          max by (appliance, region, node, instance) (
             present_over_time(piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}}[5m])
           )
         PROMQL
@@ -2305,13 +2315,13 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-            time() - max by (appliance, region, node) (
+            time() - max by (appliance, region, node, instance) (
               piri_pdp_task_last_success_timestamp_seconds{${local.piri_metric_matcher}, task_name="PDPv0_Prove"}
             )
           )
-          / on (appliance, region, node)
+          / on (appliance, region, node, instance)
           (
-            30 * max by (appliance, region, node) (
+            30 * max by (appliance, region, node, instance) (
               max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
             )
           )
@@ -2548,7 +2558,11 @@ resource "grafana_rule_group" "appliance" {
   # nothing is lost while it waits: a warning. `for` is 10m on top of the
   # threshold's ten minutes, so a single slow poll does not page.
   #
-  # no_data_state is OK: a node with nothing due has no series worth
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri on a node has its own task engine, and one stalled Piri gets an alert
+  # of its own.
+  #
+  # no_data_state is OK: a Piri with nothing due has no series worth
   # alerting on, and "Appliance has stopped reporting" covers a silent node.
   rule {
     name           = "Piri CommP claims have stalled"
@@ -2591,7 +2605,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             piri_pdp_commp_due_blobs_oldest_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
@@ -2636,8 +2650,13 @@ resource "grafana_rule_group" "appliance" {
   # within what Postgres's max_connections leaves for the other services on
   # the host.
   #
-  # no_data_state is OK: a Piri with no acquires in the window divides by zero
-  # and produces no series, and "Appliance has stopped reporting" covers a
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri has its own pool, and summing a node's Piris together would let two
+  # idle pools dilute a saturated one below the threshold.
+  #
+  # no_data_state is OK: a Piri with no acquires in the window divides zero by
+  # zero, and the NaN never crosses the threshold; a Piri with no pool counters
+  # at all produces no series, and "Appliance has stopped reporting" covers a
   # silent node.
   rule {
     name           = "Piri Postgres pool is saturated"
@@ -2680,11 +2699,11 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          sum by (appliance, region, node) (
+          sum by (appliance, region, node, instance) (
             rate(piri_pdp_db_pool_acquires_waited_total{${local.piri_metric_matcher}}[15m])
           )
           /
-          sum by (appliance, region, node) (
+          sum by (appliance, region, node, instance) (
             rate(piri_pdp_db_pool_acquires_total{${local.piri_metric_matcher}}[15m])
           )
         PROMQL
