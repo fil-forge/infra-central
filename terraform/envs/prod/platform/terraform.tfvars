@@ -30,3 +30,11 @@ chain = {
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
+
+# The appliances' egress addresses, the only sources the signing service admits,
+# since it signs with the payer key for whoever reaches it. Each key is a label
+# from appliance_regions. Null admits any source and an empty map closes the
+# route; docs/appliance-onboarding.md has the step that adds an address.
+#
+# Empty, and so no public route: prod serves no appliance yet.
+signer_allowed_sources = {}

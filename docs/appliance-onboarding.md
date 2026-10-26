@@ -21,6 +21,7 @@ then the S3 delegation that comes back.
 | Commit the region label       | this repo   | nothing                                    |
 | Allocate the node's public IP | infra-nodes | nothing                                    |
 | Mint the unseal token         | this repo   | that IP                                    |
+| Admit it at the signer        | this repo   | that IP                                    |
 | Deliver the token             | a person    | the node operator                          |
 | Boot the node, generate keys  | infra-nodes | the token                                  |
 | Register the node             | this repo   | the node's Piri DID, its URL and its proof |
@@ -119,6 +120,25 @@ restart.
 
 No flag is needed when the recorded token has simply lapsed, which is the ordinary state of a node
 that has been offline longer than the 72-hour renewal period. The script reports that and mints.
+
+## Admitting the node to the signing service
+
+The signing service signs with the stage's payer key for whoever reaches it, so its route at
+`signer.<hostname suffix>` admits only the addresses in `signer_allowed_sources`, in the same
+`terraform.tfvars` as `appliance_regions`. Add the node's egress address under its region label, the
+same address its unseal token is bound to, and merge:
+
+```hcl
+signer_allowed_sources = {
+  us-east-9 = "203.0.113.7"
+}
+```
+
+Any other address gets a `403` from the load balancer saying the host does not accept requests from
+it, so a Piri that fails to sign with that error is calling from an address not listed here. The map
+takes only labels in `appliance_regions`, and up to 36 distinct addresses, the most the service's
+listener priorities hold. `null` admits any source, which no stage uses, and an empty map gives the
+service no public route.
 
 ## Registering the node
 
@@ -259,6 +279,9 @@ appliance_regions         = []
 retired_appliance_regions = ["us-east-9"]
 ```
 
+Remove the region's entry from `signer_allowed_sources` in the same commit; the apply refuses an
+address whose label is no longer in `appliance_regions`.
+
 The apply revokes the node's unseal token, deletes its token role, deletes its parameters and
 destroys its transit key. **This is not reversible.** The node behind that key can never unseal
 again, and everything on its disks stays encrypted with a key that no longer exists.
@@ -278,6 +301,9 @@ node was retired.
 The apply takes effect at the node's next unseal. Transit unseal happens at boot, so an appliance
 that is already running holds its key in memory and keeps serving traffic until it restarts, which
 an operator you are retiring against has no reason to do.
+
+Its access to the signing service is the exception: removing its address from
+`signer_allowed_sources` takes effect when the apps root applies, without waiting for a restart.
 
 Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last. None of the
 three has tooling for it yet, so every step is manual:

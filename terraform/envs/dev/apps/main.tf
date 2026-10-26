@@ -109,6 +109,11 @@ module "apps" {
   # One home per stage: the platform workspace owns it, this one reads it.
   chain = local.platform.chain
 
+  # Held by the platform root beside appliance_regions. try() for the same
+  # reason as log_forwarding: a pull request that adds the key plans here before
+  # the platform root has applied it.
+  signer_allowed_sources = try(local.platform.signer_allowed_sources, null)
+
   # hilt registers every tenant with sprue as a customer carrying a product, so
   # a space is provisioned against a plan here as it is in prod.
   allow_provision_without_payment_plan = false

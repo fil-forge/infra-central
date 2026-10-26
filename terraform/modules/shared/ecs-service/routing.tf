@@ -1,6 +1,7 @@
 # Public routing, created only for services that need a public identity. Every
-# service has one today. A null hostname leaves the service reachable over the
-# private namespace alone.
+# service has one, except the signing service in a stage that admits no
+# address. A null hostname leaves the service reachable over the private
+# namespace alone.
 
 resource "aws_lb_target_group" "this" {
   count = var.hostname == null ? 0 : 1
@@ -31,15 +32,58 @@ resource "aws_lb_target_group" "this" {
   }
 }
 
+locals {
+  # One entry per forwarding rule: null for a route open to any source, else
+  # the CIDRs that rule admits. A rule takes five condition values and the
+  # host header uses one of them.
+  source_cidr_chunks = var.allowed_source_cidrs == null ? [null] : chunklist(var.allowed_source_cidrs, 4)
+}
+
 resource "aws_lb_listener_rule" "this" {
-  count = var.hostname == null ? 0 : 1
+  count = var.hostname == null ? 0 : length(local.source_cidr_chunks)
 
   listener_arn = var.listener_arn
-  priority     = var.listener_priority
+  priority     = var.listener_priority + count.index
 
   action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.this[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [var.hostname]
+    }
+  }
+
+  dynamic "condition" {
+    for_each = local.source_cidr_chunks[count.index] == null ? [] : [local.source_cidr_chunks[count.index]]
+
+    content {
+      source_ip {
+        values = condition.value
+      }
+    }
+  }
+}
+
+# Answers the hostname for every source the rules above do not admit. Without
+# it the listener's default 404 would claim no service is routed here, which
+# sends whoever is debugging a refused caller to look at DNS.
+resource "aws_lb_listener_rule" "refuse" {
+  count = var.hostname == null || var.allowed_source_cidrs == null ? 0 : 1
+
+  listener_arn = var.listener_arn
+  priority     = var.listener_priority + length(local.source_cidr_chunks)
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "${var.hostname} does not accept requests from this address"
+      status_code  = "403"
+    }
   }
 
   condition {

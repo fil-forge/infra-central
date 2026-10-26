@@ -91,6 +91,11 @@ output "chain" {
   value       = var.chain
 }
 
+output "signer_allowed_sources" {
+  description = "Consumed by the apps workspace, which builds the signing service's route from it."
+  value       = var.signer_allowed_sources
+}
+
 output "openbao_internal_address" {
   value = module.openbao.internal_address
 }

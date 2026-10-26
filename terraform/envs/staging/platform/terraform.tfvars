@@ -39,3 +39,15 @@ chain = {
 # docs/appliance-onboarding.md is the procedure for both.
 appliance_regions         = ["eu-central-3"]
 retired_appliance_regions = ["pilot-mad"]
+
+# The appliances' egress addresses, the only sources the signing service admits,
+# since it signs with the payer key for whoever reaches it. Each key is a label
+# from appliance_regions. Null admits any source and an empty map closes the
+# route; docs/appliance-onboarding.md has the step that adds an address.
+#
+# eu-central-3 is the Servers.com host in fil-forge/infra-nodes
+# (terraform/envs/staging/eu-central-3/main.tf), which its unseal token is
+# bound to as well.
+signer_allowed_sources = {
+  eu-central-3 = "23.83.66.244"
+}
