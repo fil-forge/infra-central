@@ -229,8 +229,11 @@ func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion stri
 // WaitForReplica returns once the secret's replica in replicaRegion is in
 // sync. Replication finishes after ReplicateSecretToRegions returns, so a seed
 // that did not wait could report a key as replicated that never arrives. It
-// fails on a failed replica, on a missing one, and when ctx ends first; the
-// caller's deadline bounds the wait.
+// fails on a failed replica and when ctx ends first; the caller's deadline
+// bounds the wait. Secrets Manager is eventually consistent, so a replica just
+// requested may be missing from the first few descriptions: a missing replica
+// is waited for like one in progress, and reported as missing only at the
+// deadline.
 func (s *Store) WaitForReplica(ctx context.Context, secretARN, replicaRegion string) error {
 	if replicaRegion == s.region {
 		return nil
@@ -246,7 +249,7 @@ func (s *Store) WaitForReplica(ctx context.Context, secretARN, replicaRegion str
 		replica, ok := findReplica(out.ReplicationStatus, replicaRegion)
 		switch {
 		case !ok:
-			return fmt.Errorf("%s in %s: %w", secretARN, replicaRegion, ErrNoReplica)
+			// Not listed yet: wait as for a replica in progress.
 		case replica.Status == types.StatusTypeInSync:
 			return nil
 		case replica.Status == types.StatusTypeFailed:
@@ -256,6 +259,9 @@ func (s *Store) WaitForReplica(ctx context.Context, secretARN, replicaRegion str
 
 		select {
 		case <-ctx.Done():
+			if !ok {
+				return fmt.Errorf("%s in %s: %w: %w", secretARN, replicaRegion, ErrNoReplica, ctx.Err())
+			}
 			return fmt.Errorf("replica of %s in %s still %s: %w", secretARN, replicaRegion, replica.Status, ctx.Err())
 		case <-time.After(s.replicaPoll):
 		}

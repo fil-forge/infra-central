@@ -383,13 +383,30 @@ func TestWaitForReplicaFailsWhenTheReplicaFails(t *testing.T) {
 	}
 }
 
-func TestWaitForReplicaFailsWhenTheRegionHasNoReplica(t *testing.T) {
+func TestWaitForReplicaKeepsWaitingUntilANewReplicaIsListed(t *testing.T) {
+	fake := newFakeSecrets()
+	fake.primaryRegion = "us-east-2"
+	fake.replicaSteps = [][]types.ReplicationStatusType{
+		{replicaIn("eu-west-1", types.StatusTypeInSync)}, // not listed yet
+		{replicaIn("eu-west-1", types.StatusTypeInSync), replicaIn("eu-central-1", types.StatusTypeInSync)},
+	}
+	store := newTestStore(fake)
+
+	err := store.WaitForReplica(waitCtx(t), anySecretARN, "eu-central-1")
+	if err != nil || fake.describes != 2 {
+		t.Errorf("WaitForReplica() = %v after %d describes, want nil after 2", err, fake.describes)
+	}
+}
+
+func TestWaitForReplicaReportsAReplicaStillMissingAtTheDeadline(t *testing.T) {
 	fake := newFakeSecrets()
 	fake.primaryRegion = "us-east-2"
 	fake.replicas = []types.ReplicationStatusType{replicaIn("eu-west-1", types.StatusTypeInSync)}
 	store := newTestStore(fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
 
-	if err := store.WaitForReplica(waitCtx(t), anySecretARN, "eu-central-1"); !errors.Is(err, ErrNoReplica) {
+	if err := store.WaitForReplica(ctx, anySecretARN, "eu-central-1"); !errors.Is(err, ErrNoReplica) {
 		t.Errorf("WaitForReplica() error = %v, want %v", err, ErrNoReplica)
 	}
 }
