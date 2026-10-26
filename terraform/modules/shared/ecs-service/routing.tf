@@ -73,7 +73,7 @@ resource "aws_lb_listener_rule" "refuse" {
   count = var.hostname == null || var.allowed_source_cidrs == null ? 0 : 1
 
   listener_arn = var.listener_arn
-  priority     = var.listener_priority + length(local.source_cidr_chunks)
+  priority     = var.refusal_priority
 
   action {
     type = "fixed-response"
@@ -88,6 +88,13 @@ resource "aws_lb_listener_rule" "refuse" {
   condition {
     host_header {
       values = [var.hostname]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = coalesce(var.refusal_priority, -1) >= var.listener_priority + length(local.source_cidr_chunks)
+      error_message = "refusal_priority must be set, after the last forwarding rule's priority (listener_priority + ${length(local.source_cidr_chunks) - 1})."
     }
   }
 }

@@ -453,6 +453,7 @@ module "signing_service" {
   allowed_source_cidrs = local.signer_routed ? local.signer_cidrs : null
   listener_arn         = var.listener_arn
   listener_priority    = 150
+  refusal_priority     = 159
   route53_zone_id      = local.zone_id[local.host["signing-service"]]
   alb_dns_name         = var.alb_dns_name
   alb_zone_id          = var.alb_zone_id
