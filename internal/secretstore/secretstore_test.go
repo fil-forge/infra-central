@@ -2,8 +2,10 @@ package secretstore
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -22,6 +24,13 @@ type fakeSecrets struct {
 	// replicated.
 	primaryRegion string
 	replicas      []types.ReplicationStatusType
+
+	// replicaSteps, when set, replaces replicas call by call: the nth
+	// DescribeSecret reports the nth entry, and the last one repeats.
+	replicaSteps [][]types.ReplicationStatusType
+
+	// replicateStatus is what ReplicateSecretToRegions reports per region.
+	replicateStatus []types.ReplicationStatusType
 
 	creates    []*secretsmanager.CreateSecretInput
 	puts       []*secretsmanager.PutSecretValueInput
@@ -73,7 +82,11 @@ func (f *fakeSecrets) PutSecretValue(ctx context.Context, in *secretsmanager.Put
 
 func (f *fakeSecrets) DescribeSecret(ctx context.Context, in *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error) {
 	f.describes++
-	out := &secretsmanager.DescribeSecretOutput{ARN: in.SecretId, ReplicationStatus: f.replicas}
+	replicas := f.replicas
+	if len(f.replicaSteps) > 0 {
+		replicas = f.replicaSteps[min(f.describes, len(f.replicaSteps))-1]
+	}
+	out := &secretsmanager.DescribeSecretOutput{ARN: in.SecretId, ReplicationStatus: replicas}
 	if f.primaryRegion != "" {
 		out.PrimaryRegion = aws.String(f.primaryRegion)
 	}
@@ -82,7 +95,7 @@ func (f *fakeSecrets) DescribeSecret(ctx context.Context, in *secretsmanager.Des
 
 func (f *fakeSecrets) ReplicateSecretToRegions(ctx context.Context, in *secretsmanager.ReplicateSecretToRegionsInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.ReplicateSecretToRegionsOutput, error) {
 	f.replicates = append(f.replicates, in)
-	return &secretsmanager.ReplicateSecretToRegionsOutput{ARN: in.SecretId}, nil
+	return &secretsmanager.ReplicateSecretToRegionsOutput{ARN: in.SecretId, ReplicationStatus: f.replicateStatus}, nil
 }
 
 // raceSecrets simulates a concurrent run creating the secret between this
@@ -98,7 +111,7 @@ func (r *raceSecrets) CreateSecret(ctx context.Context, in *secretsmanager.Creat
 }
 
 func newTestStore(client api) *Store {
-	return &Store{client: client, stage: "test", region: "us-east-2"}
+	return &Store{client: client, stage: "test", region: "us-east-2", replicaPoll: time.Millisecond}
 }
 
 func TestNameMirrorsTheSSMLayoutWithoutTheLeadingSlash(t *testing.T) {
@@ -231,6 +244,14 @@ func TestGetFailsForAnAbsentSecret(t *testing.T) {
 
 const anySecretARN = "arn:aws:secretsmanager:us-east-2:111111111111:secret:forge-central/test/svc/key-AbCdEf"
 
+// waitCtx bounds a WaitForReplica call, so a test whose replica never settles
+// fails instead of hanging.
+func waitCtx(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func replicaIn(region string, status types.StatusType) types.ReplicationStatusType {
 	return types.ReplicationStatusType{Region: aws.String(region), Status: status}
 }
@@ -316,5 +337,81 @@ func TestEnsureReplicaDoesNothingInTheReplicaRegionItself(t *testing.T) {
 	if err != nil || added || fake.describes != 0 || len(fake.replicates) != 0 {
 		t.Errorf("EnsureReplica() = (%v, %v) after %d describes and %d replicate calls, want (false, nil) and no calls",
 			added, err, fake.describes, len(fake.replicates))
+	}
+}
+
+func TestEnsureReplicaFailsWhenTheReplicateCallReportsTheRegionFailed(t *testing.T) {
+	fake := newFakeSecrets()
+	failed := replicaIn("eu-central-1", types.StatusTypeFailed)
+	failed.StatusMessage = aws.String("a secret with this name already exists")
+	fake.replicateStatus = []types.ReplicationStatusType{failed}
+	store := newTestStore(fake)
+
+	added, err := store.EnsureReplica(context.Background(), anySecretARN, "eu-central-1")
+	if !errors.Is(err, ErrReplicaFailed) || added {
+		t.Errorf("EnsureReplica() = (%v, %v), want (false, %v)", added, err, ErrReplicaFailed)
+	}
+}
+
+func TestWaitForReplicaReturnsOnceTheReplicaIsInSync(t *testing.T) {
+	fake := newFakeSecrets()
+	fake.primaryRegion = "us-east-2"
+	fake.replicaSteps = [][]types.ReplicationStatusType{
+		{replicaIn("eu-central-1", types.StatusTypeInProgress)},
+		{replicaIn("eu-central-1", types.StatusTypeInProgress)},
+		{replicaIn("eu-central-1", types.StatusTypeInSync)},
+	}
+	store := newTestStore(fake)
+
+	err := store.WaitForReplica(waitCtx(t), anySecretARN, "eu-central-1")
+	if err != nil || fake.describes != 3 {
+		t.Errorf("WaitForReplica() = %v after %d describes, want nil after 3", err, fake.describes)
+	}
+}
+
+func TestWaitForReplicaFailsWhenTheReplicaFails(t *testing.T) {
+	fake := newFakeSecrets()
+	fake.primaryRegion = "us-east-2"
+	fake.replicaSteps = [][]types.ReplicationStatusType{
+		{replicaIn("eu-central-1", types.StatusTypeInProgress)},
+		{replicaIn("eu-central-1", types.StatusTypeFailed)},
+	}
+	store := newTestStore(fake)
+
+	if err := store.WaitForReplica(waitCtx(t), anySecretARN, "eu-central-1"); !errors.Is(err, ErrReplicaFailed) {
+		t.Errorf("WaitForReplica() error = %v, want %v", err, ErrReplicaFailed)
+	}
+}
+
+func TestWaitForReplicaFailsWhenTheRegionHasNoReplica(t *testing.T) {
+	fake := newFakeSecrets()
+	fake.primaryRegion = "us-east-2"
+	fake.replicas = []types.ReplicationStatusType{replicaIn("eu-west-1", types.StatusTypeInSync)}
+	store := newTestStore(fake)
+
+	if err := store.WaitForReplica(waitCtx(t), anySecretARN, "eu-central-1"); !errors.Is(err, ErrNoReplica) {
+		t.Errorf("WaitForReplica() error = %v, want %v", err, ErrNoReplica)
+	}
+}
+
+func TestWaitForReplicaGivesUpAtTheDeadline(t *testing.T) {
+	fake := newFakeSecrets()
+	fake.primaryRegion = "us-east-2"
+	fake.replicas = []types.ReplicationStatusType{replicaIn("eu-central-1", types.StatusTypeInProgress)}
+	store := newTestStore(fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	if err := store.WaitForReplica(ctx, anySecretARN, "eu-central-1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("WaitForReplica() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+}
+
+func TestWaitForReplicaDoesNothingInTheReplicaRegionItself(t *testing.T) {
+	fake := newFakeSecrets()
+	store := newTestStore(fake)
+
+	if err := store.WaitForReplica(waitCtx(t), anySecretARN, "us-east-2"); err != nil || fake.describes != 0 {
+		t.Errorf("WaitForReplica() = %v after %d describes, want nil and no calls", err, fake.describes)
 	}
 }

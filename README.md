@@ -372,10 +372,15 @@ aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
 # A secret with a DR replica cannot be deleted until the replica is removed.
+# list-secrets does not report replicas, so ask each secret.
 for name in $(aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
-  --query 'SecretList[?ReplicationStatus].Name' --output text); do
-  aws secretsmanager remove-regions-from-replication --secret-id "$name" \
-    --remove-replica-regions eu-central-1
+  --query 'SecretList[].Name' --output text); do
+  regions=$(aws secretsmanager describe-secret --secret-id "$name" \
+    --query 'ReplicationStatus[].Region' --output text)
+  if [ -n "$regions" ] && [ "$regions" != None ]; then
+    aws secretsmanager remove-regions-from-replication --secret-id "$name" \
+      --remove-replica-regions $regions
+  fi
 done
 aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \

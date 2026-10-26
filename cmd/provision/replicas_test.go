@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,10 +11,11 @@ import (
 	"github.com/fil-forge/infra-central/internal/secretstore"
 )
 
-// fakeReplicator records the ARNs it was asked to replicate and treats those in
-// existing as already replicated.
+// fakeReplicator records each replicate and wait call in order, treats the
+// ARNs in existing as already replicated, and fails the wait for waitErr.
 type fakeReplicator struct {
 	existing map[string]bool
+	waitErr  map[string]error
 	asked    []string
 }
 
@@ -22,8 +24,13 @@ func (f *fakeReplicator) Name(service, name string) string {
 }
 
 func (f *fakeReplicator) EnsureReplica(ctx context.Context, secretARN, replicaRegion string) (bool, error) {
-	f.asked = append(f.asked, secretARN+" -> "+replicaRegion)
+	f.asked = append(f.asked, "replicate "+secretARN+" -> "+replicaRegion)
 	return !f.existing[secretARN], nil
+}
+
+func (f *fakeReplicator) WaitForReplica(ctx context.Context, secretARN, replicaRegion string) error {
+	f.asked = append(f.asked, "wait "+secretARN+" -> "+replicaRegion)
+	return f.waitErr[secretARN]
 }
 
 func seededSecrets() map[string]map[string]string {
@@ -34,7 +41,7 @@ func seededSecrets() map[string]map[string]string {
 	}
 }
 
-func TestReplicateKeysReplicatesEverySecretWalletsFirst(t *testing.T) {
+func TestReplicateKeysReplicatesEverySecretWalletsFirstThenWaitsForEach(t *testing.T) {
 	keys := &fakeReplicator{}
 	resp := &Response{Secrets: seededSecrets()}
 
@@ -43,13 +50,27 @@ func TestReplicateKeysReplicatesEverySecretWalletsFirst(t *testing.T) {
 	}
 
 	want := []string{
-		"arn:delegator/transactor-key -> eu-central-1",
-		"arn:signing-service/payer-key -> eu-central-1",
-		"arn:delegator/identity -> eu-central-1",
-		"arn:sprue/identity -> eu-central-1",
+		"replicate arn:delegator/transactor-key -> eu-central-1",
+		"replicate arn:signing-service/payer-key -> eu-central-1",
+		"replicate arn:delegator/identity -> eu-central-1",
+		"replicate arn:sprue/identity -> eu-central-1",
+		"wait arn:delegator/transactor-key -> eu-central-1",
+		"wait arn:signing-service/payer-key -> eu-central-1",
+		"wait arn:delegator/identity -> eu-central-1",
+		"wait arn:sprue/identity -> eu-central-1",
 	}
 	if !reflect.DeepEqual(keys.asked, want) {
-		t.Errorf("EnsureReplica calls = %v, want %v", keys.asked, want)
+		t.Errorf("replicator calls = %v, want %v", keys.asked, want)
+	}
+}
+
+func TestReplicateKeysFailsWhenAReplicaDoesNotSync(t *testing.T) {
+	notSynced := errors.New("replica failed")
+	keys := &fakeReplicator{waitErr: map[string]error{"arn:sprue/identity": notSynced}}
+	resp := &Response{Secrets: seededSecrets()}
+
+	if err := replicateKeys(context.Background(), keys, "eu-central-1", resp); !errors.Is(err, notSynced) {
+		t.Errorf("replicateKeys() error = %v, want %v", err, notSynced)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -41,11 +42,23 @@ type Store struct {
 	client api
 	stage  string
 	region string
+
+	// replicaPoll is how long WaitForReplica sleeps between status checks.
+	replicaPoll time.Duration
 }
+
+const defaultReplicaPoll = 5 * time.Second
+
+var (
+	// ErrReplicaFailed means Secrets Manager reports the replica as failed.
+	ErrReplicaFailed = errors.New("replica failed")
+	// ErrNoReplica means the secret has no replica in the region asked about.
+	ErrNoReplica = errors.New("no replica")
+)
 
 // New returns a Store writing under forge-central/<stage>/.
 func New(client *secretsmanager.Client, stage string) *Store {
-	return &Store{client: client, stage: stage, region: client.Options().Region}
+	return &Store{client: client, stage: stage, region: client.Options().Region, replicaPoll: defaultReplicaPoll}
 }
 
 // Secret is a stored value and the full ARN that names it. ECS needs the full
@@ -189,8 +202,8 @@ func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion stri
 			continue
 		}
 		if replica.Status == types.StatusTypeFailed {
-			return false, fmt.Errorf("replica of %s in %s failed: %s; resolve it by hand",
-				secretARN, replicaRegion, aws.ToString(replica.StatusMessage))
+			return false, fmt.Errorf("replica of %s in %s: %w: %s; resolve it by hand",
+				secretARN, replicaRegion, ErrReplicaFailed, aws.ToString(replica.StatusMessage))
 		}
 		return false, nil
 	}
@@ -198,13 +211,64 @@ func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion stri
 	// No KmsKeyId: the replica takes that region's aws/secretsmanager key.
 	// ForceOverwriteReplicaSecret stays false so an existing secret of the same
 	// name in that region is never replaced.
-	if _, err := s.client.ReplicateSecretToRegions(ctx, &secretsmanager.ReplicateSecretToRegionsInput{
+	added, err := s.client.ReplicateSecretToRegions(ctx, &secretsmanager.ReplicateSecretToRegionsInput{
 		SecretId:          aws.String(secretARN),
 		AddReplicaRegions: []types.ReplicaRegionType{{Region: aws.String(replicaRegion)}},
-	}); err != nil {
+	})
+	if err != nil {
 		return false, fmt.Errorf("replicate %s to %s: %w", secretARN, replicaRegion, err)
 	}
+	// A successful call can still report the region as failed.
+	if replica, ok := findReplica(added.ReplicationStatus, replicaRegion); ok && replica.Status == types.StatusTypeFailed {
+		return false, fmt.Errorf("replica of %s in %s: %w: %s; resolve it by hand",
+			secretARN, replicaRegion, ErrReplicaFailed, aws.ToString(replica.StatusMessage))
+	}
 	return true, nil
+}
+
+// WaitForReplica returns once the secret's replica in replicaRegion is in
+// sync. Replication finishes after ReplicateSecretToRegions returns, so a seed
+// that did not wait could report a key as replicated that never arrives. It
+// fails on a failed replica, on a missing one, and when ctx ends first; the
+// caller's deadline bounds the wait.
+func (s *Store) WaitForReplica(ctx context.Context, secretARN, replicaRegion string) error {
+	if replicaRegion == s.region {
+		return nil
+	}
+
+	for {
+		out, err := s.client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{
+			SecretId: aws.String(secretARN),
+		})
+		if err != nil {
+			return fmt.Errorf("describe %s: %w", secretARN, err)
+		}
+		replica, ok := findReplica(out.ReplicationStatus, replicaRegion)
+		switch {
+		case !ok:
+			return fmt.Errorf("%s in %s: %w", secretARN, replicaRegion, ErrNoReplica)
+		case replica.Status == types.StatusTypeInSync:
+			return nil
+		case replica.Status == types.StatusTypeFailed:
+			return fmt.Errorf("replica of %s in %s: %w: %s; resolve it by hand",
+				secretARN, replicaRegion, ErrReplicaFailed, aws.ToString(replica.StatusMessage))
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("replica of %s in %s still %s: %w", secretARN, replicaRegion, replica.Status, ctx.Err())
+		case <-time.After(s.replicaPoll):
+		}
+	}
+}
+
+func findReplica(statuses []types.ReplicationStatusType, region string) (types.ReplicationStatusType, bool) {
+	for _, replica := range statuses {
+		if aws.ToString(replica.Region) == region {
+			return replica, true
+		}
+	}
+	return types.ReplicationStatusType{}, false
 }
 
 func (s *Store) get(ctx context.Context, secretName string) (Secret, bool, error) {
