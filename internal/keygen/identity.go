@@ -53,6 +53,16 @@ func ParseIdentity(privatePEM []byte) (*Identity, error) {
 	return newIdentity(signer)
 }
 
+// ParseIdentityMultibase reconstructs an identity from its stored multibase
+// form, the copy the delegator and signing service read.
+func ParseIdentityMultibase(multibase string) (*Identity, error) {
+	signer, err := ed25519.Parse(multibase)
+	if err != nil {
+		return nil, fmt.Errorf("decode multibase private key: %w", err)
+	}
+	return newIdentity(signer)
+}
+
 func newIdentity(signer multikey.Signer) (*Identity, error) {
 	privatePEM, err := identity.EncodeSignerToPEM(signer)
 	if err != nil {

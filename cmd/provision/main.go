@@ -19,7 +19,8 @@
 // Ingot identity so it can be admitted again under a different DID, and
 // reset-apps wipes the apps' databases and hilt's tenant secrets on dev or
 // staging. All five are run by an operator through a script that shows the plan
-// and asks first.
+// and asks first. Phase check-replicas only reads: it compares each key's DR
+// replica with its primary, and an operator runs it after a seed has added them.
 package main
 
 import (
@@ -138,6 +139,17 @@ type Response struct {
 	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
+	// ReplicaRegion is the DR region the seed phase replicated the keys to, or
+	// that check-replicas compared them in. Terraform checks it against the
+	// region it configured, so an image that predates replication fails the
+	// apply rather than skipping it.
+	ReplicaRegion string `json:"replica_region,omitempty"`
+	// Replicated lists the secrets this invocation added a DR replica to. Like
+	// Created, it is empty on a steady-state apply.
+	Replicated []string `json:"replicated,omitempty"`
+	// ReplicaChecks belong to the check-replicas phase.
+	ReplicaChecks []ReplicaCheck `json:"replica_checks,omitempty"`
+
 	// Created lists parameters and secrets this invocation minted. On a steady-state apply
 	// it is empty, which is the signal that nothing was regenerated.
 	Created []string `json:"created"`
@@ -203,6 +215,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		keys:    secretstore.New(secretsClient, cfg.Stage),
 		secrets: secretsClient,
 	}
+	if cfg.SecretReplicaRegion != "" {
+		deps.replicaKeys = secretstore.New(secretsmanager.NewFromConfig(awsCfg, func(o *secretsmanager.Options) {
+			o.Region = cfg.SecretReplicaRegion
+		}), cfg.Stage)
+	}
 
 	// Every log line here announces the step about to start, never the one
 	// that just finished. A phase fails by hanging at least as often as it
@@ -228,9 +245,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.retirePhase(ctx, req)
 	case "reset-apps":
 		return deps.resetAppsPhase(ctx, req)
+	case "check-replicas":
+		return deps.checkReplicasPhase(ctx)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\", \"retire\", \"reset-apps\" or \"check-replicas\"", req.Phase)
 	}
 }
 
@@ -263,8 +282,11 @@ type deps struct {
 	cfg   config
 	store *ssmstore.Store
 	// keys holds the service identities and the wallets.
-	keys    *secretstore.Store
-	secrets *secretsmanager.Client
+	keys *secretstore.Store
+	// replicaKeys reads the same secrets' replicas in the DR region. Nil in a
+	// stage that keeps none.
+	replicaKeys *secretstore.Store
+	secrets     *secretsmanager.Client
 }
 
 // addSecret records the ARN of a secret the seed phase ensured.

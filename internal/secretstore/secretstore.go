@@ -7,7 +7,7 @@
 // (see the README), never a side effect of an apply.
 //
 // The keys live in Secrets Manager rather than SSM so they can be replicated
-// to a second region, which SSM cannot do.
+// to a second region, which SSM cannot do. EnsureReplica adds that replica.
 //
 // Secrets take the account's AWS-managed aws/secretsmanager key, for the same
 // reason ssmstore uses the AWS-managed SSM key. The stage's own key is
@@ -32,17 +32,20 @@ type api interface {
 	GetSecretValue(ctx context.Context, in *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
 	CreateSecret(ctx context.Context, in *secretsmanager.CreateSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.CreateSecretOutput, error)
 	PutSecretValue(ctx context.Context, in *secretsmanager.PutSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.PutSecretValueOutput, error)
+	DescribeSecret(ctx context.Context, in *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error)
+	ReplicateSecretToRegions(ctx context.Context, in *secretsmanager.ReplicateSecretToRegionsInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.ReplicateSecretToRegionsOutput, error)
 }
 
-// Store reads and writes one stage's secrets.
+// Store reads and writes one stage's secrets in the region its client calls.
 type Store struct {
 	client api
 	stage  string
+	region string
 }
 
 // New returns a Store writing under forge-central/<stage>/.
 func New(client *secretsmanager.Client, stage string) *Store {
-	return &Store{client: client, stage: stage}
+	return &Store{client: client, stage: stage, region: client.Options().Region}
 }
 
 // Secret is a stored value and the full ARN that names it. ECS needs the full
@@ -152,6 +155,56 @@ func (s *Store) PutIfChanged(ctx context.Context, service, name, value string) (
 		return Secret{}, fmt.Errorf("write %s: %w", secretName, err)
 	}
 	return Secret{Value: value, ARN: aws.ToString(out.ARN)}, nil
+}
+
+// EnsureReplica gives the secret a replica in another region, encrypted with
+// that region's AWS-managed aws/secretsmanager key, and reports whether this
+// call added it. A replica that is already there, or still being created, is
+// left alone, so a steady-state run changes nothing.
+//
+// A failed replica is reported rather than retried. Secrets Manager fails one
+// when the target region already holds a secret of the same name, and
+// overwriting that would destroy whatever key it holds.
+//
+// Nothing is done when the replica region is this store's own region, which is
+// the case for a stage root applied in the DR region: the secrets it reads
+// there are the replicas.
+func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion string) (bool, error) {
+	if replicaRegion == s.region {
+		return false, nil
+	}
+
+	out, err := s.client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{
+		SecretId: aws.String(secretARN),
+	})
+	if err != nil {
+		return false, fmt.Errorf("describe %s: %w", secretARN, err)
+	}
+	if primary := aws.ToString(out.PrimaryRegion); primary != "" && primary != s.region {
+		return false, fmt.Errorf("%s is a replica of a secret in %s; replicate it from there", secretARN, primary)
+	}
+
+	for _, replica := range out.ReplicationStatus {
+		if aws.ToString(replica.Region) != replicaRegion {
+			continue
+		}
+		if replica.Status == types.StatusTypeFailed {
+			return false, fmt.Errorf("replica of %s in %s failed: %s; resolve it by hand",
+				secretARN, replicaRegion, aws.ToString(replica.StatusMessage))
+		}
+		return false, nil
+	}
+
+	// No KmsKeyId: the replica takes that region's aws/secretsmanager key.
+	// ForceOverwriteReplicaSecret stays false so an existing secret of the same
+	// name in that region is never replaced.
+	if _, err := s.client.ReplicateSecretToRegions(ctx, &secretsmanager.ReplicateSecretToRegionsInput{
+		SecretId:          aws.String(secretARN),
+		AddReplicaRegions: []types.ReplicaRegionType{{Region: aws.String(replicaRegion)}},
+	}); err != nil {
+		return false, fmt.Errorf("replicate %s to %s: %w", secretARN, replicaRegion, err)
+	}
+	return true, nil
 }
 
 func (s *Store) get(ctx context.Context, secretName string) (Secret, bool, error) {

@@ -201,6 +201,15 @@ The provision Lambda, which uses the AWS-defined log group format:
 {aws_log_group="/aws/lambda/fc-dev-provision"}
 ```
 
+A key the seed phase could not replicate to the DR region fails the stage's platform apply. The
+error names the key and, for a failed replica, the reason Secrets Manager gave:
+
+```logql
+{aws_log_group="/aws/lambda/fc-staging-provision"} |= "replicat"
+```
+
+`make check-key-replicas STAGE=<stage>` then compares every replica with its primary.
+
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |
