@@ -954,9 +954,11 @@ leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
 ### Checking the DR replicas
 
-A stage that sets `secret_replica_region` in its platform root (staging and
-prod, to `module.constants.dr_region`) keeps a replica of every identity and
-wallet key there. Each seed run adds any replica that is missing, so a key
+A stage that sets `secret_replica_region` in its platform root, normally to
+`module.constants.dr_region`, keeps a replica of every identity and wallet key
+there. No stage sets it yet. Pin a provision image built with replication
+before setting it: an older image ignores the setting, and the seed
+invocation then fails the apply. Each seed run adds any replica that is missing, so a key
 minted before replication existed gets one on the next run, and a run that
 finds every replica in place changes nothing. A replica Secrets Manager failed
 to create fails the run instead of being overwritten: the usual cause is a
