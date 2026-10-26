@@ -181,9 +181,9 @@ variable "signer_allowed_sources" {
   type        = map(string)
 
   # Listener priorities 150 to 159 are the signing service's: one forwarding
-  # rule per four addresses, then the refusal. 36 addresses fill nine rules.
+  # rule per three addresses, then the refusal. 27 addresses fill nine rules.
   validation {
-    condition     = var.signer_allowed_sources == null ? true : length(distinct(values(var.signer_allowed_sources))) <= 36
-    error_message = "The signing service admits at most 36 distinct addresses, which fill listener priorities 150 to 159. Beyond that its rules would collide with plc's at 160."
+    condition     = var.signer_allowed_sources == null ? true : length(distinct(values(var.signer_allowed_sources))) <= 27
+    error_message = "The signing service admits at most 27 distinct addresses, which fill listener priorities 150 to 159. Beyond that its rules would collide with plc's at 160."
   }
 }

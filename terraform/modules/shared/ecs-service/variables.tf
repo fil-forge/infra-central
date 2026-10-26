@@ -190,7 +190,7 @@ variable "alb_zone_id" {
 }
 
 variable "allowed_source_cidrs" {
-  description = "Source addresses the public route admits, as CIDRs. Null admits any source. Otherwise a request from any other address gets a 403 from the load balancer and never reaches the task. A listener rule takes five condition values and the hostname uses one, so the route becomes one rule per four CIDRs at consecutive priorities from listener_priority, followed by the refusal. The caller keeps that many priorities free from listener_priority on."
+  description = "Source addresses the public route admits, as CIDRs. Null admits any source. Otherwise a request from any other address gets a 403 from the load balancer and never reaches the task. A rule condition takes at most three values, so the route becomes one rule per three CIDRs at consecutive priorities from listener_priority, followed by the refusal. The caller keeps that many priorities free from listener_priority on."
   type        = list(string)
   default     = null
 

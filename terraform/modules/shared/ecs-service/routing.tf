@@ -34,9 +34,8 @@ resource "aws_lb_target_group" "this" {
 
 locals {
   # One entry per forwarding rule: null for a route open to any source, else
-  # the CIDRs that rule admits. A rule takes five condition values and the
-  # host header uses one of them.
-  source_cidr_chunks = var.allowed_source_cidrs == null ? [null] : chunklist(var.allowed_source_cidrs, 4)
+  # the CIDRs that rule admits. A condition takes at most three values.
+  source_cidr_chunks = var.allowed_source_cidrs == null ? [null] : chunklist(var.allowed_source_cidrs, 3)
 }
 
 resource "aws_lb_listener_rule" "this" {
