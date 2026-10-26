@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.1
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.6
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.81.0
-	github.com/ethereum/go-ethereum v1.17.8
+	github.com/ethereum/go-ethereum v1.17.10
 	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
 	github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595
 	github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8
