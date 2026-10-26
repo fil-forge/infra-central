@@ -2765,8 +2765,9 @@ resource "grafana_rule_group" "appliance" {
   # one whose ship fails on its own every time. An Ingot configured with
   # catalog_plane.ship false never ships, so the rule never clears there; no
   # deployed node sets it. A bucket whose DeleteBucket failed partway also
-  # stops shipping, until the client retries the delete or writes to it again;
-  # it reads as the runbook's hung ship, where a restart is harmless.
+  # stops shipping, until the client retries the delete or writes to it again,
+  # but the delete dropped its journal rows when it emptied the bucket's root,
+  # so it neither holds the gauge nor appears in the runbook's query.
   #
   # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
   # one pass while the queue waits, so a draining backlog and a hung ship both
