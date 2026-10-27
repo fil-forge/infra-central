@@ -2040,8 +2040,11 @@ resource "grafana_rule_group" "appliance" {
   # against the provider on chain, for data it holds. `for` is 5m; the proving
   # period and its window are the grace.
   #
-  # no_data_state is OK: a node with no scheduled proof set has no series, and
-  # a failed chain read drops only that set's series for the collection.
+  # A scheduled set with no last-proven series, because Piri could not read it
+  # from the chain, fires too (the `or` branch, valued 1), so a failing read
+  # cannot hide a stall. `for` covers a read that fails once and recovers.
+  #
+  # no_data_state is OK: a node with no scheduled proof set has no series.
   rule {
     name           = "Piri proving is failing"
     condition      = "B"
@@ -2050,8 +2053,8 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period"
-      description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds. Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
+      description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds; or Piri has been unable to read the proof set's last proven epoch from PDPVerifier, so the stall cannot be ruled out (the Piri logs say \"reading proof set's last proven epoch\"). Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
@@ -2096,6 +2099,14 @@ resource "grafana_rule_group" "appliance" {
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
           )
+          or
+          (
+            0 * max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
+            )
+            unless on (appliance, region, node, proof_set)
+            piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
+          ) + 1
         PROMQL
       }))
     }
