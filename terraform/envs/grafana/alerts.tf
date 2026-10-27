@@ -2737,6 +2737,107 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
+  #
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
+  #
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed: this rule names the cause, and the loss
+  # is a delay that stops once the drain is cleared.
+  #
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
+  rule {
+    name           = "Piri's deletion drain is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, proof_set)
+          (
+            30 * max by (appliance, region, node, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
