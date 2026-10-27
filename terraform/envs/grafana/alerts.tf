@@ -1685,18 +1685,20 @@ resource "grafana_rule_group" "appliance" {
   # instance, merges the node's Piris into one series, as before. The CommP and
   # Postgres pool rules further down group by instance for the same reason.
   #
-  # The gauges are what Curio has recorded in its database, not chain state, so
-  # none of these confirms that a proof landed. Two failures go unseen: a proof
-  # Curio sent that then failed on chain, and a Prove task that woke after its
-  # challenge window had closed. Curio records both as successful task runs and
-  # leaves its failure count alone.
+  # The gauges are what Curio has recorded in its database, except
+  # piri_pdp_proofset_last_proven_epoch, which Piri reads from PDPVerifier.
+  # "Proving is failing" uses it, so it alone confirms that proofs land; the
+  # others would miss a proof Curio sent that then failed on chain, or a Prove
+  # task that woke after its challenge window had closed, which Curio records
+  # as successful task runs.
   #
   # Severities follow docs/observability.md: a rule pages (critical) when
   # waiting until the next day could make a loss permanent, and is a warning
   # when the loss is a delay that stops once the cause is fixed, about one
-  # proving period's payment a day. Two page: both chain-head rules, because
-  # Piri gives up adding pieces after a few hours without a head (FIL-1508).
-  # The other four are warnings, for the reasons each gives. Each rule's
+  # proving period's payment a day. Three page: both chain-head rules, because
+  # Piri gives up adding pieces after a few hours without a head (FIL-1508),
+  # and "proving is failing", because every period without a proof records a
+  # fault on chain. The other three are warnings, for the reasons each gives. Each rule's
   # description says how soon to act, and its runbook_url links to the rule's
   # section of infra-nodes' RUNBOOK.
   #
@@ -1925,7 +1927,8 @@ resource "grafana_rule_group" "appliance" {
   # A warning: a stall loses about one proving period's payment a day and
   # nothing more, since Curio takes the next window from the contract once
   # scheduling runs again. Its causes that can lose more mostly page on their
-  # own: a stuck head as "chain head is stale". A stuck scheduled-removal drain,
+  # own: a stuck head as "chain head is stale", proofs that stop landing as
+  # "proving is failing". A stuck scheduled-removal drain,
   # which PDPVerifier 3.5.0 makes block scheduling, warns on its own as
   # "deletion drain is stuck". The exception is a cause that also makes AddRoots fail with the
   # head still moving, such as an empty wallet: AddRoots strands its batches
@@ -2020,43 +2023,44 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # A proof set has had scheduled piece removals queued for draining for longer
-  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
-  # a set has removals queued, so Curio drains them first with
-  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
-  # set's proving periods stop advancing. The value is how far past one
-  # proving period the drain has waited, in seconds.
+  # A proof set with a scheduled challenge has not had a proof accepted on
+  # chain for longer than its proving period plus its challenge window. The
+  # value is epochs past that. piri_pdp_proofset_last_proven_epoch is what
+  # Piri reads from PDPVerifier (getDataSetLastProvenEpoch), so it is the
+  # proof that landed, not the one Curio sent; the current epoch is the last
+  # head plus the wall-clock time since it, as in the rule above.
   #
-  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
-  # drops the series once the drain finishes. A queued drain the task finds
-  # empty is dropped on its next run, so short-lived series after removals or
-  # an upgrade are normal; a full proving period is the grace. The period is
-  # the longest seen over a day, which bridges a missed collection.
+  # It watches the outcome, so it catches every reason proofs stop landing: a
+  # rejected proof, a proof Curio cannot build (FIL-1449's "no subpiece
+  # found"), a proof that failed on chain, a stopped task engine, a stuck
+  # deletion drain. It needs the schedule series, which Piri reports only while
+  # a challenge is scheduled, because before its first proof a set's last
+  # proven epoch is the epoch it was created.
   #
-  # A warning, like "proving period has not advanced", which fires for the
-  # same set once a period is missed: the loss is a delay that stops once the
-  # drain is cleared. This rule names the cause.
+  # Critical: every proving period that passes without a proof records a fault
+  # against the provider on chain, for data it holds. `for` is 5m; the proving
+  # period and its window are the grace.
   #
-  # `for` is 5m, the shortest non-zero pending period a five-minute group
-  # gives. no_data_state is OK: a node with no drain queued has no series.
+  # no_data_state is OK: a node with no scheduled proof set has no series, and
+  # a failed chain read drops only that set's series for the collection.
   rule {
-    name           = "Piri's deletion drain is stuck"
+    name           = "Piri proving is failing"
     condition      = "B"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
-      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period"
+      description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds. Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "warning"
+      severity  = "critical"
     }
 
     notification_settings {
@@ -2068,7 +2072,7 @@ resource "grafana_rule_group" "appliance" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 86400
+        from = 600
         to   = 0
       }
 
@@ -2079,15 +2083,19 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-            time() - max by (appliance, region, node, proof_set) (
-              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            (
+                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node) group_right()
+            max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
             )
           )
           - on (appliance, region, node, proof_set)
-          (
-            30 * max by (appliance, region, node, proof_set) (
-              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
-            )
+          max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
+            + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
           )
         PROMQL
       }))
@@ -2227,8 +2235,7 @@ resource "grafana_rule_group" "appliance" {
   # The gauge is the last run that finished without a retryable error, not the
   # last proof that landed. It includes runs that woke too late, found proving
   # disabled or had their proof rejected, so it says the task engine is running
-  # Prove, not that proofs are landing; nothing here alerts on a rejected proof
-  # (FIL-1383 adds chain-side alerts for faults). What
+  # Prove, not that proofs are landing; "proving is failing" covers that. What
   # it adds is a Prove task that keeps failing with a retryable error, or never
   # runs, while scheduling carries on, which nothing else here sees.
   #
@@ -2242,7 +2249,7 @@ resource "grafana_rule_group" "appliance" {
   # A warning: by the time it fires at least one period's proof is missed, but
   # nothing is lost for good while it holds, and proving resumes once the cause
   # is fixed. The causes that can lose more mostly page on their own, as
-  # "chain head is stale", except the AddRoots case
+  # "proving is failing" and "chain head is stale", except the AddRoots case
   # described under "proving period has not advanced". This departs from the
   # Critical the piri docs recommend, for that reason. `for` is 10m. The
   # threshold is the grace; this only confirms it.
@@ -2714,6 +2721,108 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
+  #
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
+  #
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed, and "proving is failing" pages once
+  # proofs stop landing: this rule names the cause, and the loss is a delay
+  # that stops once the drain is cleared.
+  #
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
+  rule {
+    name           = "Piri's deletion drain is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, proof_set)
+          (
+            30 * max by (appliance, region, node, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }
