@@ -2157,7 +2157,7 @@ resource "grafana_rule_group" "appliance" {
   #
   # no_data_state is OK: Piri reports the count, zero included, on every
   # collection, so an empty result is a Piri older than the metric, and a
-  # healthy node evaluates to zero.
+  # healthy Piri evaluates to zero.
   #
   # A warning, not critical: by the time it fires there is nothing urgent left
   # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
@@ -2242,7 +2242,7 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # The backstop: no PDPv0_Prove run has finished on the node in one and a half
+  # The backstop: no PDPv0_Prove run has finished on a Piri in one and a half
   # proving periods. The value is the time since the last one in proving
   # periods, so the threshold is 1.5.
   #
