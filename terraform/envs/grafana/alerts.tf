@@ -1694,10 +1694,9 @@ resource "grafana_rule_group" "appliance" {
   # Severities follow docs/observability.md: a rule pages (critical) when
   # waiting until the next day could make a loss permanent, and is a warning
   # when the loss is a delay that stops once the cause is fixed, about one
-  # proving period's payment a day. Three page: both chain-head rules, because
-  # Piri gives up adding pieces after a few hours without a head (FIL-1508),
-  # and "proving is failing", because five rejections end a proof set for good.
-  # The other three are warnings, for the reasons each gives. Each rule's
+  # proving period's payment a day. Two page: both chain-head rules, because
+  # Piri gives up adding pieces after a few hours without a head (FIL-1508).
+  # The other four are warnings, for the reasons each gives. Each rule's
   # description says how soon to act, and its runbook_url links to the rule's
   # section of infra-nodes' RUNBOOK.
   #
@@ -1912,8 +1911,8 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # A proof set whose challenge window, as Curio recorded it, has closed without
-  # Curio scheduling the next proving period, for a reason other than a failure
-  # backoff. The value is epochs past the window's close. The current epoch is
+  # Curio scheduling the next proving period. The value is epochs past the
+  # window's close. The current epoch is
   # the last head plus the wall-clock time since it, so this still fires when
   # the head itself is stale.
   #
@@ -1923,18 +1922,12 @@ resource "grafana_rule_group" "appliance" {
   # whether or not this period's proof landed, and moves the challenge epoch on
   # when it sends that transaction rather than when it lands.
   #
-  # A proof set in a failure backoff is left out by the `unless`: Curio holds
-  # its scheduling back on purpose until the backoff deadline passes the head,
-  # and "Piri proving is failing" has already paged for the failure that set
-  # it. The deadline stays recorded after it passes, so the comparison is
-  # against the same extrapolated head, and the set comes back into this rule
-  # once the head is past it.
-  #
   # A warning: a stall loses about one proving period's payment a day and
   # nothing more, since Curio takes the next window from the contract once
   # scheduling runs again. Its causes that can lose more mostly page on their
-  # own: a stuck head as "chain head is stale", a rejection as "proving is
-  # failing". The exception is a cause that also makes AddRoots fail with the
+  # own: a stuck head as "chain head is stale". A stuck scheduled-removal drain,
+  # which PDPVerifier 3.5.0 makes block scheduling, warns on its own as
+  # "deletion drain is stuck". The exception is a cause that also makes AddRoots fail with the
   # head still moving, such as an empty wallet: AddRoots strands its batches
   # after about 3.5 hours (FIL-1508), and nothing here pages for that.
   #
@@ -1954,7 +1947,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
@@ -1995,17 +1988,6 @@ resource "grafana_rule_group" "appliance" {
               + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
             )
           )
-          unless on (appliance, region, node, proof_set)
-          (
-            max by (appliance, region, node, proof_set) (
-              piri_pdp_proofset_next_prove_attempt_epoch{${local.piri_metric_matcher}}
-            )
-            > on (appliance, region, node) group_left()
-            (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
-            )
-          )
         PROMQL
       }))
     }
@@ -2038,50 +2020,43 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # Curio has had a proving transaction for a proof set rejected within the
-  # last hour. A rejected prove is not retried within its period, so that
-  # period's proof was missed; a rejected scheduling transaction is retried
-  # after a backoff, and Curio gives up on the set after repeated failures (the
-  # next rule).
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
   #
-  # The gauge is the count of rejections since the set's last successful prove
-  # send, and the level is not a paging condition. Only a successful prove send
-  # resets it, so it stays above zero for up to a proving period after any
-  # rejection, even when the retry that follows succeeds, and indefinitely if
-  # proving is then disabled for the set. So the rule fires on a rise instead.
-  # `increase`, not `delta`, because the count behaves as a counter whose only
-  # drop is the reset to zero: a reset followed by a new failure within the
-  # hour is still counted as a rise, where `delta` would net it to zero.
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
   #
-  # It fires for about an hour per new failure, so during a long backoff it
-  # pages after each failure rather than throughout. `for` is 0m: the hour
-  # window is the debounce, and a single rejection is worth a page.
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed: the loss is a delay that stops once the
+  # drain is cleared. This rule names the cause.
   #
-  # Critical: Curio gives up on the set for good on its fifth rejection, and
-  # the backoffs between them (100, 200, 400 and 800 epochs) let that come 12.5
-  # hours after the first, within a night.
-  #
-  # no_data_state is OK: every proof set reports the count, zero included, so
-  # an empty result means no proof sets or a Piri older than the metric, and a
-  # healthy set evaluates to zero.
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
   rule {
-    name           = "Piri proving is failing"
+    name           = "Piri's deletion drain is stuck"
     condition      = "B"
-    for            = "0m"
+    for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
-      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, and check the proof set with `piri client pdp proofset state`; the revert reason says what the contract refused. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
     }
 
     labels = {
       team_name = "forge"
       component = "appliance"
       stage     = local.appliance_stage_label
-      severity  = "critical"
+      severity  = "warning"
     }
 
     notification_settings {
@@ -2093,7 +2068,7 @@ resource "grafana_rule_group" "appliance" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 3600
+        from = 86400
         to   = 0
       }
 
@@ -2103,8 +2078,16 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node, proof_set) (
-            increase(piri_pdp_proofset_consecutive_prove_failures{${local.piri_metric_matcher}}[1h])
+          (
+            time() - max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, proof_set)
+          (
+            30 * max by (appliance, region, node, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
           )
         PROMQL
       }))
@@ -2145,8 +2128,8 @@ resource "grafana_rule_group" "appliance" {
   # The count does not go down on its own: Piri does not run Curio's data set
   # deletion, so the row stays until someone removes it by hand. A rule on the
   # level would fire forever after the first one, so this fires on a rise, for
-  # about an hour per newly unrecoverable set. `for` is 0m for the reason the
-  # rule above gives. Two things follow from reading a rise:
+  # about an hour per newly unrecoverable set. `for` is 0m: the hour window is
+  # the debounce. Two things follow from reading a rise:
   #
   #   - A set that was already unrecoverable when a Piri with this metric first
   #     reported is never alerted on; graph the gauge to see the current state.
@@ -2158,12 +2141,9 @@ resource "grafana_rule_group" "appliance" {
   # healthy node evaluates to zero.
   #
   # A warning, not critical: by the time it fires there is nothing urgent left
-  # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
-  # Either the set's payment has ended or been terminated, so there is no
-  # revenue left to lose, or its sends have been rejected five times in a row
-  # over at least half a day of backoff, and "Piri proving is failing" has
-  # paged for the rejections before the last. A cause that threatens the node's
-  # other sets shows up in their own rejections first. This departs from the
+  # to do. Curio gives up on a set only when FWSS reports its payment has ended
+  # or been terminated, or the set no longer exists on chain
+  # (tasks/pdpv0/failure_handling.go), so there is no revenue left to lose. This departs from the
   # Critical the piri docs' table recommends for this condition, for that
   # reason.
   rule {
@@ -2247,7 +2227,8 @@ resource "grafana_rule_group" "appliance" {
   # The gauge is the last run that finished without a retryable error, not the
   # last proof that landed. It includes runs that woke too late, found proving
   # disabled or had their proof rejected, so it says the task engine is running
-  # Prove, not that proofs are landing; the rules above cover rejections. What
+  # Prove, not that proofs are landing; nothing here alerts on a rejected proof
+  # (FIL-1383 adds chain-side alerts for faults). What
   # it adds is a Prove task that keeps failing with a retryable error, or never
   # runs, while scheduling carries on, which nothing else here sees.
   #
@@ -2261,7 +2242,7 @@ resource "grafana_rule_group" "appliance" {
   # A warning: by the time it fires at least one period's proof is missed, but
   # nothing is lost for good while it holds, and proving resumes once the cause
   # is fixed. The causes that can lose more mostly page on their own, as
-  # "proving is failing" and "chain head is stale", except the AddRoots case
+  # "chain head is stale", except the AddRoots case
   # described under "proving period has not advanced". This departs from the
   # Critical the piri docs recommend, for that reason. `for` is 10m. The
   # threshold is the grace; this only confirms it.

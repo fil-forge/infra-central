@@ -124,7 +124,7 @@ appliance label.
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's proving period has not advanced               | Forge Regions            | Piri's metrics                | FIL-1383 |
-| Piri proving is failing                              | Forge Regions            | Piri's metrics                | FIL-1383 |
+| Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
