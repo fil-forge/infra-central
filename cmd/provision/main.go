@@ -215,7 +215,10 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		keys:    secretstore.New(secretsClient, cfg.Stage),
 		secrets: secretsClient,
 	}
-	if cfg.SecretReplicaRegion != "" {
+	// In a stage root applied in the DR region the replica region is the
+	// function's own, and its secrets are the replicas: there is nothing
+	// separate to compare them with.
+	if cfg.SecretReplicaRegion != "" && cfg.SecretReplicaRegion != cfg.Region {
 		deps.replicaKeys = secretstore.New(secretsmanager.NewFromConfig(awsCfg, func(o *secretsmanager.Options) {
 			o.Region = cfg.SecretReplicaRegion
 		}), cfg.Stage)
@@ -284,7 +287,7 @@ type deps struct {
 	// keys holds the service identities and the wallets.
 	keys *secretstore.Store
 	// replicaKeys reads the same secrets' replicas in the DR region. Nil in a
-	// stage that keeps none.
+	// stage that keeps none, and in a stage root applied in the DR region.
 	replicaKeys *secretstore.Store
 	secrets     *secretsmanager.Client
 }

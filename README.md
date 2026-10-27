@@ -979,8 +979,9 @@ make check-key-replicas STAGE=prod
 
 The provision Lambda reads both copies and compares the DID or address each
 derives. It returns only those, and exits non-zero when a replica is missing or
-differs. A replica added by the last few minutes' seed run can still be in
-progress and show as missing.
+differs. A seed run returns only once every replica is in sync, so a missing
+replica after a successful seed is real; one can show as missing only while a
+seed is still running or after one failed.
 
 ### Smoke-testing a stage
 
@@ -1036,7 +1037,7 @@ aws secretsmanager remove-regions-from-replication \
 Then delete the secret, skipping the recovery window:
 
 ```bash
-aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+aws secretsmanager delete-secret --secret-id forge-central/<stage>/swarf/identity \
   --force-delete-without-recovery
 ```
 

@@ -64,6 +64,18 @@ func TestReplicateKeysReplicatesEverySecretWalletsFirstThenWaitsForEach(t *testi
 	}
 }
 
+func TestReplicateKeysRefusesASecretTheReplicaCheckDoesNotList(t *testing.T) {
+	keys := &fakeReplicator{}
+	secrets := seededSecrets()
+	secrets["sprue"]["any-new-key"] = "arn:sprue/any-new-key" // not in replicatedKeys
+	resp := &Response{Secrets: secrets}
+
+	err := replicateKeys(context.Background(), keys, "eu-central-1", resp)
+	if err == nil || !strings.Contains(err.Error(), "sprue/any-new-key") || len(keys.asked) != 0 {
+		t.Errorf("replicateKeys() = %v after %v, want an error naming sprue/any-new-key before any replicator call", err, keys.asked)
+	}
+}
+
 func TestReplicateKeysFailsWhenAReplicaDoesNotSync(t *testing.T) {
 	notSynced := errors.New("replica failed")
 	keys := &fakeReplicator{waitErr: map[string]error{"arn:sprue/identity": notSynced}}

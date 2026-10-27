@@ -313,8 +313,8 @@ func TestEnsureReplicaReportsAFailedReplicaWithoutOverwriting(t *testing.T) {
 	store := newTestStore(fake)
 
 	added, err := store.EnsureReplica(context.Background(), anySecretARN, "eu-central-1")
-	if err == nil || added || len(fake.replicates) != 0 {
-		t.Errorf("EnsureReplica() = (%v, %v) with %d replicate calls, want an error and no replicate call", added, err, len(fake.replicates))
+	if !errors.Is(err, ErrReplicaFailed) || added || len(fake.replicates) != 0 {
+		t.Errorf("EnsureReplica() = (%v, %v) with %d replicate calls, want (false, %v) and no replicate call", added, err, len(fake.replicates), ErrReplicaFailed)
 	}
 }
 
@@ -324,8 +324,8 @@ func TestEnsureReplicaRefusesToReplicateAReplica(t *testing.T) {
 	store := newTestStore(fake)
 
 	added, err := store.EnsureReplica(context.Background(), anySecretARN, "eu-central-1")
-	if err == nil || added || len(fake.replicates) != 0 {
-		t.Errorf("EnsureReplica() = (%v, %v) with %d replicate calls, want an error and no replicate call", added, err, len(fake.replicates))
+	if !errors.Is(err, ErrIsReplica) || added || len(fake.replicates) != 0 {
+		t.Errorf("EnsureReplica() = (%v, %v) with %d replicate calls, want (false, %v) and no replicate call", added, err, len(fake.replicates), ErrIsReplica)
 	}
 }
 

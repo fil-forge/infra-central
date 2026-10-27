@@ -40,6 +40,19 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 	}
 	resp.ReplicaRegion = region
 
+	// check-replicas compares only the keys replicatedKeys lists. A secret the
+	// seed added without listing it there would be replicated but never
+	// checked, so the seed refuses it.
+	listed := map[secretKey]bool{}
+	for _, key := range replicatedKeys() {
+		listed[secretKey{key.service, key.name}] = true
+	}
+	for _, key := range replicationOrder(resp.Secrets) {
+		if !listed[key] {
+			return fmt.Errorf("%s/%s is not in replicatedKeys, so check-replicas would never compare its replica; add it there", key.service, key.name)
+		}
+	}
+
 	order := replicationOrder(resp.Secrets)
 	for _, key := range order {
 		added, err := keys.EnsureReplica(ctx, resp.Secrets[key.service][key.name], region)
@@ -179,7 +192,7 @@ func compareReplicas(ctx context.Context, primary, replica keyReader, keys []rep
 // confirmation.
 func (d *deps) checkReplicasPhase(ctx context.Context) (*Response, error) {
 	if d.replicaKeys == nil {
-		return nil, fmt.Errorf("FORGE_SECRET_REPLICA_REGION is not set; this stage keeps no replicas")
+		return nil, fmt.Errorf("this stage keeps no replicas in another region (FORGE_SECRET_REPLICA_REGION is unset or is the function's own region)")
 	}
 
 	keys := replicatedKeys()

@@ -12,8 +12,8 @@
 #   --stage  stage to check  (default: dev)
 #
 # Exits 1 when any key's replica is missing or derives a different DID or
-# address. A replica the seed phase added moments ago may still be in progress
-# and show as missing; run the check again a minute later.
+# address. A seed run returns only once every replica is in sync, so a replica
+# shows as missing only while a seed is still running or after one failed.
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage

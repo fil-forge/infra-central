@@ -54,6 +54,9 @@ var (
 	ErrReplicaFailed = errors.New("replica failed")
 	// ErrNoReplica means the secret has no replica in the region asked about.
 	ErrNoReplica = errors.New("no replica")
+	// ErrIsReplica means the secret is itself a replica, so it can only be
+	// replicated from its primary region.
+	ErrIsReplica = errors.New("secret is a replica")
 )
 
 // New returns a Store writing under forge-central/<stage>/.
@@ -194,7 +197,7 @@ func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion stri
 		return false, fmt.Errorf("describe %s: %w", secretARN, err)
 	}
 	if primary := aws.ToString(out.PrimaryRegion); primary != "" && primary != s.region {
-		return false, fmt.Errorf("%s is a replica of a secret in %s; replicate it from there", secretARN, primary)
+		return false, fmt.Errorf("%s: %w of a secret in %s; replicate it from there", secretARN, ErrIsReplica, primary)
 	}
 
 	for _, replica := range out.ReplicationStatus {

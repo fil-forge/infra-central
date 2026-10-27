@@ -247,12 +247,15 @@ resource "aws_lambda_invocation" "seed" {
 
   # The pandora host and the replica region are here so that changing either
   # re-invokes the phase. The function reads both from its environment.
-  input = jsonencode({
-    phase                 = "seed"
-    trigger               = var.seed_trigger
-    pandora_db_host       = try(module.pandora_db[0].address, null)
+  # The replica region joins the input only when set, so a stage that keeps no
+  # replicas sees the same input as before replication existed.
+  input = jsonencode(merge({
+    phase           = "seed"
+    trigger         = var.seed_trigger
+    pandora_db_host = try(module.pandora_db[0].address, null)
+    }, var.secret_replica_region == null ? {} : {
     secret_replica_region = var.secret_replica_region
-  })
+  }))
 
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
