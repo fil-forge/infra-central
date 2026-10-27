@@ -138,7 +138,8 @@ Any other address gets a `403` from the load balancer saying the host does not a
 it, so a Piri that fails to sign with that error is calling from an address not listed here. The map
 takes only labels in `appliance_regions`, and up to 27 distinct addresses, the most the service's
 listener priorities hold. `null` admits any source, which no stage uses, and an empty map gives the
-service no public route.
+service no public route. Between committing the region label and adding its address, every plan of the
+stage's platform root warns that the signing service admits no address for that region.
 
 ## Registering the node
 

@@ -185,6 +185,6 @@ variable "signer_allowed_sources" {
   # fill the nine forwarding slots.
   validation {
     condition     = var.signer_allowed_sources == null ? true : length(distinct(values(var.signer_allowed_sources))) <= 27
-    error_message = "The signing service admits at most 27 distinct addresses, which fill listener priorities 150 to 159. Beyond that its rules would collide with plc's at 160."
+    error_message = "The signing service admits at most 27 distinct addresses: nine forwarding rules at listener priorities 150 to 158, with the refusal at 159. A 28th would need a tenth forwarding rule at 159."
   }
 }

@@ -112,8 +112,9 @@ module "apps" {
 
   # Held by the platform root beside appliance_regions. try() for the same
   # reason as log_forwarding: a pull request that adds the key plans here before
-  # the platform root has applied it.
-  signer_allowed_sources = try(local.platform.signer_allowed_sources, null)
+  # the platform root has applied it. The fallback is an empty map, which closes
+  # the route: a missing output must not open the signer to every source.
+  signer_allowed_sources = try(local.platform.signer_allowed_sources, {})
 
   # Real money: storage is provisioned only against a funded payment plan.
   allow_provision_without_payment_plan = false
