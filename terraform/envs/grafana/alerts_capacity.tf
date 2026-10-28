@@ -13,9 +13,10 @@ locals {
   ecs_stage_regex   = "fc-(${local.stages})"
 
   # Dev and staging run one RDS instance named fc-<stage>; prod's Aurora
-  # instances are fc-prod-<n>.
-  rds_matcher     = "dimension_DBInstanceIdentifier=~\"fc-(${local.stages})(-[0-9]+)?\""
-  rds_stage_regex = "fc-(${local.stages})(?:-[0-9]+)?"
+  # instances are fc-prod-<n>, and the compatibility server's are
+  # fc-<stage>-pandora-db-<n>.
+  rds_matcher     = "dimension_DBInstanceIdentifier=~\"fc-(${local.stages})(-pandora-db)?(-[0-9]+)?\""
+  rds_stage_regex = "fc-(${local.stages})(?:-pandora-db)?(?:-[0-9]+)?"
 
   # cAdvisor reports a usage series with a cpu="total" label and spec series
   # without it, so each side is summed to the same labels before dividing.
