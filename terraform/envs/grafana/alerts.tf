@@ -50,6 +50,12 @@ variable "trace_spans_alert_threshold" {
   default     = null
 }
 
+variable "central_response_time_threshold_seconds" {
+  description = "Mean response time, in seconds over five minutes, above which a Central service's response time rule fires. Provisional: FIL-1242 defines the SLO this should match. Prod's slowest service, plc, peaked near 0.2s in the week the rule was written."
+  type        = number
+  default     = 1
+}
+
 locals {
   stages = join("|", var.alert_stages)
 
@@ -879,6 +885,119 @@ resource "grafana_rule_group" "central" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "lt", params = [0.5] }
+        }]
+      })
+    }
+  }
+}
+
+# A group of its own, so the response time rule and its threshold can change
+# with the SLO without touching the rules above. 60s for the same reason as
+# "Forge Central".
+resource "grafana_rule_group" "central_latency" {
+  name             = "Forge Central latency"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 60
+
+  # The mean time each service's targets took to answer, over five minutes.
+  #
+  # TargetResponseTime ends when the target starts sending its response
+  # headers, so it is closer to TTFB than TTLB. Central's responses are small
+  # JSON, where the two barely differ, and it keeps swarf's SSE stream from
+  # reading as a request hours long. Central serves no S3 object operations, so
+  # there is nothing size-dependent to exclude.
+  #
+  # The stream carries no percentiles, so this is a mean: the sum of response
+  # times over their count, which weighs each request equally where averaging
+  # the per-minute averages would weigh each minute equally. CloudWatch
+  # publishes the metric only in minutes with requests, so an idle service has
+  # no series and no_data_state is OK.
+  rule {
+    name           = "Service response time is high"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
+      description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
+      __dashboardUid__ = "forge-central"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sum{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          /
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sample_count{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [var.central_response_time_threshold_seconds] }
         }]
       })
     }
