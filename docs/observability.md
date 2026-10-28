@@ -118,6 +118,7 @@ appliance label.
 | Provision Lambda errors                              | Forge Central            | Lambda, CloudWatch            | FIL-1151 |
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
+| Service response time is high                        | Forge Central latency    | ALB, CloudWatch               | FIL-1213 |
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
