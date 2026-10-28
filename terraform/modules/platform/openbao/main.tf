@@ -71,9 +71,10 @@ locals {
 
   # The task's own address, from the ECS task metadata endpoint. A task that
   # cannot read it stops here: as a standby it could not be forwarded to, and
-  # as the active task no standby could forward to it.
+  # as the active task no standby could forward to it. Whitespace is stripped
+  # first so the match holds whether the JSON arrives compact or formatted.
   task_ip_command = <<-SH
-    OPENBAO_TASK_IP=$(wget -q -O - "$ECS_CONTAINER_METADATA_URI_V4" | sed -n 's/.*"IPv4Addresses":\["\([^"]*\)".*/\1/p')
+    OPENBAO_TASK_IP=$(wget -q -O - "$ECS_CONTAINER_METADATA_URI_V4" | tr -d ' \t\r\n' | sed -n 's/.*"IPv4Addresses":\["\([^"]*\)".*/\1/p')
     [ -n "$OPENBAO_TASK_IP" ] || { echo "openbao: no IPv4 address in the task metadata" >&2; exit 1; }
   SH
 
