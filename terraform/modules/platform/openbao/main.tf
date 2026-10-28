@@ -18,14 +18,15 @@ locals {
   config_path = "/tmp/forge/openbao.hcl"
 
   # Written by the entrypoint rather than baked into the image because the
-  # connection URL carries a password and OpenBao's HCL does not interpolate
-  # environment variables. The heredoc is unquoted so the shell expands the one
-  # secret; every other value is fixed by Terraform.
+  # connection URL carries a password, the cluster address is known only once
+  # the task has an IP, and OpenBao's HCL does not interpolate environment
+  # variables. The heredoc is unquoted so the shell expands those two; every
+  # other value is fixed by Terraform.
   config = <<-HCL
     storage "postgresql" {
       connection_url = "$OPENBAO_POSTGRES_DSN"
       max_parallel   = "${var.max_parallel}"
-      ha_enabled     = "false"
+      ha_enabled     = "true"
     }
 
     listener "tcp" {
@@ -58,15 +59,29 @@ locals {
       kms_key_id = "${var.kms_key_id}"
     }
 
+    # Both the ALB and private DNS send requests to standbys as well as to the
+    # active task, and a standby forwards each one to the active task's
+    # cluster_addr. Left unset, OpenBao derives it from api_addr, which names
+    # the ALB, and forwarding fails.
     api_addr      = "https://${var.hostname}"
+    cluster_addr  = "https://$OPENBAO_TASK_IP:${var.port + 1}"
     disable_mlock = true
     ui            = ${var.enable_ui}
   HCL
 
+  # The task's own address, from the ECS task metadata endpoint. A task that
+  # cannot read it stops here: as a standby it could not be forwarded to, and
+  # as the active task no standby could forward to it.
+  task_ip_command = <<-SH
+    OPENBAO_TASK_IP=$(wget -q -O - "$ECS_CONTAINER_METADATA_URI_V4" | sed -n 's/.*"IPv4Addresses":\["\([^"]*\)".*/\1/p')
+    [ -n "$OPENBAO_TASK_IP" ] || { echo "openbao: no IPv4 address in the task metadata" >&2; exit 1; }
+  SH
+
   # exec, via dumb-init, because setting shell_command replaces the image
   # entrypoint with /bin/sh -c. Without exec, bao runs as a child of that shell
   # and never sees the SIGTERM ECS sends, so a deployment ends in a forced kill
-  # once the stop timeout expires — expensive with desired_count = 1. dumb-init
+  # once the stop timeout expires. A killed active task also keeps the HA lock
+  # until it lapses, where a stopped one hands it over at once. dumb-init
   # is what upstream's entrypoint runs as PID 1 (`#!/usr/bin/dumb-init /bin/sh`)
   # to forward signals and reap children; the rest of that entrypoint only fills
   # in dev-mode flags and drops a root privilege this image never holds.
@@ -101,9 +116,10 @@ module "service" {
 
   # The config is assembled here rather than through secret_files because it is
   # a template around a secret, not a secret in its own right. The heredoc
-  # delimiter is deliberately unquoted so the shell substitutes the DSN; the
-  # config contains no other shell metacharacters.
+  # delimiter is deliberately unquoted so the shell substitutes the DSN and the
+  # task's address; the config contains no other shell metacharacters.
   shell_command = join("\n", [
+    local.task_ip_command,
     "umask 077",
     "mkdir -p ${dirname(local.config_path)}",
     "cat > ${local.config_path} <<EOF",
@@ -112,6 +128,10 @@ module "service" {
     local.shell_command,
   ])
 
+  # standbyok=true keeps standbys healthy in both checks. ECS replaces a task
+  # that fails either one, so an active-only check would have it kill every
+  # standby in turn; forwarding is what makes a standby safe to route to.
+  #
   # uninitcode=200 matters: a fresh OpenBao answers /sys/health with 501 until
   # it is initialised, and the provision Lambda cannot initialise a task that
   # ECS has already killed for failing its health check. A sealed instance
@@ -136,9 +156,15 @@ module "service" {
 
   task_policies = { "service-permissions" = data.aws_iam_policy_document.seal.json }
 
-  # Raising this needs ha_enabled in the storage stanza above. Until then a
-  # second task would be a second writer, not a standby.
-  desired_count = 1
+  # One active task and two standbys, which ECS spreads across the stage's
+  # availability zones. The active task holds a lock in Postgres that a standby
+  # takes over once it lapses, at most 15 seconds after the active task is lost.
+  desired_count = 3
+
+  # A target in a lost zone leaves the ALB's rotation after 20 seconds rather
+  # than the default 90.
+  health_check_interval            = 10
+  health_check_unhealthy_threshold = 2
 
   cpu    = var.cpu
   memory = var.memory

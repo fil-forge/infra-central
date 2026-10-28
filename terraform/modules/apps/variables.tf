@@ -162,6 +162,12 @@ variable "sprue_postgres_max_conns" {
   default     = null
 }
 
+variable "hilt_postgres_max_conns" {
+  description = "Size of hilt's Postgres connection pool. Null keeps hilt's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
+  type        = number
+  default     = null
+}
+
 variable "secret_arns" {
   description = "Service to key name to the full ARN of the Secrets Manager secret holding that identity or wallet key, from the platform root's seed result. Every key a service reads must be listed; a missing one fails the plan."
   type        = map(map(string))

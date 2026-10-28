@@ -38,11 +38,11 @@ variable "port" {
 
 variable "max_parallel" {
   description = <<-EOT
-    Postgres connections OpenBao may open. Its own default is 128, which is
-    fine for a dedicated database and rude to one shared with four application
-    services.
+    Postgres connections each OpenBao task may open. Its own default is 128,
+    which is fine for a dedicated database and rude to one shared with four
+    application services.
 
-    Budget against the RDS instance's or the Aurora writer's real
+    Budget three times this, one per task, against the RDS instance's or the Aurora writer's real
     max_connections (roughly DBInstanceClassMemory/9531392, about 112 on a
     db.t4g.micro and at most about 1,800 on a db.r8g.large) alongside
     sprue, hilt and swarf, which each default to max_conns = 10. RDS Proxy is
