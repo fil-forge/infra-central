@@ -175,3 +175,16 @@ variable "log_forwarding" {
   })
   default = null
 }
+
+variable "signer_allowed_sources" {
+  description = "Appliance egress addresses the signing service admits, by region label, read from the platform root. Null admits any source. An empty map gives the service no public route at all, since an ALB rule cannot match an empty source list."
+  type        = map(string)
+
+  # Listener priorities 150 to 159 are the signing service's: forwarding rules
+  # from 150, three addresses each, and the refusal fixed at 159. 27 addresses
+  # fill the nine forwarding slots.
+  validation {
+    condition     = var.signer_allowed_sources == null ? true : length(distinct(values(var.signer_allowed_sources))) <= 27
+    error_message = "The signing service admits at most 27 distinct addresses: nine forwarding rules at listener priorities 150 to 158, with the refusal at 159. A 28th would need a tenth forwarding rule at 159."
+  }
+}

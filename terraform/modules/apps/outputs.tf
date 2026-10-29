@@ -1,5 +1,5 @@
 output "service_urls" {
-  description = "Public URL per service."
+  description = "Public URL per service. Null for the signing service in a stage whose signer_allowed_sources is empty."
   value = {
     sprue             = module.sprue.public_url
     hilt              = module.hilt.public_url

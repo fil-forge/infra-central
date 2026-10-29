@@ -189,6 +189,27 @@ variable "alb_zone_id" {
   default = null
 }
 
+variable "allowed_source_cidrs" {
+  description = "Source addresses the public route admits, as CIDRs. Null admits any source. Otherwise a request from any other address gets a 403 from the load balancer and never reaches the task. A rule condition takes at most three values, so the route becomes one rule per three CIDRs at consecutive priorities from listener_priority, and the refusal sits at refusal_priority. The caller keeps every priority from listener_priority to refusal_priority free."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition = var.allowed_source_cidrs == null ? true : (
+      var.hostname != null &&
+      length(var.allowed_source_cidrs) > 0 &&
+      alltrue([for cidr in var.allowed_source_cidrs : can(cidrhost(cidr, 0))])
+    )
+    error_message = "allowed_source_cidrs needs a hostname and at least one CIDR. An ALB rule cannot match an empty source list; leave hostname null for a service no source may reach."
+  }
+}
+
+variable "refusal_priority" {
+  description = "Listener priority of the 403 rule that answers sources allowed_source_cidrs does not admit. It stays put as addresses are added or removed, so a forwarding rule never has to take its place in the same apply. Required with allowed_source_cidrs."
+  type        = number
+  default     = null
+}
+
 variable "register_internal" {
   description = "Register in the private namespace, for callers inside the VPC."
   type        = bool

@@ -70,6 +70,11 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+variable "signer_allowed_sources" {
+  description = "The appliances' egress addresses the signing service admits, in terraform.tfvars beside appliance_regions. See docs/appliance-onboarding.md."
+  type        = map(string)
+}
+
 # Written by `make publish` into image.auto.tfvars, so the dev loop is
 # `make publish`, commit, merge, with nothing to edit by hand.
 variable "provision_image_digest" {
@@ -94,6 +99,7 @@ module "platform" {
 
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
+  signer_allowed_sources    = var.signer_allowed_sources
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.

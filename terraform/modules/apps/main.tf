@@ -76,6 +76,12 @@ locals {
 
   # Where the entrypoint wrapper drops file-borne secrets.
   keys = "/tmp/forge"
+
+  # Null admits any source. Two regions served from one host share an address.
+  signer_cidrs = var.signer_allowed_sources == null ? null : [
+    for address in distinct(values(var.signer_allowed_sources)) : "${address}/32"
+  ]
+  signer_routed = var.signer_allowed_sources == null ? true : length(var.signer_allowed_sources) > 0
 }
 
 # --- sprue ---------------------------------------------------------------
@@ -441,12 +447,16 @@ module "signing_service" {
   health_check_command = "wget -q --spider http://127.0.0.1:7446/healthcheck"
   health_check_path    = "/healthcheck"
 
-  hostname          = local.host["signing-service"]
-  listener_arn      = var.listener_arn
-  listener_priority = 150
-  route53_zone_id   = local.zone_id[local.host["signing-service"]]
-  alb_dns_name      = var.alb_dns_name
-  alb_zone_id       = var.alb_zone_id
+  # It signs with the payer key for whoever reaches it, so only the appliances'
+  # addresses get through. A stage that admits no address gets no route.
+  hostname             = local.signer_routed ? local.host["signing-service"] : null
+  allowed_source_cidrs = local.signer_routed ? local.signer_cidrs : null
+  listener_arn         = var.listener_arn
+  listener_priority    = 150
+  refusal_priority     = 159
+  route53_zone_id      = local.zone_id[local.host["signing-service"]]
+  alb_dns_name         = var.alb_dns_name
+  alb_zone_id          = var.alb_zone_id
 
   cpu    = var.sizes.signing_service.cpu
   memory = var.sizes.signing_service.memory
