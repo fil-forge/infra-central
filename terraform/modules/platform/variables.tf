@@ -167,7 +167,7 @@ variable "openbao_image" {
 }
 
 variable "openbao_max_parallel" {
-  description = "Postgres connections OpenBao may open. Budget against the RDS instance's or the Aurora writer's max_connections alongside the application services."
+  description = "Postgres connections each of the three OpenBao tasks may open. Budget three times this against the RDS instance's or the Aurora writer's max_connections alongside the application services."
   type        = number
   default     = 16
 }

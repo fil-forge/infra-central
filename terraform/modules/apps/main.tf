@@ -188,7 +188,7 @@ module "hilt" {
 
   log_forwarding = var.log_forwarding
 
-  environment = {
+  environment = merge({
     # hilt binds 127.0.0.1 by default, which no health check can reach.
     HILT_SERVER_HOST = "0.0.0.0"
     HILT_SERVER_PORT = "8080"
@@ -216,7 +216,11 @@ module "hilt" {
     HILT_UPLOAD_PROOFS      = "${local.keys}/upload-proof.txt"
 
     HILT_LOG_LEVEL = var.log_level
-  }
+    },
+    # Set only where a stage sizes it, as for sprue. hilt's default is also 10.
+    var.hilt_postgres_max_conns == null ? {} : {
+      HILT_STORAGE_POSTGRES_MAX_CONNS = tostring(var.hilt_postgres_max_conns)
+  })
 
   secrets = {
     HILT_STORAGE_POSTGRES_DSN            = "${local.ssm}/hilt/postgres-dsn"
