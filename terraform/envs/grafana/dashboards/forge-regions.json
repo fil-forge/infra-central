@@ -3165,7 +3165,7 @@
         "spec": {
           "id": 22,
           "title": "Ingot catalog on Forge",
-          "description": "Catalog bytes Ingot has shipped to Forge and not released, summed over the node's buckets: the segments' CARs, not their index blobs. Nothing collects dead catalog blocks yet, so the shipped line only grows until a bucket is deleted. Dead on arrival is the part already superseded when its segment shipped, over the segments Ingot measured; unmeasured is the shipped bytes it didn't measure, such as every segment shipped before it began measuring. Blocks that die after their segment ships aren't measured on a node: that takes a walk of a bucket's live catalog, which needs the tenant's key. fil-forge/forge-perf measures it on its own benchmark stack. Ingot's README, \"Catalog storage on Forge\", says what each gauge measures.",
+          "description": "Catalog bytes Ingot has shipped to Forge and not released, summed over the node's buckets: the segments' CARs, not their index blobs. Nothing collects dead catalog blocks yet, so the shipped line only grows until a bucket is deleted. Dead on arrival is the part already superseded when its segment shipped, over the segments Ingot measured; unmeasured is the shipped bytes it didn't measure, such as every segment shipped before it began measuring. On a node whose buckets predate Ingot's migration 00033, segments retired before it count in neither line, so the shipped line is a floor. Blocks that die after their segment ships aren't measured on a node: that takes a walk of a bucket's live catalog, which needs the tenant's key. fil-forge/forge-perf runs that walk on its own benchmark stack, which gives them roughly. Ingot's README, \"Catalog storage on Forge\", says what each gauge measures.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -3327,7 +3327,7 @@
         "spec": {
           "id": 23,
           "title": "Ingot catalog dead on arrival",
-          "description": "The share of the node's measured catalog bytes on Forge that was already dead when its segment shipped: superseded by later writes while the segment was open, mostly MST interior nodes. It covers every bucket, but only the segments Ingot measured (shipped bytes less unmeasured, \"Ingot catalog on Forge\"); segments shipped before Ingot began measuring aren't in it. Blocks that die after their segment ships aren't counted, so this is roughly a floor on how much of the measured segments is dead.",
+          "description": "The share of the node's measured catalog bytes on Forge that was already dead when its segment shipped: superseded by later writes while the segment was open, mostly MST interior nodes. It covers every bucket, but only the segments Ingot measured (shipped bytes less unmeasured, \"Ingot catalog on Forge\"); segments shipped before Ingot began measuring aren't in it. Blocks that die after their segment ships aren't counted, so this is roughly a floor on the measured segments' dead share.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
