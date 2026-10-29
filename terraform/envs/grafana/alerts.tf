@@ -106,6 +106,13 @@ locals {
   # OpenBao's container log stream, same scheme.
   openbao_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-openbao\""
 
+  # Ingot's container log stream, same scheme.
+  ingot_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-ingot\""
+
+  # Hilt's log, which reaches Loki from CloudWatch under its ECS log group,
+  # /forge-central/<stage>/hilt, with the stage also in the environment label.
+  hilt_log_matcher = "aws_log_group=~\"/forge-central/(${local.stages})/hilt\""
+
   # Caddy's request metrics, narrowed to traffic the appliance's own sites
   # answered. caddy_http_request_duration_seconds_count is the series to read:
   # the plain request counter carries no code label at all, because Caddy
@@ -2738,6 +2745,117 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # Ingot drops revoked keys from its authorization caches by streaming Swarf's
+  # revocation firehose. Once connected, the Swarf client reconnects a dropped
+  # stream without reporting it, so a stalled feed leaves no error line, and a
+  # revoked key keeps working on the node until its cache entry expires
+  # (infra-nodes docs/observability.md, Ingot).
+  #
+  # The signal is Hilt publishing revocations while an Ingot processes none.
+  # Hilt logs "published revocation" for each one and Ingot logs "revocation:
+  # record processed" for each record it reads. The counts are not compared:
+  # the firehose is shared, so Ingot also reads records Hilt did not publish.
+  # The query returns, for each Ingot that processed nothing in the last 15
+  # minutes, its stage's Hilt count, and nothing when Hilt published none.
+  #
+  # Ingot is often silent for hours, so the set of nodes to judge comes from a
+  # day of its logs. An Ingot that logged nothing all day is out of sight here;
+  # "Appliance container is not running" covers one that has stopped. The stage
+  # is cut from the appliance label, <stage>-<region>, to join on Hilt's
+  # environment label.
+  #
+  # Both sides are counted by the time each line was written, not when it
+  # reached Loki, so Hilt's CloudWatch delay does not split one revocation
+  # across windows. `for` = 10m asks for two evaluations in a row.
+  #
+  # no_data_state is OK: an empty result is the healthy state. An instant
+  # query, so no reduce stage.
+  rule {
+    name           = "Ingot is not receiving revocations"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Ingot on {{ $labels.node }} ({{ $labels.region }}) processed no revocations while Hilt published {{ $values.A.Value }}"
+      description = "Hilt has published revocations in the last 15 minutes and this node's Ingot has processed none, so bucket policy changes and key deletions are not reaching its authorization caches and a revoked key keeps working until its cache entry expires. Check that Ingot's config has revocation_service_url and revocation_service_did set, that the node can reach its stage's Swarf (revoke.<stage>.fil-forge.com), and Ingot's log for \"revocation: stream error\". Restarting Ingot reconnects the stream and resumes it from its stored cursor."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/observability.md#ingot"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          label_replace(
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} [1d])
+            ) * 0
+              unless on (appliance, region, node)
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} |= "revocation: record processed" [15m])
+            ),
+            "environment", "$1", "appliance", "([^-]+)-.*"
+          )
+            + on (environment) group_left ()
+          sum by (environment) (
+            count_over_time({${local.hilt_log_matcher}} |= "published revocation" [15m])
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }
