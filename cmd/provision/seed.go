@@ -123,7 +123,8 @@ var randomSecrets = []struct{ service, name string }{
 	{service: "hilt", name: "partner-key"},
 }
 
-// seed mints identities, wallets and passwords, then creates the databases.
+// seed mints identities, wallets and passwords, replicates the keys to the DR
+// region, then creates the databases.
 func (d *deps) seed(ctx context.Context) (*Response, error) {
 	resp := &Response{
 		Phase:     "seed",
@@ -149,6 +150,13 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 
 	slog.Info("ensuring wallets", "wallets", len(wallets))
 	if err := d.seedWallets(ctx, resp, &movedKeys); err != nil {
+		return nil, err
+	}
+
+	// Before the databases, so a database failure cannot leave the keys
+	// without their DR copy.
+	slog.Info("replicating keys", "replica_region", d.cfg.SecretReplicaRegion)
+	if err := replicateKeys(ctx, d.keys, d.cfg.SecretReplicaRegion, resp); err != nil {
 		return nil, err
 	}
 
@@ -191,6 +199,7 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 
 	slog.Info("seed complete",
 		"created", len(resp.Created),
+		"replicated", len(resp.Replicated),
 		"identities", len(resp.DIDs),
 		"databases", len(resp.Databases))
 	return resp, nil

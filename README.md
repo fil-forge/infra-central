@@ -58,7 +58,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
-| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, which can be replicated to a DR region; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, replicated to the DR region where a stage sets `secret_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
@@ -371,6 +371,17 @@ aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
+# A secret with a DR replica cannot be deleted until the replica is removed.
+# list-secrets does not report replicas, so ask each secret.
+for name in $(aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text); do
+  regions=$(aws secretsmanager describe-secret --secret-id "$name" \
+    --query 'ReplicationStatus[].Region' --output text)
+  if [ -n "$regions" ] && [ "$regions" != None ]; then
+    aws secretsmanager remove-regions-from-replication --secret-id "$name" \
+      --remove-replica-regions $regions
+  fi
+done
 aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \
   | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
@@ -946,6 +957,32 @@ and wallets, Secrets Manager secrets.
 A key the seed phase moved out of SSM is reused, not minted, so moving the keys
 leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
+### Checking the DR replicas
+
+A stage that sets `secret_replica_region` in its platform root, normally to
+`module.constants.dr_region`, keeps a replica of every identity and wallet key
+there. No stage sets it yet. Pin a provision image built with replication
+before setting it: an older image ignores the setting, and the seed
+invocation then fails the apply. Each seed run adds any replica that is missing, so a key
+minted before replication existed gets one on the next run, and a run that
+finds every replica in place changes nothing. A replica Secrets Manager failed
+to create fails the run instead of being overwritten: the usual cause is a
+secret of the same name already in the DR region, which may hold a key worth
+keeping.
+
+To confirm each replica holds the same key as its primary:
+
+```bash
+make check-key-replicas STAGE=staging
+make check-key-replicas STAGE=prod
+```
+
+The provision Lambda reads both copies and compares the DID or address each
+derives. It returns only those, and exits non-zero when a replica is missing or
+differs. A seed run returns only once every replica is in sync, so a missing
+replica after a successful seed is real; one can show as missing only while a
+seed is still running or after one failed.
+
 ### Smoke-testing a stage
 
 ```bash
@@ -988,10 +1025,19 @@ stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
-Delete the secret, skipping the recovery window:
+In a stage that keeps DR replicas, remove the replica first. Secrets Manager
+refuses to delete a secret that still has one, and the seed run that mints the
+new key replicates it again:
 
 ```bash
-aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+aws secretsmanager remove-regions-from-replication \
+  --secret-id forge-central/<stage>/swarf/identity --remove-replica-regions eu-central-1
+```
+
+Then delete the secret, skipping the recovery window:
+
+```bash
+aws secretsmanager delete-secret --secret-id forge-central/<stage>/swarf/identity \
   --force-delete-without-recovery
 ```
 

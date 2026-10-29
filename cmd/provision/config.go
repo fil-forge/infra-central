@@ -45,6 +45,10 @@ type config struct {
 	// internal/vaultinit about what this does and does not buy.
 	PrivateCIDRs []string
 
+	// SecretReplicaRegion is the DR region the seed phase replicates every key
+	// to. Empty in a stage that keeps no replicas.
+	SecretReplicaRegion string
+
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
 	// phase. Not validated at startup, because every other phase runs without it.
 	AllowListTable string
@@ -61,6 +65,7 @@ func loadConfig() (config, error) {
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		SecretReplicaRegion: os.Getenv("FORGE_SECRET_REPLICA_REGION"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),

@@ -162,6 +162,14 @@ RESET_ARGS ?=
 reset-apps:
 	AWS_REGION=$(AWS_REGION) scripts/reset-apps.sh --stage $(STAGE) $(RESET_ARGS)
 
+# Compare each key's DR replica with its primary by the DID or address both
+# derive. Reads only.
+#
+#   make check-key-replicas STAGE=staging
+.PHONY: check-key-replicas
+check-key-replicas:
+	AWS_REGION=$(AWS_REGION) scripts/check-key-replicas.sh --stage $(STAGE)
+
 .PHONY: test
 test:
 	go test ./...

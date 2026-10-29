@@ -77,3 +77,19 @@ func TestPrivateKeyPEMIsLabelledForTheServices(t *testing.T) {
 		t.Errorf("PEM does not start with %q", want)
 	}
 }
+
+func TestParseIdentityMultibaseRecoversTheSameDID(t *testing.T) {
+	original, err := GenerateIdentity()
+	if err != nil {
+		t.Fatalf("GenerateIdentity: %v", err)
+	}
+
+	parsed, err := ParseIdentityMultibase(original.Multibase)
+	if err != nil {
+		t.Fatalf("ParseIdentityMultibase: %v", err)
+	}
+
+	if parsed.DID != original.DID {
+		t.Errorf("DID after round trip = %q, want %q", parsed.DID, original.DID)
+	}
+}
