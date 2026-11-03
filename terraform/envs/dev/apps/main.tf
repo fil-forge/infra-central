@@ -120,6 +120,10 @@ module "apps" {
   allow_provision_without_payment_plan = false
 
   log_level = "info"
+
+  # ucantone runs up to 100 invocations of one request at once, so a single
+  # batch can exhaust swarf's default pool of 10.
+  swarf_postgres_max_conns = 20
 }
 
 output "service_urls" {

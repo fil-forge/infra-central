@@ -137,7 +137,7 @@ module "sprue" {
     SPRUE_LOG_LEVEL   = var.log_level
     },
     # Set only where a stage sizes it, so the other stages' task definitions
-    # stay as they are and sprue keeps its own default of 10.
+    # stay as they are and sprue keeps its own default of 20.
     var.sprue_postgres_max_conns == null ? {} : {
       SPRUE_STORAGE_POSTGRES_MAX_CONNS = tostring(var.sprue_postgres_max_conns)
   })
@@ -273,7 +273,7 @@ module "swarf" {
 
   log_forwarding = var.log_forwarding
 
-  environment = {
+  environment = merge({
     SWARF_SERVER_HOST = "0.0.0.0"
     SWARF_SERVER_PORT = "8080"
 
@@ -283,7 +283,12 @@ module "swarf" {
     SWARF_STORAGE_TYPE  = "postgres"
     SWARF_PLC_DIRECTORY = local.plc_directory
     SWARF_LOG_LEVEL     = var.log_level
-  }
+    },
+    # Set only where a stage sizes it, so the other stages' task definitions
+    # stay as they are and swarf keeps its own default of 10.
+    var.swarf_postgres_max_conns == null ? {} : {
+      SWARF_STORAGE_POSTGRES_MAX_CONNS = tostring(var.swarf_postgres_max_conns)
+  })
 
   secrets = {
     SWARF_STORAGE_POSTGRES_DSN = "${local.ssm}/swarf/postgres-dsn"
