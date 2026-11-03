@@ -107,7 +107,7 @@ module "platform" {
   protect_stateful_resources = false
 
   # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, which
-  # leaves headroom for sprue, hilt and swarf at 10 each.
+  # leaves headroom for sprue and hilt at 10 each and swarf at 20.
   openbao_max_parallel = 8
 
   # Both invocations re-run only when their input changes, so replacing the
