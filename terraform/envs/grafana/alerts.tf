@@ -2802,7 +2802,7 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           max by (appliance, region, node, instance) (
-            piri_pdp_save_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
+            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
           )
         PROMQL
       }))
