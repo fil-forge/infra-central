@@ -131,7 +131,7 @@ module "sprue" {
     SPRUE_LOG_LEVEL   = var.log_level
     },
     # Set only where a stage sizes it, so the other stages' task definitions
-    # stay as they are and sprue keeps its own default of 10.
+    # stay as they are and sprue keeps its own default of 20.
     var.sprue_postgres_max_conns == null ? {} : {
       SPRUE_STORAGE_POSTGRES_MAX_CONNS = tostring(var.sprue_postgres_max_conns)
   })

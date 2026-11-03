@@ -106,8 +106,9 @@ module "platform" {
   # Terraform, so a recreated dev stage comes back with its previous DIDs.
   protect_stateful_resources = false
 
-  # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, which
-  # leaves headroom for sprue and hilt at 10 each and swarf at 20.
+  # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, and
+  # the application pools take up to 60 more: sprue and swarf 20 each, hilt
+  # and plc 10 each.
   openbao_max_parallel = 8
 
   # Both invocations re-run only when their input changes, so replacing the
