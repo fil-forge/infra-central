@@ -17,6 +17,9 @@
 locals {
   config_path = "/tmp/forge/openbao.hcl"
 
+  # Where standbys forward requests to the active task, beside the API port.
+  cluster_port = var.port + 1
+
   # Written by the entrypoint rather than baked into the image because the
   # connection URL carries a password, the cluster address is known only once
   # the task has an IP, and OpenBao's HCL does not interpolate environment
@@ -30,9 +33,10 @@ locals {
     }
 
     listener "tcp" {
-      address     = "0.0.0.0:${var.port}"
-      tls_disable = 1
-  
+      address         = "0.0.0.0:${var.port}"
+      cluster_address = "0.0.0.0:${local.cluster_port}"
+      tls_disable     = 1
+
       # An appliance authenticates here with a token bound to its Elastic IP,
       # and it arrives through the ALB, which connects from its own address.
       # Checking the raw connection would compare the ALB against the node's
@@ -62,9 +66,11 @@ locals {
     # Both the ALB and private DNS send requests to standbys as well as to the
     # active task, and a standby forwards each one to the active task's
     # cluster_addr. Left unset, OpenBao derives it from api_addr, which names
-    # the ALB, and forwarding fails.
+    # the ALB, and forwarding fails. It is https although tls_disable is set:
+    # that applies to the API alone, and the cluster port always speaks mutual
+    # TLS with certificates OpenBao issues itself.
     api_addr      = "https://${var.hostname}"
-    cluster_addr  = "https://$OPENBAO_TASK_IP:${var.port + 1}"
+    cluster_addr  = "https://$OPENBAO_TASK_IP:${local.cluster_port}"
     disable_mlock = true
     ui            = ${var.enable_ui}
   HCL
@@ -161,6 +167,12 @@ module "service" {
   # availability zones. The active task holds a lock in Postgres that a standby
   # takes over once it lapses, at most 15 seconds after the active task is lost.
   desired_count = 3
+
+  # Without it, the tasks a lost zone moved elsewhere stay there after it
+  # recovers, so the next zone lost can take two of the three. ECS starts the
+  # replacement before stopping the task it moves, and a stopped active task
+  # hands the lock over at once.
+  availability_zone_rebalancing = "ENABLED"
 
   # A target in a lost zone leaves the ALB's rotation after 20 seconds rather
   # than the default 90.

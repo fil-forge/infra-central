@@ -245,6 +245,12 @@ variable "desired_count" {
   default     = 1
 }
 
+variable "availability_zone_rebalancing" {
+  description = "ENABLED moves tasks back across zones once a lost zone recovers. Null leaves the service's current setting, which is DISABLED for every service created before ECS made it the default."
+  type        = string
+  default     = null
+}
+
 variable "cpu" {
   type    = number
   default = 512
