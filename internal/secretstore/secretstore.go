@@ -181,15 +181,7 @@ func (s *Store) PutIfChanged(ctx context.Context, service, name, value string) (
 // A failed replica is reported rather than retried. Secrets Manager fails one
 // when the target region already holds a secret of the same name, and
 // overwriting that would destroy whatever key it holds.
-//
-// Nothing is done when the replica region is this store's own region, which is
-// the case for a stage root applied in the DR region: the secrets it reads
-// there are the replicas.
 func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion string) (bool, error) {
-	if replicaRegion == s.region {
-		return false, nil
-	}
-
 	out, err := s.client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{
 		SecretId: aws.String(secretARN),
 	})
@@ -238,10 +230,6 @@ func (s *Store) EnsureReplica(ctx context.Context, secretARN, replicaRegion stri
 // is waited for like one in progress, and reported as missing only at the
 // deadline.
 func (s *Store) WaitForReplica(ctx context.Context, secretARN, replicaRegion string) error {
-	if replicaRegion == s.region {
-		return nil
-	}
-
 	for {
 		out, err := s.client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{
 			SecretId: aws.String(secretARN),

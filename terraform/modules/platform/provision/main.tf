@@ -12,10 +12,6 @@
 locals {
   name = "fc-${var.stage}-provision"
 
-  # A stage root applied in the DR region reads the replicas as its own
-  # secrets, so it has no other region to replicate to.
-  replica_region = var.secret_replica_region == var.region ? null : var.secret_replica_region
-
   # Both clusters' master secrets. Each is encrypted with the account's
   # AWS-managed Secrets Manager key, so the key ARNs are usually one.
   db_master_secret_arns = compact([var.db_master_secret_arn, try(var.pandora_db_connection.master_secret_arn, null)])
@@ -80,8 +76,8 @@ resource "aws_lambda_function" "this" {
       FORGE_USDFC_ADDRESS        = var.chain.contracts.usdfc_token
       FORGE_FILECOIN_PAY_ADDRESS = var.chain.contracts.filecoin_pay
       FORGE_FWSS_ADDRESS         = var.chain.contracts.fwss
-      }, var.secret_replica_region == null ? {} : {
-      FORGE_SECRET_REPLICA_REGION = var.secret_replica_region
+      }, var.backup_replica_region == null ? {} : {
+      FORGE_BACKUP_REPLICA_REGION = var.backup_replica_region
       }, var.pandora_db_connection == null ? {} : {
       FORGE_PANDORA_DB_HOST              = var.pandora_db_connection.host
       FORGE_PANDORA_DB_PORT              = tostring(var.pandora_db_connection.port)

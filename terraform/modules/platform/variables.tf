@@ -177,7 +177,7 @@ variable "container_insights" {
   default = false
 }
 
-variable "secret_replica_region" {
+variable "backup_replica_region" {
   description = "Region the seed phase replicates every identity and wallet secret to, normally module.constants.dr_region. Null keeps no replicas."
   type        = string
   default     = null

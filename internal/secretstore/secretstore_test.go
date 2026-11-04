@@ -329,17 +329,6 @@ func TestEnsureReplicaRefusesToReplicateAReplica(t *testing.T) {
 	}
 }
 
-func TestEnsureReplicaDoesNothingInTheReplicaRegionItself(t *testing.T) {
-	fake := newFakeSecrets()
-	store := newTestStore(fake)
-
-	added, err := store.EnsureReplica(context.Background(), anySecretARN, "us-east-2")
-	if err != nil || added || fake.describes != 0 || len(fake.replicates) != 0 {
-		t.Errorf("EnsureReplica() = (%v, %v) after %d describes and %d replicate calls, want (false, nil) and no calls",
-			added, err, fake.describes, len(fake.replicates))
-	}
-}
-
 func TestEnsureReplicaFailsWhenTheReplicateCallReportsTheRegionFailed(t *testing.T) {
 	fake := newFakeSecrets()
 	failed := replicaIn("eu-central-1", types.StatusTypeFailed)
@@ -421,14 +410,5 @@ func TestWaitForReplicaGivesUpAtTheDeadline(t *testing.T) {
 
 	if err := store.WaitForReplica(ctx, anySecretARN, "eu-central-1"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("WaitForReplica() error = %v, want %v", err, context.DeadlineExceeded)
-	}
-}
-
-func TestWaitForReplicaDoesNothingInTheReplicaRegionItself(t *testing.T) {
-	fake := newFakeSecrets()
-	store := newTestStore(fake)
-
-	if err := store.WaitForReplica(waitCtx(t), anySecretARN, "us-east-2"); err != nil || fake.describes != 0 {
-		t.Errorf("WaitForReplica() = %v after %d describes, want nil and no calls", err, fake.describes)
 	}
 }

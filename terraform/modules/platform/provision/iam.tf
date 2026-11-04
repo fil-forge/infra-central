@@ -85,7 +85,7 @@ data "aws_iam_policy_document" "this" {
   # is allowed to the DR region only, and never over a secret of the same name
   # already there. Nothing here removes a replica.
   dynamic "statement" {
-    for_each = local.replica_region == null ? [] : [local.replica_region]
+    for_each = var.backup_replica_region == null ? [] : [var.backup_replica_region]
 
     content {
       sid = "ReplicateStageKeys"
@@ -111,19 +111,6 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The check-replicas phase reads each replica to compare the DID or address
-  # it derives with the primary's. These are the same keys ManageStageKeys
-  # already lets the function read.
-  dynamic "statement" {
-    for_each = local.replica_region == null ? [] : [local.replica_region]
-
-    content {
-      sid       = "ReadStageKeyReplicas"
-      actions   = ["secretsmanager:GetSecretValue"]
-      resources = ["arn:aws:secretsmanager:${statement.value}:${var.account_id}:secret:forge-central/${var.stage}/*"]
-    }
-  }
-
   # The keys take the account's AWS-managed Secrets Manager key, for the same
   # reason the SecureStrings take the AWS-managed SSM key, and their replicas
   # take the DR region's.
@@ -136,7 +123,7 @@ data "aws_iam_policy_document" "this" {
       test     = "StringEquals"
       variable = "kms:ViaService"
       values = [
-        for region in compact([var.region, local.replica_region]) : "secretsmanager.${region}.amazonaws.com"
+        for region in compact([var.region, var.backup_replica_region]) : "secretsmanager.${region}.amazonaws.com"
       ]
     }
   }

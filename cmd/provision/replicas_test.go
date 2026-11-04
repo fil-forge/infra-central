@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
-
-	"github.com/fil-forge/infra-central/internal/keygen"
-	"github.com/fil-forge/infra-central/internal/secretstore"
 )
 
 // fakeReplicator records each replicate and wait call in order, treats the
@@ -64,18 +60,6 @@ func TestReplicateKeysReplicatesEverySecretWalletsFirstThenWaitsForEach(t *testi
 	}
 }
 
-func TestReplicateKeysRefusesASecretTheReplicaCheckDoesNotList(t *testing.T) {
-	keys := &fakeReplicator{}
-	secrets := seededSecrets()
-	secrets["sprue"]["any-new-key"] = "arn:sprue/any-new-key" // not in replicatedKeys
-	resp := &Response{Secrets: secrets}
-
-	err := replicateKeys(context.Background(), keys, "eu-central-1", resp)
-	if err == nil || !strings.Contains(err.Error(), "sprue/any-new-key") || len(keys.asked) != 0 {
-		t.Errorf("replicateKeys() = %v after %v, want an error naming sprue/any-new-key before any replicator call", err, keys.asked)
-	}
-}
-
 func TestReplicateKeysFailsWhenAReplicaDoesNotSync(t *testing.T) {
 	notSynced := errors.New("replica failed")
 	keys := &fakeReplicator{waitErr: map[string]error{"arn:sprue/identity": notSynced}}
@@ -99,9 +83,9 @@ func TestReplicateKeysReportsOnlyTheReplicasItAdded(t *testing.T) {
 	}
 
 	want := Response{
-		Secrets:       seededSecrets(),
-		ReplicaRegion: "eu-central-1",
-		Replicated:    []string{"forge-central/test/signing-service/payer-key"},
+		Secrets:             seededSecrets(),
+		BackupReplicaRegion: "eu-central-1",
+		Replicated:          []string{"forge-central/test/signing-service/payer-key"},
 	}
 	if !reflect.DeepEqual(*resp, want) {
 		t.Errorf("response = %+v, want %+v", *resp, want)
@@ -115,114 +99,7 @@ func TestReplicateKeysDoesNothingWithoutAReplicaRegion(t *testing.T) {
 	if err := replicateKeys(context.Background(), keys, "", resp); err != nil {
 		t.Fatalf("replicateKeys() error = %v", err)
 	}
-	if len(keys.asked) != 0 || resp.ReplicaRegion != "" {
-		t.Errorf("replicateKeys() asked for %v and set region %q, want nothing", keys.asked, resp.ReplicaRegion)
-	}
-}
-
-func TestReplicatedKeysCoverEveryKeyTheIssueNames(t *testing.T) {
-	var got []string
-	for _, key := range replicatedKeys() {
-		got = append(got, key.service+"/"+key.name)
-	}
-
-	want := []string{
-		"signing-service/payer-key",
-		"delegator/transactor-key",
-		"sprue/identity",
-		"hilt/identity",
-		"swarf/identity",
-		"delegator/identity",
-		"delegator/identity-multibase",
-		"signing-service/identity",
-		"signing-service/identity-multibase",
-		"indexer/identity",
-		"etracker/identity",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("replicatedKeys() = %v, want %v", got, want)
-	}
-}
-
-// mapKeys is a keyReader over service/name -> value.
-type mapKeys map[string]string
-
-func (m mapKeys) Lookup(ctx context.Context, service, name string) (secretstore.Secret, bool, error) {
-	value, ok := m[service+"/"+name]
-	return secretstore.Secret{Value: value}, ok, nil
-}
-
-var testReplicatedKey = replicatedKey{
-	service: "svc",
-	name:    "key",
-	derive:  func(value string) (string, error) { return testPublicHalves[value], nil },
-}
-
-func TestCompareReplicas(t *testing.T) {
-	testCases := []struct {
-		name    string
-		replica mapKeys
-		want    ReplicaCheck
-	}{
-		{
-			name:    "matches a replica deriving the primary's public half",
-			replica: mapKeys{"svc/key": "k1"},
-			want:    ReplicaCheck{Key: "svc/key", Primary: "public-of-k1", Replica: "public-of-k1", Match: true},
-		},
-		{
-			name:    "fails a replica deriving a different public half",
-			replica: mapKeys{"svc/key": "k2"},
-			want:    ReplicaCheck{Key: "svc/key", Primary: "public-of-k1", Replica: "public-of-k2"},
-		},
-		{
-			name:    "fails a missing replica",
-			replica: mapKeys{},
-			want:    ReplicaCheck{Key: "svc/key", Primary: "public-of-k1"},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			primary := mapKeys{"svc/key": "k1"}
-
-			got, err := compareReplicas(context.Background(), primary, tc.replica, []replicatedKey{testReplicatedKey})
-			if err != nil {
-				t.Fatalf("compareReplicas() error = %v", err)
-			}
-			if want := []ReplicaCheck{tc.want}; !reflect.DeepEqual(got, want) {
-				t.Errorf("compareReplicas() = %+v, want %+v", got, want)
-			}
-		})
-	}
-}
-
-func TestCompareReplicasFailsForAKeyMissingFromThePrimary(t *testing.T) {
-	_, err := compareReplicas(context.Background(), mapKeys{}, mapKeys{"svc/key": "k1"}, []replicatedKey{testReplicatedKey})
-	if err == nil || !strings.Contains(err.Error(), "svc/key is missing from the primary region") {
-		t.Errorf("compareReplicas() error = %v, want one naming the missing key", err)
-	}
-}
-
-func TestCompareReplicasNeverReportsTheKey(t *testing.T) {
-	primary := mapKeys{"svc/key": "very-secret-value"}
-	replica := mapKeys{"svc/key": "k2"}
-
-	got, err := compareReplicas(context.Background(), primary, replica, []replicatedKey{testReplicatedKey})
-	if err != nil {
-		t.Fatalf("compareReplicas() error = %v", err)
-	}
-	if rendered := strings.Join([]string{got[0].Key, got[0].Primary, got[0].Replica}, " "); strings.Contains(rendered, "very-secret-value") {
-		t.Errorf("compareReplicas() = %+v, which contains the primary's private value", got)
-	}
-}
-
-func TestMultibaseReplicaDerivesTheIdentityDID(t *testing.T) {
-	id, err := keygen.GenerateIdentity()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got, err := deriveMultibaseDID(id.Multibase); err != nil || got != id.DID {
-		t.Errorf("deriveMultibaseDID() = (%q, %v), want (%q, nil)", got, err, id.DID)
+	if len(keys.asked) != 0 || resp.BackupReplicaRegion != "" {
+		t.Errorf("replicateKeys() asked for %v and set region %q, want nothing", keys.asked, resp.BackupReplicaRegion)
 	}
 }

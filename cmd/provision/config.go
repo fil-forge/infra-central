@@ -45,9 +45,10 @@ type config struct {
 	// internal/vaultinit about what this does and does not buy.
 	PrivateCIDRs []string
 
-	// SecretReplicaRegion is the DR region the seed phase replicates every key
-	// to. Empty in a stage that keeps no replicas.
-	SecretReplicaRegion string
+	// BackupReplicaRegion is the region the seed phase replicates every key
+	// to, so a copy survives the loss of Region. Empty in a stage that keeps no
+	// replicas.
+	BackupReplicaRegion string
 
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
 	// phase. Not validated at startup, because every other phase runs without it.
@@ -65,7 +66,7 @@ func loadConfig() (config, error) {
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
-		SecretReplicaRegion: os.Getenv("FORGE_SECRET_REPLICA_REGION"),
+		BackupReplicaRegion: os.Getenv("FORGE_BACKUP_REPLICA_REGION"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
@@ -111,6 +112,10 @@ func loadConfig() (config, error) {
 	}
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("missing required environment: %s", strings.Join(missing, ", "))
+	}
+
+	if cfg.BackupReplicaRegion != "" && cfg.BackupReplicaRegion == cfg.Region {
+		return config{}, fmt.Errorf("FORGE_BACKUP_REPLICA_REGION is %s, the function's own region; a backup replica must live in another region", cfg.Region)
 	}
 
 	return cfg, nil

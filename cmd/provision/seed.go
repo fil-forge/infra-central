@@ -155,8 +155,8 @@ func (d *deps) seed(ctx context.Context) (*Response, error) {
 
 	// Before the databases, so a database failure cannot leave the keys
 	// without their DR copy.
-	slog.Info("replicating keys", "replica_region", d.cfg.SecretReplicaRegion)
-	if err := replicateKeys(ctx, d.keys, d.cfg.SecretReplicaRegion, resp); err != nil {
+	slog.Info("replicating keys", "replica_region", d.cfg.BackupReplicaRegion)
+	if err := replicateKeys(ctx, d.keys, d.cfg.BackupReplicaRegion, resp); err != nil {
 		return nil, err
 	}
 

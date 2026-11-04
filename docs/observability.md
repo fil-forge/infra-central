@@ -209,8 +209,6 @@ replica, the reason Secrets Manager gave:
 {aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
 ```
 
-`make check-key-replicas STAGE=<stage>` then compares every replica with its primary.
-
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |

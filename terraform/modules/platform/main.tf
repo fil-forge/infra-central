@@ -236,7 +236,7 @@ module "provision" {
   allow_list_table_name = module.storage.allow_list_table_name
   allow_list_table_arn  = module.storage.allow_list_table_arn
 
-  secret_replica_region = var.secret_replica_region
+  backup_replica_region = var.backup_replica_region
 }
 
 # Mints every identity, wallet and password, and creates the per-service
@@ -253,8 +253,8 @@ resource "aws_lambda_invocation" "seed" {
     phase           = "seed"
     trigger         = var.seed_trigger
     pandora_db_host = try(module.pandora_db[0].address, null)
-    }, var.secret_replica_region == null ? {} : {
-    secret_replica_region = var.secret_replica_region
+    }, var.backup_replica_region == null ? {} : {
+    backup_replica_region = var.backup_replica_region
   }))
 
   # Static references only: depends_on cannot read local.database, and only one
@@ -271,8 +271,8 @@ resource "aws_lambda_invocation" "seed" {
   # newer image, bump seed_trigger to re-run the phase.
   lifecycle {
     postcondition {
-      condition     = var.secret_replica_region == null || try(jsondecode(self.result).replica_region, null) == var.secret_replica_region
-      error_message = "The seed phase did not replicate the keys to ${coalesce(var.secret_replica_region, "-")}. The provision image predates replication: publish a newer one, then bump seed_trigger."
+      condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
+      error_message = "The seed phase did not replicate the keys to ${coalesce(var.backup_replica_region, "-")}. The provision image predates replication: publish a newer one, then bump seed_trigger."
     }
   }
 }
