@@ -128,10 +128,9 @@ module "apps" {
     plc             = { cpu = 256, memory = 512 }
   }
 
-  # sprue's own default, restated, and twice hilt's for the same request rate.
-  # The database allows roughly 1,800 connections; see the platform root.
+  # The same as sprue's own default. The database allows roughly 900
+  # connections; see the platform root.
   sprue_postgres_max_conns = 20
-  hilt_postgres_max_conns  = 20
 }
 
 # Read by the workflow's wait for steady state.
