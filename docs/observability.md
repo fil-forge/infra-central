@@ -134,6 +134,7 @@ appliance label.
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
+| Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
