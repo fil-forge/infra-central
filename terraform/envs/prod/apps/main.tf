@@ -128,8 +128,8 @@ module "apps" {
     plc             = { cpu = 256, memory = 512 }
   }
 
-  # Twice sprue's default, for the same request rate. The database allows
-  # roughly 900 connections; see the platform root.
+  # The same as sprue's own default. The database allows roughly 900
+  # connections; see the platform root.
   sprue_postgres_max_conns = 20
 }
 
