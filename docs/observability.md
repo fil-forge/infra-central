@@ -135,6 +135,13 @@ appliance label.
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
+| Central service CPU high                             | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
+| Central service memory high                          | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
+| Central database CPU high                            | Forge capacity           | RDS, CloudWatch               | FIL-1214 |
+| Appliance container memory high                      | Forge capacity           | cAdvisor, staging             | FIL-1214 |
+| Appliance container CPU high                         | Forge capacity           | cAdvisor, staging             | FIL-1214 |
+| Appliance host memory low                            | Forge capacity           | node exporter                 | FIL-1214 |
+| Appliance host CPU high                              | Forge capacity           | node exporter                 | FIL-1214 |
 
 "Piri's Prove task has not run in 1.5 proving periods" stays paused until Piri's Curio dependency
 parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with "no subpiece found".

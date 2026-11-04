@@ -1,6 +1,7 @@
 # CPU and memory headroom, for Central and the appliances (FIL-1214). Each rule
-# warns while there is still time to scale up, so every one is a warning: none
-# of them is an outage yet.
+# fires while there is still time to scale up. They are critical so that they
+# page in production: capacity runs out at any hour, and a service at its
+# limit is throttled or killed before the next working day.
 #
 # Every rule has the same shape -- one instant query, one threshold -- so they
 # are a list rendered by a dynamic block rather than seven copies of it. The
@@ -26,14 +27,14 @@ locals {
   central_labels = {
     team_name = "forge"
     component = "central"
-    severity  = "warning"
+    severity  = "critical"
   }
 
   appliance_labels = {
     team_name = "forge"
     component = "appliance"
     stage     = local.appliance_stage_label
-    severity  = "warning"
+    severity  = "critical"
   }
 
   appliance_runbook = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
