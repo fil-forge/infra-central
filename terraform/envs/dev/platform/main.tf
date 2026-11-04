@@ -107,8 +107,8 @@ module "platform" {
   protect_stateful_resources = false
 
   # A db.t4g.micro allows roughly 112 connections. OpenBao takes up to 8 per
-  # task, 24 across its three, which leaves headroom for sprue, hilt and swarf
-  # at 10 each.
+  # task, 24 across its three, and the application pools up to 60 more: sprue
+  # and swarf 20 each, hilt and plc 10 each.
   openbao_max_parallel = 8
 
   # Both invocations re-run only when their input changes, so replacing the

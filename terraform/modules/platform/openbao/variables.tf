@@ -44,9 +44,10 @@ variable "max_parallel" {
 
     Budget three times this, one per task, against the RDS instance's or the Aurora writer's real
     max_connections (roughly DBInstanceClassMemory/9531392, about 112 on a
-    db.t4g.micro and at most about 1,800 on a db.r8g.large) alongside
-    sprue, hilt and swarf, which each default to max_conns = 10. RDS Proxy is
-    the escape hatch if the budget gets tight.
+    db.t4g.micro and at most about 1,800 on a db.r8g.large) alongside the
+    application services' pools, which default to 20 for sprue and 10 each
+    for hilt, swarf and plc. RDS Proxy is the escape hatch if the budget gets
+    tight.
   EOT
   type        = number
   default     = 16
