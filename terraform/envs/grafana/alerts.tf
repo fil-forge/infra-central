@@ -2748,8 +2748,10 @@ resource "grafana_rule_group" "appliance" {
   # builds by reading the piece once after Piri parks it. Every Piri
   # aggregate is at least 128 MiB, so a piece without its layer fails every
   # proof once it is in a proof set and challenged. The value is how long the
-  # oldest parked piece above 32 MiB has waited for its layer while no task
-  # is building it; Piri returns a piece to the queue if its task is dropped.
+  # oldest parked piece above 32 MiB has waited for its layer, including a
+  # piece a SaveCache task has claimed: a task that hangs or keeps failing
+  # holds its claim, and the piece still cannot be proven. Piri returns a
+  # piece to the queue if its task is dropped.
   #
   # A layer is normally built within minutes of parking, and a piece is
   # parked well before it is added to a proof set, so thirty minutes is a
