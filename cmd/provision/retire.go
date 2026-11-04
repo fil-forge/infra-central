@@ -131,10 +131,8 @@ func (d *deps) planRetire(ctx context.Context, dsn, region string) (*RetirePlan,
 
 	plan.ProviderDID = dids.provider
 	plan.Rows = map[string]int{
-		"provider":   1,
-		"tenant":     len(dids.tenants),
-		"bucket":     len(dids.buckets),
-		"access_key": len(dids.accessKeys),
+		"provider": 1,
+		"bucket":   len(dids.buckets),
 	}
 
 	delegations, err := countDelegations(ctx, conn, dids.all())
@@ -176,26 +174,26 @@ func (d *deps) applyRetire(ctx context.Context, dsn string, plan *RetirePlan) (*
 }
 
 // regionDIDs are every DID hilt holds under one region's provider.
+//
+// A tenant spans regions: it is the console organisation, and each of its
+// buckets is served by whichever region created it. So a region owns its
+// provider row and the buckets that name it, and nothing else. Tenants,
+// principals, access keys and wrap keys belong to the organisation and outlive
+// any one region.
 type regionDIDs struct {
-	provider   string
-	tenants    []string
-	buckets    []string
-	accessKeys []string
+	provider string
+	buckets  []string
 }
 
 // all returns every DID, which is what a delegation's issuer or audience is
 // matched against. hilt's delegation to the Ingot names the provider, while a
-// tenant's names its own DID or an access key's.
+// bucket's names the bucket.
 func (r *regionDIDs) all() []string {
-	dids := []string{r.provider}
-	dids = append(dids, r.tenants...)
-	dids = append(dids, r.buckets...)
-	dids = append(dids, r.accessKeys...)
-	return dids
+	return append([]string{r.provider}, r.buckets...)
 }
 
-// readRegionDIDs walks provider to tenant to bucket and access_key. It returns
-// nil when hilt has no provider row for the region.
+// readRegionDIDs walks provider to bucket. It returns nil when hilt has no
+// provider row for the region.
 //
 // The walk is by DID rather than by cascade because the delegation table has no
 // foreign key to anything: its issuer and audience are plain text columns, so
@@ -211,31 +209,20 @@ func readRegionDIDs(ctx context.Context, conn querier, region string) (*regionDI
 		return nil, fmt.Errorf("read hilt's provider row for region %s: %w", region, err)
 	}
 
-	queries := []struct {
-		into  *[]string
-		query string
-	}{
-		{&dids.tenants, "SELECT id FROM tenant WHERE provider_id = $1"},
-		{&dids.buckets, "SELECT id FROM bucket WHERE tenant_id = ANY(SELECT id FROM tenant WHERE provider_id = $1)"},
-		{&dids.accessKeys, "SELECT id FROM access_key WHERE tenant_id = ANY(SELECT id FROM tenant WHERE provider_id = $1)"},
+	rows, err := conn.Query(ctx, "SELECT id FROM bucket WHERE provider_id = $1", dids.provider)
+	if err != nil {
+		return nil, fmt.Errorf("read hilt's bucket rows under %s: %w", dids.provider, err)
 	}
-	for _, q := range queries {
-		rows, err := conn.Query(ctx, q.query, dids.provider)
-		if err != nil {
-			return nil, fmt.Errorf("read hilt's rows under %s: %w", dids.provider, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			*q.into = append(*q.into, id)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("read hilt's rows under %s: %w", dids.provider, err)
-		}
+		dids.buckets = append(dids.buckets, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read hilt's bucket rows under %s: %w", dids.provider, err)
 	}
 	return dids, nil
 }
@@ -259,17 +246,39 @@ func countDelegations(ctx context.Context, conn querier, dids []string) (int, er
 	return count, nil
 }
 
+// regionDelete is one statement of the retirement, named by the table it
+// empties so a partial failure says how far it got.
+type regionDelete struct {
+	table string
+	sql   string
+	args  []any
+}
+
+// regionDeletes is every row a region retirement removes, in the order the
+// schema demands. It is a function of the DIDs alone so the set a retirement
+// touches can be read without a database in front of it.
+func regionDeletes(dids *regionDIDs) []regionDelete {
+	return []regionDelete{
+		{"delegation", "DELETE FROM delegation WHERE issuer = ANY($1) OR audience = ANY($1)", []any{dids.all()}},
+		{"bucket", "DELETE FROM bucket WHERE provider_id = $1", []any{dids.provider}},
+		{"provider", "DELETE FROM provider WHERE id = $1", []any{dids.provider}},
+	}
+}
+
 // deleteRegionRows removes one region's rows from hilt in a single transaction.
 //
-// The order is fixed by the schema: tenant, bucket and access_key each reference
-// their parent ON DELETE RESTRICT, so a parent cannot go first. Delegations go
-// before all of them because they are keyed by nothing and would otherwise be
-// left addressed to DIDs that no longer exist.
+// The order is fixed by the schema: bucket references provider ON DELETE
+// RESTRICT, so the provider cannot go first. Delegations go before both because
+// they are keyed by nothing and would otherwise be left addressed to DIDs that
+// no longer exist. A bucket's policy rows reference it ON DELETE CASCADE and go
+// with it.
 //
-// wrap_key is left alone. It has no foreign key, so its rows do not block this,
-// and it arrived in a hilt migration later than the deployed image: a DELETE
-// against a table that is not there would abort the whole transaction. The rows
-// it leaves are inert, because a tenant DID is minted fresh and never reused.
+// Tenants stay. A tenant is the console organisation and may hold buckets in
+// regions that are not being retired, so deleting it would take those with it.
+// Its principals, access keys and wrap keys stay for the same reason. An access
+// key scoped to a deleted bucket keeps that DID in its bucket list, which denies
+// rather than grants: the array carries no foreign key, and a bucket DID is
+// minted fresh and never reused.
 func deleteRegionRows(ctx context.Context, dsn, region string) (map[string]int, error) {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
@@ -291,20 +300,8 @@ func deleteRegionRows(ctx context.Context, dsn, region string) (map[string]int, 
 		return nil, fmt.Errorf("hilt's provider row for region %s went away mid-retirement", region)
 	}
 
-	statements := []struct {
-		table string
-		sql   string
-		args  []any
-	}{
-		{"delegation", "DELETE FROM delegation WHERE issuer = ANY($1) OR audience = ANY($1)", []any{dids.all()}},
-		{"access_key", "DELETE FROM access_key WHERE tenant_id = ANY($1)", []any{dids.tenants}},
-		{"bucket", "DELETE FROM bucket WHERE tenant_id = ANY($1)", []any{dids.tenants}},
-		{"tenant", "DELETE FROM tenant WHERE provider_id = $1", []any{dids.provider}},
-		{"provider", "DELETE FROM provider WHERE id = $1", []any{dids.provider}},
-	}
-
 	deleted := map[string]int{}
-	for _, s := range statements {
+	for _, s := range regionDeletes(dids) {
 		tag, err := tx.Exec(ctx, s.sql, s.args...)
 		if err != nil {
 			return nil, fmt.Errorf("delete hilt's %s rows for region %s: %w", s.table, region, err)
