@@ -24,9 +24,16 @@
 #   grafana_team, grafana_user   shared with FilOne
 #   grafana_cloud_*              the Cloud org, not this stack
 #
-# Not in check-and-deploy.yml's plan or apply matrix, for the same reason the
-# state key carries no stage: there is no stage whose deploy this belongs to. An
-# operator applies it:
+# Not among check-and-deploy.yml's per-stage plans or applies, for the same
+# reason the state key carries no stage: there is no stage whose deploy this
+# belongs to. It has two jobs of its own there instead. plan-grafana plans every
+# pull request from a branch in this repository, with no Grafana credential and
+# so without a refresh.
+# apply-grafana applies every push to main once the GRAFANA_APPLY_ENABLED
+# repository variable is set, which it is, so merging a change here applies it.
+# The workflow's comments on both jobs say why each is shaped the way it is.
+#
+# An operator can still apply it by hand, as the same account:
 #
 #   export TF_VAR_grafana_auth="$(op read 'op://Fil One/Forge Central/GRAFANA/GRAFANA_TERRAFORM_TOKEN')"
 #   tofu -chdir=terraform/envs/grafana init
@@ -62,11 +69,11 @@
 #
 # Same shape as the regional bootstrap root's three Grafana values, and the same
 # section of the same 1Password item. 1Password is where an operator's
-# credentials live because no workflow can reach it: the only secrets CI consumes
-# are FORGE_BOT_PRIVATE_KEY and SLACK_BOT_TOKEN, both repository secrets. This
-# root is applied from a laptop, so a laptop credential is what it wants. The
-# tokens the preview and sync workflows use are the other way round, and are
-# repository secrets that no human types.
+# credentials live because no workflow can reach it; what CI needs it reads from
+# repository secrets instead. An operator who applies this root by hand does so
+# from a laptop, so the 1Password copy is a laptop credential. The tokens the
+# preview and sync workflows use are the other way round, and are repository
+# secrets that no human types.
 #
 # forge-terraform is the one account on both sides of that line, once
 # GRAFANA_APPLY_ENABLED is set. An operator reads its token from 1Password for

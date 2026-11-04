@@ -50,6 +50,12 @@ variable "trace_spans_alert_threshold" {
   default     = null
 }
 
+variable "central_response_time_threshold_seconds" {
+  description = "Mean response time, in seconds over five minutes, above which a Central service's response time rule fires. Provisional: FIL-1242 defines the SLO this should match. Prod's slowest service, plc, peaked near 0.2s in the week the rule was written."
+  type        = number
+  default     = 1
+}
+
 locals {
   stages = join("|", var.alert_stages)
 
@@ -105,6 +111,13 @@ locals {
 
   # OpenBao's container log stream, same scheme.
   openbao_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-openbao\""
+
+  # Ingot's container log stream, same scheme.
+  ingot_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-ingot\""
+
+  # Hilt's log, which reaches Loki from CloudWatch under its ECS log group,
+  # /forge-central/<stage>/hilt, with the stage also in the environment label.
+  hilt_log_matcher = "aws_log_group=~\"/forge-central/(${local.stages})/hilt\""
 
   # Caddy's request metrics, narrowed to traffic the appliance's own sites
   # answered. caddy_http_request_duration_seconds_count is the series to read:
@@ -885,6 +898,119 @@ resource "grafana_rule_group" "central" {
   }
 }
 
+# A group of its own, so the response time rule and its threshold can change
+# with the SLO without touching the rules above. 60s for the same reason as
+# "Forge Central".
+resource "grafana_rule_group" "central_latency" {
+  name             = "Forge Central latency"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 60
+
+  # The mean time each service's targets took to answer, over five minutes.
+  #
+  # TargetResponseTime ends when the target starts sending its response
+  # headers, so it is closer to TTFB than TTLB. Central's responses are small
+  # JSON, where the two barely differ, and it keeps swarf's SSE stream from
+  # reading as a request hours long. Central serves no S3 object operations, so
+  # there is nothing size-dependent to exclude.
+  #
+  # The stream carries no percentiles, so this is a mean: the sum of response
+  # times over their count, which weighs each request equally where averaging
+  # the per-minute averages would weigh each minute equally. CloudWatch
+  # publishes the metric only in minutes with requests, so an idle service has
+  # no series and no_data_state is OK.
+  rule {
+    name           = "Service response time is high"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
+      description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
+      __dashboardUid__ = "forge-central"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sum{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          /
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sample_count{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [var.central_response_time_threshold_seconds] }
+        }]
+      })
+    }
+  }
+}
+
 # 300s although the host exporter is scraped once a minute. Nothing in this
 # group is time-critical enough to want the extra resolution, and a slower
 # interval costs nothing here.
@@ -1000,8 +1126,10 @@ resource "grafana_rule_group" "appliance" {
   # rather than chosen here (FIL-1209).
   #
   # Grouped by node as well as region: two boxes in one stage and region share
-  # service_name and are told apart by node, once the second is given a node
-  # value of its own. An instant query, so no reduce stage.
+  # service_name, and no label on those series separates them today -- Alloy
+  # sets instance to the node name too. Grouping by appliance, region and node
+  # together means the groups split as soon as one of them carries a per-box
+  # value, with no edit here. An instant query, so no reduce stage.
   #
   # for = 15m is chosen, not specified: a filesystem crossing 40% is not an event
   # that needs a one-minute response.
@@ -1568,17 +1696,18 @@ resource "grafana_rule_group" "appliance" {
 
   # The labelling convention, alerted on rather than written down.
   #
-  # Every per-box rule in this file needs `node`, because `appliance` is
-  # <stage>-<region> and cannot tell two boxes in one region apart. All three
-  # scrapes set it: the host and Caddy each through a relabel component, and
-  # the cAdvisor scrape through the static rules its own relabel component
-  # adds, since `up` carries none of the Compose labels the rest of those
-  # rules read. That node's value is per-region today is a different problem
-  # from the label going missing, and not the one this rule is about. The
-  # labelling is a convention living in a config outside these repositories,
-  # and conventions in prose get dropped when the config is re-implemented --
-  # which it will be, at the next box and again if the appliance ever runs its
-  # own Alloy.
+  # Every other appliance rule groups by `node`, so a scrape arriving without
+  # it lands in a group apart from the labelled ones and joins to nothing that
+  # has it. This rule is the exception: it selects node="" to find those
+  # scrapes. All three scrapes set it: the host and Caddy each through a
+  # relabel component, and the cAdvisor scrape through the static rules its own
+  # relabel component adds, since `up` carries none of the Compose labels the
+  # rest of those rules read. No node value names a machine today, but that is
+  # a separate problem from the label going missing, and not the one this rule
+  # is about. The labelling is a convention living in a config outside these
+  # repositories, and conventions in prose get dropped when the config is
+  # re-implemented -- which it will be, at the next box and again if the
+  # appliance ever runs its own Alloy.
   #
   # So this fires while the convention is broken, and goes quiet when it is
   # kept. Prometheus reads an absent label as empty, so node="" selects exactly
@@ -1601,7 +1730,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "{{ $labels.appliance }} is shipping telemetry with no node label"
-      description = "A scrape on this appliance is arriving without the node label every per-box rule needs. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
+      description = "A scrape on this appliance is arriving without the node label the other appliance rules group by. While that is true, anything reading these series can only work at region granularity, so a second box in the region would be invisible behind the first. Set node and region on the scrape in the host's Alloy config, as the staging section of infra-nodes docs/RUNBOOK.md specifies."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
@@ -1675,29 +1804,32 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
-  # The three rules that watch Piri itself rather than a proof set (chain head
-  # is stale, no chain head, Prove task has not run) also group by instance. A
-  # node can run several Piris, each reporting instance <node>/piri-<n>, and
-  # grouping by node alone would let one healthy Piri hide another's stall. A
-  # Piri that reports another instance is grouped by that.
+  # The four rules that watch Piri itself rather than a proof set (chain head
+  # is stale, no chain head, proof set is unrecoverable, Prove task has not run)
+  # also group by instance, and their summaries name the Piri by it. A node can
+  # run several Piris, each reporting instance <node>/piri-<n>, and grouping by
+  # node alone would let one healthy Piri hide another's stall, or leave the
+  # alert unable to say which Piri it means. A Piri that reports another
+  # instance is grouped by that.
   # Its DID, which it reports until an image with fil-forge/piri#173 reaches the
   # node, is still one series per Piri. The node name, where Alloy overwrites
   # instance, merges the node's Piris into one series, as before. The CommP and
   # Postgres pool rules further down group by instance for the same reason.
   #
-  # The gauges are what Curio has recorded in its database, not chain state, so
-  # none of these confirms that a proof landed. Two failures go unseen: a proof
-  # Curio sent that then failed on chain, and a Prove task that woke after its
-  # challenge window had closed. Curio records both as successful task runs and
-  # leaves its failure count alone.
+  # The gauges are what Curio has recorded in its database, except
+  # piri_pdp_proofset_last_proven_epoch, which Piri reads from PDPVerifier.
+  # "Proving is failing" uses it, so it alone confirms that proofs land; the
+  # others would miss a proof Curio sent that then failed on chain, or a Prove
+  # task that woke after its challenge window had closed, which Curio records
+  # as successful task runs.
   #
   # Severities follow docs/observability.md: a rule pages (critical) when
   # waiting until the next day could make a loss permanent, and is a warning
   # when the loss is a delay that stops once the cause is fixed, about one
   # proving period's payment a day. Three page: both chain-head rules, because
   # Piri gives up adding pieces after a few hours without a head (FIL-1508),
-  # and "proving is failing", because five rejections end a proof set for good.
-  # The other three are warnings, for the reasons each gives. Each rule's
+  # and "proving is failing", because every period without a proof records a
+  # fault on chain. The other three are warnings, for the reasons each gives. Each rule's
   # description says how soon to act, and its runbook_url links to the rule's
   # section of infra-nodes' RUNBOOK.
   #
@@ -1737,7 +1869,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not seen a new chain head for more than five minutes"
+      summary     = "Piri {{ $labels.instance }} has not seen a new chain head for more than five minutes"
       description = "The last tipset Piri's chain scheduler applied is more than five minutes old. Filecoin produces one every thirty seconds, so the Lotus it reads the chain from is stalled, out of sync or unreachable, or Piri's subscription to it is stuck, and Piri cannot schedule or submit proofs. Check the sync status of that Lotus (`lotus sync wait` or `lotus chain head` on the host that owns it) and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-chain-head-is-stale"
     }
@@ -1837,7 +1969,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) is running but has not seen a chain head"
+      summary     = "Piri {{ $labels.instance }} is running but has not seen a chain head"
       description = "Piri is exporting metrics but its chain scheduler has not applied a single tipset since it started, so it cannot schedule or submit proofs. Usually the Lotus it reads the chain from is unreachable or was down when Piri started. Check that Lotus is up and synced (`lotus sync wait` or `lotus chain head` on the host that owns it), that Piri's Lotus endpoint and token are right, and run `piri status` in the Piri container. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand, as the runbook describes."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-is-reporting-but-has-no-chain-head"
     }
@@ -1912,8 +2044,8 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # A proof set whose challenge window, as Curio recorded it, has closed without
-  # Curio scheduling the next proving period, for a reason other than a failure
-  # backoff. The value is epochs past the window's close. The current epoch is
+  # Curio scheduling the next proving period. The value is epochs past the
+  # window's close. The current epoch is
   # the last head plus the wall-clock time since it, so this still fires when
   # the head itself is stale.
   #
@@ -1923,20 +2055,14 @@ resource "grafana_rule_group" "appliance" {
   # whether or not this period's proof landed, and moves the challenge epoch on
   # when it sends that transaction rather than when it lands.
   #
-  # A proof set in a failure backoff is left out by the `unless`: Curio holds
-  # its scheduling back on purpose until the backoff deadline passes the head,
-  # and "Piri proving is failing" has already paged for the failure that set
-  # it. The deadline stays recorded after it passes, so the comparison is
-  # against the same extrapolated head, and the set comes back into this rule
-  # once the head is past it.
-  #
   # A warning: a stall loses about one proving period's payment a day and
   # nothing more, since Curio takes the next window from the contract once
   # scheduling runs again. Its causes that can lose more mostly page on their
-  # own: a stuck head as "chain head is stale", a rejection as "proving is
-  # failing". The exception is a cause that also makes AddRoots fail with the
-  # head still moving, such as an empty wallet: AddRoots strands its batches
-  # after about 3.5 hours (FIL-1508), and nothing here pages for that.
+  # own: a stuck head as "chain head is stale", proofs that stop landing as
+  # "proving is failing". The exception is a cause that also makes AddRoots
+  # fail with the head still moving, such as an empty wallet: AddRoots strands
+  # its batches after about 3.5 hours (FIL-1508), and nothing here pages for
+  # that.
   #
   # A healthy proof set is past its window for a minute or two each period,
   # until the scheduling task runs and Piri's next push reports it. `for` is 5m,
@@ -1954,7 +2080,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
-      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, and it is not waiting out a failure backoff, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
+      description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
 
@@ -1995,17 +2121,6 @@ resource "grafana_rule_group" "appliance" {
               + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
             )
           )
-          unless on (appliance, region, node, proof_set)
-          (
-            max by (appliance, region, node, proof_set) (
-              piri_pdp_proofset_next_prove_attempt_epoch{${local.piri_metric_matcher}}
-            )
-            > on (appliance, region, node) group_left()
-            (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
-            )
-          )
         PROMQL
       }))
     }
@@ -2038,42 +2153,39 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # Curio has had a proving transaction for a proof set rejected within the
-  # last hour. A rejected prove is not retried within its period, so that
-  # period's proof was missed; a rejected scheduling transaction is retried
-  # after a backoff, and Curio gives up on the set after repeated failures (the
-  # next rule).
+  # A proof set with a scheduled challenge has not had a proof accepted on
+  # chain for longer than its proving period plus its challenge window. The
+  # value is epochs past that. piri_pdp_proofset_last_proven_epoch is what
+  # Piri reads from PDPVerifier (getDataSetLastProvenEpoch), so it is the
+  # proof that landed, not the one Curio sent; the current epoch is the last
+  # head plus the wall-clock time since it, as in the rule above.
   #
-  # The gauge is the count of rejections since the set's last successful prove
-  # send, and the level is not a paging condition. Only a successful prove send
-  # resets it, so it stays above zero for up to a proving period after any
-  # rejection, even when the retry that follows succeeds, and indefinitely if
-  # proving is then disabled for the set. So the rule fires on a rise instead.
-  # `increase`, not `delta`, because the count behaves as a counter whose only
-  # drop is the reset to zero: a reset followed by a new failure within the
-  # hour is still counted as a rise, where `delta` would net it to zero.
+  # It watches the outcome, so it catches every reason proofs stop landing: a
+  # rejected proof, a proof Curio cannot build (FIL-1449's "no subpiece
+  # found"), a proof that failed on chain, a stopped task engine, a stuck
+  # deletion drain. It needs the schedule series, which Piri reports only while
+  # a challenge is scheduled, because before its first proof a set's last
+  # proven epoch is the epoch it was created.
   #
-  # It fires for about an hour per new failure, so during a long backoff it
-  # pages after each failure rather than throughout. `for` is 0m: the hour
-  # window is the debounce, and a single rejection is worth a page.
+  # Critical: every proving period that passes without a proof records a fault
+  # against the provider on chain, for data it holds. `for` is 5m; the proving
+  # period and its window are the grace.
   #
-  # Critical: Curio gives up on the set for good on its fifth rejection, and
-  # the backoffs between them (100, 200, 400 and 800 epochs) let that come 12.5
-  # hours after the first, within a night.
+  # A scheduled set with no last-proven series, because Piri could not read it
+  # from the chain, fires too (the `or` branch, valued 1), so a failing read
+  # cannot hide a stall. `for` covers a read that fails once and recovers.
   #
-  # no_data_state is OK: every proof set reports the count, zero included, so
-  # an empty result means no proof sets or a Piri older than the metric, and a
-  # healthy set evaluates to zero.
+  # no_data_state is OK: a node with no scheduled proof set has no series.
   rule {
     name           = "Piri proving is failing"
     condition      = "B"
-    for            = "0m"
+    for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) had a proving transaction rejected"
-      description = "Curio, inside Piri, has had a proving transaction for this proof set rejected by the contract in the last hour. A rejected prove means this proving period's proof was missed; a rejected scheduling transaction is retried after a backoff, and repeated failures make Curio give up on the proof set. Check the Piri container's logs for the PDPv0_Prove or PDPv0_ProvPeriod error, and check the proof set with `piri client pdp proofset state`; the revert reason says what the contract refused. Act now: Curio gives up on the proof set for good on its fifth rejection, which can come 12.5 hours after the first."
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
+      description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds; or Piri has been unable to read the proof set's last proven epoch from PDPVerifier, so the stall cannot be ruled out (the Piri logs say \"reading proof set's last proven epoch\"). Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
 
@@ -2093,7 +2205,7 @@ resource "grafana_rule_group" "appliance" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 3600
+        from = 600
         to   = 0
       }
 
@@ -2103,9 +2215,29 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node, proof_set) (
-            increase(piri_pdp_proofset_consecutive_prove_failures{${local.piri_metric_matcher}}[1h])
+          (
+            (
+                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node) group_right()
+            max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
+            )
           )
+          - on (appliance, region, node, proof_set)
+          max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
+            + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
+          )
+          or
+          (
+            0 * max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
+            )
+            unless on (appliance, region, node, proof_set)
+            piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
+          ) + 1
         PROMQL
       }))
     }
@@ -2140,13 +2272,13 @@ resource "grafana_rule_group" "appliance" {
 
   # Curio has given up proving a proof set after an unrecoverable failure.
   # Piri stops reporting that set's own series and counts it in
-  # piri_pdp_proofsets_unrecoverable instead, per node.
+  # piri_pdp_proofsets_unrecoverable instead, per Piri.
   #
   # The count does not go down on its own: Piri does not run Curio's data set
   # deletion, so the row stays until someone removes it by hand. A rule on the
   # level would fire forever after the first one, so this fires on a rise, for
-  # about an hour per newly unrecoverable set. `for` is 0m for the reason the
-  # rule above gives. Two things follow from reading a rise:
+  # about an hour per newly unrecoverable set. `for` is 0m: the hour window is
+  # the debounce. Two things follow from reading a rise:
   #
   #   - A set that was already unrecoverable when a Piri with this metric first
   #     reported is never alerted on; graph the gauge to see the current state.
@@ -2155,15 +2287,12 @@ resource "grafana_rule_group" "appliance" {
   #
   # no_data_state is OK: Piri reports the count, zero included, on every
   # collection, so an empty result is a Piri older than the metric, and a
-  # healthy node evaluates to zero.
+  # healthy Piri evaluates to zero.
   #
   # A warning, not critical: by the time it fires there is nothing urgent left
-  # to do. Curio gives up on a set in two ways (tasks/pdpv0/failure_handling.go).
-  # Either the set's payment has ended or been terminated, so there is no
-  # revenue left to lose, or its sends have been rejected five times in a row
-  # over at least half a day of backoff, and "Piri proving is failing" has
-  # paged for the rejections before the last. A cause that threatens the node's
-  # other sets shows up in their own rejections first. This departs from the
+  # to do. Curio gives up on a set only when FWSS reports its payment has ended
+  # or been terminated, or the set no longer exists on chain
+  # (tasks/pdpv0/failure_handling.go), so there is no revenue left to lose. This departs from the
   # Critical the piri docs' table recommends for this condition, for that
   # reason.
   rule {
@@ -2174,7 +2303,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has stopped proving a proof set after an unrecoverable failure"
+      summary     = "Piri {{ $labels.instance }} has stopped proving a proof set after an unrecoverable failure"
       description = "Curio, inside Piri, has marked a proof set unrecoverable in the last hour and will not prove it again, so its data is no longer being proved on chain. Check the Piri container's logs for why Curio gave up on it, and check each proof set with `piri client pdp proofset state`. Piri does not delete the proof set, so it stays counted until it is dealt with by hand. Act within a day: the loss has already happened."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proof-set-is-unrecoverable"
     }
@@ -2205,7 +2334,7 @@ resource "grafana_rule_group" "appliance" {
         range      = false
         intervalMs = 1000
         expr       = <<-PROMQL
-          max by (appliance, region, node) (
+          max by (appliance, region, node, instance) (
             increase(piri_pdp_proofsets_unrecoverable{${local.piri_metric_matcher}}[1h])
           )
         PROMQL
@@ -2240,20 +2369,20 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # The backstop: no PDPv0_Prove run has finished on the node in one and a half
+  # The backstop: no PDPv0_Prove run has finished on a Piri in one and a half
   # proving periods. The value is the time since the last one in proving
   # periods, so the threshold is 1.5.
   #
   # The gauge is the last run that finished without a retryable error, not the
   # last proof that landed. It includes runs that woke too late, found proving
   # disabled or had their proof rejected, so it says the task engine is running
-  # Prove, not that proofs are landing; the rules above cover rejections. What
+  # Prove, not that proofs are landing; "proving is failing" covers that. What
   # it adds is a Prove task that keeps failing with a retryable error, or never
   # runs, while scheduling carries on, which nothing else here sees.
   #
-  # Per node, not per proof set: with several proof sets, proving one keeps it
+  # Per Piri, not per proof set: with several proof sets, proving one keeps it
   # quiet. The period is the longest seen over a day, which bridges a missed
-  # collection. A node whose last proof set is disabled or unrecoverable loses
+  # collection. A Piri whose last proof set is disabled or unrecoverable loses
   # the period series within the day, which is before the threshold while 1.5
   # proving periods is longer than a day, as with mainnet's 2880 epochs; then
   # this lapses rather than repeat the unrecoverable alert.
@@ -2266,7 +2395,7 @@ resource "grafana_rule_group" "appliance" {
   # Critical the piri docs recommend, for that reason. `for` is 10m. The
   # threshold is the grace; this only confirms it.
   #
-  # no_data_state is OK: a node that has never finished a Prove run, or has had
+  # no_data_state is OK: a Piri that has never finished a Prove run, or has had
   # no scheduled proof set in a day, has no series.
   #
   # Paused until Piri's Curio dependency parses PiecesAddedV2 events
@@ -2283,8 +2412,8 @@ resource "grafana_rule_group" "appliance" {
     is_paused      = true
 
     annotations = {
-      summary     = "Piri on {{ $labels.node }} ({{ $labels.region }}) has not finished a Prove task run in 1.5 proving periods"
-      description = "No PDPv0_Prove task run has finished on this node for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment. If the wallet is empty, Piri's pending piece additions have probably stranded, about 3.5 hours after they began failing; the runbook says how to free them."
+      summary     = "Piri {{ $labels.instance }} has not finished a Prove task run in 1.5 proving periods"
+      description = "No PDPv0_Prove task run has finished on this Piri for more than one and a half proving periods, so Piri is not sending proofs and its proof sets are missing their proving periods. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and check each proof set with `piri client pdp proofset state` in the Piri container; the PDPv0_Prove task logs say why it is not finishing. Act within a day: each further day costs another period's payment. If the wallet is empty, Piri's pending piece additions have probably stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-prove-task-has-not-run-in-15-proving-periods"
     }
 
@@ -2572,7 +2701,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has blobs past the CommP delay that no CommP task has claimed for over 10 minutes"
+      summary          = "Piri {{ $labels.instance }} has blobs past the CommP delay that no CommP task has claimed for over 10 minutes"
       description      = "Accepted blobs are past pdp.aggregation.commp.delay and no PDPCommP task is picking them up, so they are not entering aggregation or being proven. The task engine claims due blobs on every poll, so check that Piri's harmonytask engine is running and not saturated: `piri status` in the Piri container, and the PDPCommP task's logs. Setting the delay to 0 does not help; the claims themselves have stopped."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=28"
       __dashboardUid__ = "forge-regions"
@@ -2666,7 +2795,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "Piri on {{ $labels.node }} ({{ $labels.region }}) has had a 15-minute rolling Postgres acquire wait share above 10% for 30 minutes"
+      summary          = "Piri {{ $labels.instance }} has had a 15-minute rolling Postgres acquire wait share above 10% for 30 minutes"
       description      = "blob/accept and the PDP tasks are queueing for connections from Piri's PDP Postgres pool, so each slows the other down and an accept can time out waiting. Raise pool_max_conns on the Piri's Postgres URL in infra-nodes, keeping the Piris' pools plus Ingot's within Postgres's max_connections, and re-run init so the new URL reaches the node. The mean wait panel beside this one says how long the queueing is costing."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=31"
       __dashboardUid__ = "forge-regions"
@@ -2733,6 +2862,117 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # Ingot drops revoked keys from its authorization caches by streaming Swarf's
+  # revocation firehose. Once connected, the Swarf client reconnects a dropped
+  # stream without reporting it, so a stalled feed leaves no error line, and a
+  # revoked key keeps working on the node until its cache entry expires
+  # (infra-nodes docs/observability.md, Ingot).
+  #
+  # The signal is Hilt publishing revocations while an Ingot processes none.
+  # Hilt logs "published revocation" for each one and Ingot logs "revocation:
+  # record processed" for each record it reads. The counts are not compared:
+  # the firehose is shared, so Ingot also reads records Hilt did not publish.
+  # The query returns, for each Ingot that processed nothing in the last 15
+  # minutes, its stage's Hilt count, and nothing when Hilt published none.
+  #
+  # Ingot is often silent for hours, so the set of nodes to judge comes from a
+  # day of its logs. An Ingot that logged nothing all day is out of sight here;
+  # "Appliance container is not running" covers one that has stopped. The stage
+  # is cut from the appliance label, <stage>-<region>, to join on Hilt's
+  # environment label.
+  #
+  # Both sides are counted by the time each line was written, not when it
+  # reached Loki, so Hilt's CloudWatch delay does not split one revocation
+  # across windows. `for` = 10m asks for two evaluations in a row.
+  #
+  # no_data_state is OK: an empty result is the healthy state. An instant
+  # query, so no reduce stage.
+  rule {
+    name           = "Ingot is not receiving revocations"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Ingot on {{ $labels.node }} ({{ $labels.region }}) processed no revocations while Hilt published {{ $values.A.Value }}"
+      description = "Hilt has published revocations in the last 15 minutes and this node's Ingot has processed none, so bucket policy changes and key deletions are not reaching its authorization caches and a revoked key keeps working until its cache entry expires. Check that Ingot's config has revocation_service_url and revocation_service_did set, that the node can reach its stage's Swarf (revoke.<stage>.fil-forge.com), and Ingot's log for \"revocation: stream error\". Restarting Ingot reconnects the stream and resumes it from its stored cursor."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/observability.md#ingot"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          label_replace(
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} [1d])
+            ) * 0
+              unless on (appliance, region, node)
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} |= "revocation: record processed" [15m])
+            ),
+            "environment", "$1", "appliance", "([^-]+)-.*"
+          )
+            + on (environment) group_left ()
+          sum by (environment) (
+            count_over_time({${local.hilt_log_matcher}} |= "published revocation" [15m])
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }
@@ -3061,20 +3301,18 @@ resource "grafana_rule_group" "appliance_containers" {
   # region is in the grouping because the dashboard link below reads
   # $labels.region, and an annotation can only read a label the query emits;
   # without it the link carried the literal <no value>. node is in it because
-  # the rule beside this one groups by it, and because the grouping starts
-  # separating boxes the day a node value is per-box, with no edit here.
-  # Neither splits a group, so neither changes when this fires.
+  # the rule beside this one groups by it, and because the grouping separates
+  # boxes as soon as any of the three carries a per-box value, with no edit
+  # here. Neither splits a group, so neither changes when this fires.
   #
-  # None of the three tells two boxes in one region apart today, and node is
-  # the label meant to: infra-nodes' design has node identify the box, and
-  # names it as what tells apart two nodes sharing a stage, a region and a
-  # service_name. Only its value falls short: it is the node's name, which
-  # distinguishes stages and regions, not boxes. A second box in a region
-  # needs a node value of its own, not a new label -- and until it has one,
-  # the `unless` in the second branch below would let a live sibling hold the
-  # 5m side populated and mask a dead cAdvisor. The first branch still catches
-  # a target that fails rather than vanishes: `up == bool 0` maxes to 1 across
-  # the pair.
+  # None of the three tells two boxes in one region apart today: none of
+  # their values names more than a stage and a region. Which label should
+  # name a box is still being settled, so this states the gap rather than
+  # anticipating the fix. Until one of them carries a per-box value, the
+  # `unless` in the second branch below would let a live sibling hold the
+  # 5m side populated and mask a dead cAdvisor. The first branch still
+  # catches a target that fails rather than vanishes: `up == bool 0` maxes
+  # to 1 across the pair.
   #
   # The gate stays joined on appliance. Moving it to node would mean `on
   # (node)` and `max by (node)` together, as the rule beside this one does;
