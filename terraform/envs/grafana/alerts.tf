@@ -2977,6 +2977,327 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # Ingot journals each commit's new catalog blocks in Postgres until the log
+  # segment holding them ships to Forge, so a copy of the database holds the
+  # catalog that exists nowhere but the host's disk (fil-forge/ingot's
+  # logstore/README.md). Segments seal within seconds and ship right after, so
+  # the oldest journaled block is normally seconds old. A ship that fails is
+  # retried, a few times at once and then by a sweep each minute until it
+  # lands, so half an hour means shipping is failing, not slow. Nothing is
+  # lost while a segment waits, since its blocks are on disk and in Postgres:
+  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # rides out a slow scrape.
+  #
+  # A restart is the wrong way to retry. Ingot signs a ship with authority it
+  # keeps in memory from the bucket's recent writes, and a restart clears it, so
+  # an idle bucket's segments then wait for its next write. After an outage
+  # longer than that authority's hour, every idle bucket with a backlog waits
+  # the same way, so the alert can outlast its cause by days with nothing to do.
+  # If that ever matters, the fix is in hilt, which holds the tenant's keys and
+  # could mint Ingot a narrow ship-only delegation when it has none; it has no
+  # endpoint for that yet. A restart is the remedy for two cases. One is a
+  # segment whose file is gone from disk: its blocks are safe in the journal,
+  # and at startup Ingot rebuilds the segment from them (FIL-1601) before it
+  # retires or deletes the lost row. The other is a ship that hangs (its HTTP
+  # clients set no timeout), which blocks the bucket's queue and sweep alike
+  # and logs nothing. Either way the bucket then waits for its next write, like
+  # any idle bucket after a restart, and a rebuilt segment keeps its blocks'
+  # journal age, so the alert stays until that write. One case needs Ingot's
+  # maintainers: a ship that fails on its own every time. An Ingot configured
+  # with catalog_plane.ship false never ships, so the rule never clears there;
+  # no deployed node sets it. A bucket whose DeleteBucket failed partway also
+  # stops shipping, until the client retries the delete or writes to it again,
+  # but the delete dropped its journal rows when it emptied the bucket's root,
+  # so it neither holds the gauge nor appears in the runbook's query.
+  #
+  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
+  # one pass while the queue waits, so a draining backlog and a hung ship both
+  # log nothing but 'flush queue full'. The runbook tells them apart by
+  # progress: whether the bucket's oldest seq moves on.
+  #
+  # The gauge is the oldest block across every bucket, and several buckets can
+  # be stuck at once for different reasons, so the runbook lists every bucket
+  # with unshipped segments from Postgres and works through each with that
+  # bucket's own log lines. The query reads only the journal, so it can't
+  # show a lost file, and an idle bucket's log shows only 'no ship
+  # authority', which the ship checks before it opens the file. So the
+  # runbook's first case looks for each unshipped segment's file on disk.
+  #
+  # no_data_state is OK, as for the multipart rule: an Ingot without the
+  # metric is the container rule's business.
+  rule {
+    name           = "Ingot catalog shipping has stalled"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'logstore: ship attempt failed' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "34"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_catalog_journal_oldest_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
+  #
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
+  #
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed: this rule names the cause, and the loss
+  # is a delay that stops once the drain is cleared.
+  #
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
+  rule {
+    name           = "Piri's deletion drain is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, proof_set)
+          (
+            30 * max by (appliance, region, node, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Curio, inside Piri, proves a sub-piece above 32 MiB padded only from a
+  # cached Merkle layer, one hash per 4 MiB, which its PDPv0_SaveCache task
+  # builds by reading the piece once after Piri parks it. Every Piri
+  # aggregate is at least 128 MiB, so a piece without its layer fails every
+  # proof once it is in a proof set and challenged. The value is how long the
+  # oldest parked piece above 32 MiB has waited for its layer, including a
+  # piece a SaveCache task has claimed: a task that hangs or keeps failing
+  # holds its claim, and the piece still cannot be proven. Piri returns a
+  # piece to the queue if its task is dropped.
+  #
+  # A layer is normally built within minutes of parking, and a piece is
+  # parked well before it is added to a proof set, so thirty minutes is a
+  # stalled task: the task engine down, or the blobstore reads failing. A
+  # warning: nothing is lost until the piece is challenged, and "Piri proving
+  # is failing" pages once proofs fail. Expect it after the Piri release that
+  # adds the cache, until every piece parked before it has its layer.
+  #
+  # Grouped by instance as well as node, like the other Piri-wide rules: each
+  # Piri has its own task engine. `for` is 10m on top of the threshold.
+  #
+  # no_data_state is OK: a Piri older than the release that adds the cache
+  # reports no series, and "Appliance has stopped reporting" covers a silent
+  # node.
+  rule {
+    name           = "Piri proof cache builds have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} has a piece that has waited over 30 minutes for its proof cache layer"
+      description = "A piece above 32 MiB padded has no proof cache layer, and Curio, inside Piri, proves such a piece only from its layer, so its proofs will fail once it is challenged. Check the Piri container's logs for the PDPv0_SaveCache task and its blobstore reads, and that Piri's harmonytask engine is running: `piri status` in the Piri container. After the Piri release that adds the cache, this fires until pieces parked before it all have their layers."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
