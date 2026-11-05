@@ -218,10 +218,14 @@ When the derived Ingot DID changes, retire the region's old identity before re-o
 make retire-region STAGE=dev REGION=us-east-9
 ```
 
-It deletes hilt's provider row for the region, every tenant, bucket, access key and delegation under
-it, and the delegation central stored for the old audience. It reads and prints all of that first,
-and asks before deleting anything. It leaves sprue, the delegator and the node's unseal credential
-alone, so Piri's identity and the node's ability to unseal are unaffected.
+It deletes hilt's provider row for the region, the buckets that region served, the delegations
+naming any of them, and the delegation central stored for the old audience. It reads and prints all
+of that first, and asks before deleting anything. It leaves sprue, the delegator and the node's
+unseal credential alone, so Piri's identity and the node's ability to unseal are unaffected.
+
+Organisations survive a retirement. A tenant is not tied to a region, so it keeps its buckets
+elsewhere along with its members and access keys. What it loses is the buckets the retired region
+held, and the data in them, which went with the appliance.
 
 Without it a re-onboard reports success and changes nothing. The stored delegation is keyed by the
 appliance's prefix and the proof's name, neither of which mentions the audience, so onboarding finds
