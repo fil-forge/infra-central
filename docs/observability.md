@@ -132,6 +132,7 @@ appliance label.
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
+| Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
