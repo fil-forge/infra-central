@@ -287,6 +287,16 @@ func regionDeletes(dids *regionDIDs) []regionDelete {
 // key scoped to a deleted bucket keeps that DID in its bucket list, which denies
 // rather than grants: the array carries no foreign key, and a bucket DID is
 // minted fresh and never reused.
+//
+// This takes none of the per-audience advisory locks hilt's delegation store
+// writes under, so a grant written for a retired bucket while the retirement
+// runs, or just after it commits, survives it. That is tolerated rather than
+// solved. The lock is keyed by audience, and the audiences here are access keys
+// belonging to organisations that span regions, so taking them would mean
+// locking whole organisations that have nothing to do with the region. The row
+// it leaves is inert: the bucket and the provider are both gone, so nothing
+// authorizes against it. Retirement is also the last step, run once the region
+// has been deregistered from sprue and the delegator by hand.
 func deleteRegionRows(ctx context.Context, dsn, region string) (map[string]int, error) {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
