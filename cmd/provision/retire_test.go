@@ -59,3 +59,31 @@ func TestRegionDIDsCoverProviderAndBuckets(t *testing.T) {
 		}
 	}
 }
+
+// A key's grant over a bucket has the bucket as its subject, and a tenant and
+// an access key at its ends. Both of those survive a retirement, so matching
+// only the ends would leave the grant behind pointing at a bucket that has gone.
+func TestDelegationPredicateMatchesTheSubject(t *testing.T) {
+	for _, column := range []string{"issuer", "audience", "subject"} {
+		if !strings.Contains(delegationPredicate, column+" = ANY($1)") {
+			t.Errorf("the delegation predicate does not match on %s: %q", column, delegationPredicate)
+		}
+	}
+}
+
+// The plan is what an operator confirms, so the count has to describe the rows
+// the delete will take. Sharing one predicate is what keeps them from drifting.
+func TestDelegationCountAndDeleteAgree(t *testing.T) {
+	var sql string
+	for _, s := range regionDeletes(&regionDIDs{provider: "did:web:ingot"}) {
+		if s.table == "delegation" {
+			sql = s.sql
+		}
+	}
+	if sql == "" {
+		t.Fatal("regionDeletes() has no delegation statement")
+	}
+	if !strings.HasSuffix(sql, delegationPredicate) {
+		t.Errorf("the delegation delete does not end in the shared predicate: %q", sql)
+	}
+}

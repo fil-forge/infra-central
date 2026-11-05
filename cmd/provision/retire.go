@@ -185,9 +185,8 @@ type regionDIDs struct {
 	buckets  []string
 }
 
-// all returns every DID, which is what a delegation's issuer or audience is
-// matched against. hilt's delegation to the Ingot names the provider, while a
-// bucket's names the bucket.
+// all returns every DID a delegation of this region's can name, in any of the
+// three columns [delegationPredicate] matches.
 func (r *regionDIDs) all() []string {
 	return append([]string{r.provider}, r.buckets...)
 }
@@ -234,11 +233,20 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// delegationPredicate matches every delegation a region's DIDs appear in.
+//
+// All three columns are needed. hilt's delegation to the Ingot has the provider
+// as its audience, while a key's grant over a bucket has the bucket as its
+// subject and a tenant and an access key at its ends, both of which survive the
+// retirement. A powerline grant carries no subject and so never matches, which
+// is right: it is the organisation's and is not confined to a region.
+const delegationPredicate = "issuer = ANY($1) OR audience = ANY($1) OR subject = ANY($1)"
+
 // countDelegations reports how many delegation rows name any of these DIDs.
 func countDelegations(ctx context.Context, conn querier, dids []string) (int, error) {
 	var count int
 	err := conn.QueryRow(ctx,
-		"SELECT count(*) FROM delegation WHERE issuer = ANY($1) OR audience = ANY($1)",
+		"SELECT count(*) FROM delegation WHERE "+delegationPredicate,
 		dids).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count hilt's delegations for the region: %w", err)
@@ -259,7 +267,7 @@ type regionDelete struct {
 // touches can be read without a database in front of it.
 func regionDeletes(dids *regionDIDs) []regionDelete {
 	return []regionDelete{
-		{"delegation", "DELETE FROM delegation WHERE issuer = ANY($1) OR audience = ANY($1)", []any{dids.all()}},
+		{"delegation", "DELETE FROM delegation WHERE " + delegationPredicate, []any{dids.all()}},
 		{"bucket", "DELETE FROM bucket WHERE provider_id = $1", []any{dids.provider}},
 		{"provider", "DELETE FROM provider WHERE id = $1", []any{dids.provider}},
 	}
