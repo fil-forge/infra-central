@@ -138,6 +138,13 @@ type Response struct {
 	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
+	// BackupReplicaRegion is the region the seed phase replicated the keys to.
+	// Terraform checks it against the region it configured, so an image that
+	// predates replication fails the apply rather than skipping it.
+	BackupReplicaRegion string `json:"backup_replica_region,omitempty"`
+	// Replicated lists the secrets this invocation added a DR replica to. Like
+	// Created, it is empty on a steady-state apply.
+	Replicated []string `json:"replicated,omitempty"`
 	// Created lists parameters and secrets this invocation minted. On a steady-state apply
 	// it is empty, which is the signal that nothing was regenerated.
 	Created []string `json:"created"`

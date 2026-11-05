@@ -51,9 +51,9 @@ resource "aws_lambda_function" "this" {
   }
 
   environment {
-    # Lambda rejects a null value, so the pandora variables are merged in only
-    # when the stage has that cluster. The function treats their absence as
-    # nothing to do.
+    # Lambda rejects a null value, so the replica region and the pandora
+    # variables are merged in only when the stage has them. The function treats
+    # their absence as nothing to do.
     variables = merge({
       FORGE_STAGE                 = var.stage
       FORGE_HOSTNAME_SUFFIX       = var.hostname_suffix
@@ -76,6 +76,8 @@ resource "aws_lambda_function" "this" {
       FORGE_USDFC_ADDRESS        = var.chain.contracts.usdfc_token
       FORGE_FILECOIN_PAY_ADDRESS = var.chain.contracts.filecoin_pay
       FORGE_FWSS_ADDRESS         = var.chain.contracts.fwss
+      }, var.backup_replica_region == null ? {} : {
+      FORGE_BACKUP_REPLICA_REGION = var.backup_replica_region
       }, var.pandora_db_connection == null ? {} : {
       FORGE_PANDORA_DB_HOST              = var.pandora_db_connection.host
       FORGE_PANDORA_DB_PORT              = tostring(var.pandora_db_connection.port)

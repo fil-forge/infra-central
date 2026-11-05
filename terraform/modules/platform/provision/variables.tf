@@ -119,6 +119,17 @@ variable "allow_list_table_arn" {
   type        = string
 }
 
+variable "backup_replica_region" {
+  description = "Region the seed phase replicates the key secrets to. Null keeps no replicas, and the role gets no grant in any other region."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.backup_replica_region != var.region
+    error_message = "backup_replica_region must differ from region: a replica in the stage's own region does not survive losing it."
+  }
+}
+
 variable "log_forwarding" {
   description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, from the log-forwarding module. Null leaves the function's log group in CloudWatch only."
   type = object({
