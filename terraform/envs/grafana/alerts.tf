@@ -3268,7 +3268,7 @@ resource "grafana_rule_group" "appliance" {
             )
             - on (appliance, region, node, instance) group_right()
             max by (appliance, region, node, instance, proof_set) (
-              piri_pdp_proofset_unrecorded_add_confirmed_epoch{${local.piri_metric_matcher}}
+              piri_pdp_proofset_untracked_add_pieces_confirmed_epoch{${local.piri_metric_matcher}}
             )
           )
           - 20
