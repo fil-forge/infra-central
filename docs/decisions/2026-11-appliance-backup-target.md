@@ -70,9 +70,12 @@ next unseal. Retiring a region removes its label from `appliance_regions`, and t
 deletes the user, its policy and its key.
 
 The key carries no `aws:SourceIp` condition, so a leaked key can write under its region's prefix
-from anywhere until it is deleted. It still cannot read or delete a backup, though it can put a
-newer version in front of one, as [Locked for 35 days, then expired](#locked-for-35-days-then-expired)
-describes. Binding it to the node's egress CIDR, as the unseal token is bound, is a follow-up.
+from anywhere until it is deleted. It still cannot read or delete a backup. Binding it to the
+node's egress CIDR, as the unseal token is bound, is a follow-up.
+
+A leaked key can put a newer version in front of a backup.
+[Locked for 35 days, then expired](#locked-for-35-days-then-expired) says what that means for a
+restore.
 
 ## One mint for both credentials
 
