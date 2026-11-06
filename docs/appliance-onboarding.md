@@ -74,7 +74,7 @@ The unseal token is bound to the node's egress address, so this waits until the 
 has allocated its Elastic IP.
 
 ```bash
-make mint-appliance-token STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7
+make mint-appliance-credentials STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7
 ```
 
 The script mints two credentials: the unseal token, and in staging and prod the access key the node
@@ -117,9 +117,10 @@ same for the backup key and stores it in the node's own OpenBao. The node has no
 own, so every OpenBao command there runs inside the container.
 
 **If the node cannot exchange a token, somebody else spent it.** Treat it as a compromise rather
-than a retry. For the unseal token, re-run the mint with `TOKEN_ARGS=--reissue`, which revokes the
-token that was taken. For the backup key, re-run it with `TOKEN_ARGS=--reissue-backup-key`, which
-deletes the key in IAM before minting another. Then find out who could read the channel.
+than a retry. For the unseal token, re-run the mint with `MINT_ARGS=--reissue-unseal-token`,
+which revokes the token that was taken. For the backup key, re-run it with
+`MINT_ARGS=--reissue-backup-key`, which deletes the key in IAM before minting another. Then find out
+who could read the channel.
 
 ### Minting again
 
@@ -127,7 +128,7 @@ A region that already holds a credential is skipped, because two standing creden
 is a state nothing can reason about. If the unseal token was never delivered, or leaked:
 
 ```bash
-make mint-appliance-token STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7 TOKEN_ARGS=--reissue
+make mint-appliance-credentials STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-unseal-token
 ```
 
 That mints a replacement and then revokes the old token. A node still using it stops being able to
@@ -136,7 +137,7 @@ unseal at its next restart.
 If the backup key was never delivered, or leaked:
 
 ```bash
-make mint-appliance-token STAGE=staging REGION=eu-central-3 NODE_IP=203.0.113.7 TOKEN_ARGS=--reissue-backup-key
+make mint-appliance-credentials STAGE=staging REGION=eu-central-3 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-backup-key
 ```
 
 That deletes the old key first, so the node's uploads fail until it stores the new one with
@@ -174,7 +175,7 @@ following:
   re-archives a WAL segment when a retried upload already reached S3, so expect some keys to carry
   more than one version.
 - A failed unwrap of the backup key is a compromise, as for the unseal token: delete the key in IAM
-  and run the mint with `TOKEN_ARGS=--reissue-backup-key`.
+  and run the mint with `MINT_ARGS=--reissue-backup-key`.
 
 To check what a writer can and cannot do, run this with administrator credentials:
 

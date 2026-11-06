@@ -171,8 +171,8 @@ plain String. An accessor cannot authenticate: it can look a token up and revoke
 exactly what retirement and reissue need. The token itself is stored nowhere in AWS.
 
 A second mint would leave two standing credentials for one node, so a region whose accessor is
-recorded and whose token still lives is skipped unless the operator passes `--reissue`, which
-mints a replacement and revokes the old token. Skipping keeps the mint script safe to re-run for
+recorded and whose token still lives is skipped unless the operator passes
+`--reissue-unseal-token`, which mints a replacement and revokes the old token. Skipping keeps the mint script safe to re-run for
 an appliance that is already set up, which is how it hands over a backup key the region lacks
 ([2026-11-appliance-backup-target.md](2026-11-appliance-backup-target.md#one-mint-for-both-credentials)).
 A lookup that cannot answer at all stops the phase, because minting on an unanswered question is
@@ -225,7 +225,7 @@ loader.
 
 ## Operator scripts live here; the node's caller lives in infra-nodes
 
-`scripts/mint-appliance-token.sh` and `scripts/onboard-appliance.sh` both ship here, in
+`scripts/mint-appliance-credentials.sh` and `scripts/onboard-appliance.sh` both ship here, in
 `fund-payer.sh`'s shape: dry run, printed plan, typed confirmation, then the run that changes
 something. The steps an operator follows, and the delivery and compromise-handling rules around
 them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,

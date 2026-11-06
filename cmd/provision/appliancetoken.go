@@ -33,7 +33,7 @@ const (
 // Every other response here is public by construction, documented as safe for
 // anyone with state access; this one carries a wrapping token that exchanges for
 // a live credential, and an aws_lambda_invocation would write it into Terraform
-// state. The caller is an operator running scripts/mint-appliance-token.sh.
+// state. The caller is an operator running scripts/mint-appliance-credentials.sh.
 //
 // What is returned is wrapped rather than the token itself, so the credential
 // never transits the channel that carries it to a node operator. See

@@ -141,7 +141,7 @@ internal/fund/                the three FilecoinPay transactions
 internal/onboard/             the appliance registration writes and their verification
 build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
-scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
+scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and backup key, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
@@ -770,7 +770,7 @@ anything anyone depends on.
 ### Onboarding a regional appliance
 
 A stage seals the appliances named in its `appliance_regions`, and
-`make mint-appliance-token` issues a node's unseal credential and, in staging and
+`make mint-appliance-credentials` issues a node's unseal credential and, in staging and
 prod, the access key it writes its backups with. The ordering across
 both repositories, how the credential is delivered to a node operator, and what
 retiring a region destroys are in
