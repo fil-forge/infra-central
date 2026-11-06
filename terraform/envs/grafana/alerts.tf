@@ -102,6 +102,11 @@ locals {
   # reused: its service_name is the host exporter's.
   piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
 
+  # Piri's container log stream, same scheme as Postgres's below. Each Piri on
+  # a node has its own stream, and its instance label, <node>/piri-<n>, is the
+  # one Piri's metrics carry.
+  piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
+
   # Postgres's container log stream. Alloy names each container's stream
   # appliance-<stage>-<region>-<service> from the Compose service and stamps
   # appliance, region and node on it (infra-nodes
@@ -2038,6 +2043,377 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The rules below read Piri's own log for its chain RPC endpoint (FIL-1553).
+  # Piri exports no metric for its RPC calls, so the log is the only signal;
+  # a metric would serve better and could feed an SLO, which Loki cannot.
+  #
+  # Piri holds two connections to the endpoint: go-jsonrpc for the Lotus API
+  # (ChainNotify and the rest) and go-ethereum for the eth API. go-ethereum
+  # reports a refused handshake as "bad handshake (HTTP status 401
+  # Unauthorized)". go-jsonrpc did not say the status until fil-forge/piri#221,
+  # and logs a refused reconnect only at debug. So a key that stops working
+  # mid-run shows here only once a caller of the eth API logs its error, which
+  # needs a proof set or a pending transaction; on an idle Piri the backstop is
+  # "Piri's chain head is stale" above.
+  #
+  # Each query drops fx/echo, Piri's HTTP access log: its lines quote request
+  # paths anyone on the internet chooses, including scanners that are answered
+  # 401, and must not be able to raise these rules.
+  #
+  # Grouped by instance, as the metric rules above are, so the alert names the
+  # Piri. No annotation quotes a log line: Piri versions before
+  # fil-forge/piri#221 print the endpoint, key included, when a dial fails.
+  # no_data_state is OK because count_over_time returns a series only for a
+  # Piri that logged the line, so an empty result is the healthy state.
+
+  # The endpoint answered 401: the key is wrong, revoked or expired. It stays
+  # that way until somebody changes it, so one line is enough. The ten-minute
+  # window is deliberately twice the evaluation interval, so a single line
+  # holds the rule across the two evaluations `for` needs. Critical: Piri
+  # cannot reach the chain, so it cannot prove.
+  rule {
+    name           = "Piri's chain RPC is rejecting its credentials"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being refused by its chain RPC endpoint (401)"
+      description = "Piri's chain RPC endpoint (Chain.Love) answered 401 Unauthorized, so its API key is wrong, revoked or expired, and Piri cannot read the chain or submit proofs. Check the key in Chain.Love's dashboard and the LOTUS_RPC_URL Piri is given, then restart Piri. Read the Piri container log for the full error. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |= "HTTP status 401"
+              [10m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Piri could not open either connection at start-up, so it exits and the
+  # container restarts it. The lines start "providing lotus client" or
+  # "providing eth client". A 401 is left to the rule above. Before
+  # fil-forge/piri#221 go-jsonrpc's line has no status, so a 401, a 429 and an
+  # outage all look the same here. Critical, for the reason the rule above
+  # gives.
+  rule {
+    name           = "Piri cannot connect to its chain RPC"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} cannot connect to its chain RPC endpoint"
+      description = "Piri failed to open its connection to the chain RPC endpoint (Chain.Love) at start-up, so it exits and restarts without reading the chain or submitting proofs. The Piri container log says why: an HTTP status (401 is a bad key, 429 a rate limit), a DNS or TLS error, or a timeout. Check Chain.Love's status page and the LOTUS_RPC_URL Piri is given. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |~ "providing (lotus|eth) client"
+                != "HTTP status 401"
+              [10m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The endpoint answered 429, or said so inside an open socket. Chain.Love
+  # documents 429 for a key over its own limit or the account over its plan's,
+  # but not what it sends inside a WebSocket, so the filter also takes any
+  # "rate limit" or "too many requests" text. Piri's own code logs neither.
+  # Calls fail while it lasts and are retried, so this is a warning: it is a
+  # delay, and a limit that blocks Piri for long shows as a stale chain head.
+  # `for` is 10m, so a brief burst does not fire.
+  rule {
+    name           = "Piri's chain RPC is rate limiting it"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being rate limited by its chain RPC endpoint"
+      description = "Piri's chain RPC endpoint (Chain.Love) has been refusing its calls as over a rate limit for at least ten minutes. Calls are retried, so Piri falls behind rather than failing, but proofs and piece additions are delayed. Check the key's request limit and the account's credits in Chain.Love's dashboard, and whether something else shares the key."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |~ "(?i)HTTP status 429|rate.?limit|too many requests"
+              [15m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The Lotus API WebSocket closed under Piri's chain scheduler, which logs
+  # "chain notification channel closed" once per drop and then resubscribes.
+  # Drops happen on Chain.Love's side, to every Piri at once, about ten times
+  # a week each, and recover within seconds; the busiest hour in a week of
+  # staging and dev logs had three. More than five in an hour is a connection
+  # that keeps failing. The scheduler's ChainNotify errors are not counted:
+  # it retries every ten seconds while the socket is down, so one long outage
+  # would count as many drops. A drop that does not recover is "Piri's chain
+  # head is stale". A warning: Piri recovers from each drop.
+  rule {
+    name           = "Piri's chain RPC WebSocket keeps dropping"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }}'s chain RPC WebSocket keeps dropping"
+      description = "Piri's WebSocket to its chain RPC endpoint (Chain.Love) has dropped more than five times in the last hour. Piri reconnects each time, but chain notifications are missed while it does. Check Chain.Love's status page and whether every Piri is affected (an endpoint problem) or only this one (its host or network)."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |= "chain notification channel closed"
+              [1h]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [5] }
         }]
       })
     }
