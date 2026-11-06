@@ -147,6 +147,7 @@ scripts/promote.sh            opens or refreshes the pull request promoting into
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
+scripts/restore-appliance-backups.sh  copies a region's backups as of a time before a key leak
 scripts/set-pin.sh            pins one service of one stage at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
@@ -156,6 +157,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
+docs/restore-appliance-backups.md  the runbook for restoring a region's backups after its key leaks
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration

@@ -21,6 +21,7 @@ label:
 | --- | --- | --- |
 | `<region>/postgres/` | WAL-G, with `WALG_S3_PREFIX=s3://<bucket>/<region>/postgres` | FIL-1599 |
 | `<region>/openbao/` | the raft snapshot upload | FIL-1745 |
+| `restores/<region>/<cutoff>/` | an administrator, restoring after a key leak | |
 
 A bucket per region would separate the appliances by resource instead of by policy, which is easier
 to audit. It fails at retirement. S3 refuses to delete a bucket that holds a locked object, and
@@ -138,8 +139,11 @@ That meets RFC 37's overwrite requirement only in part. A leaked key cannot dest
 it can put a forged object at a backup's key. The forged version becomes current, and a plain
 `GetObject`, which is how WAL-G restores, reads it while the genuine version stays locked behind it.
 A restore after a leak therefore reads, for each key, the latest version written before the leak,
-by version ID, rather than the current one. Writing that procedure down is a follow-up, together
-with the restore role in [Who can read the backups](#who-can-read-the-backups).
+by version ID, rather than the current one. S3 sets a version's `LastModified` itself, so a forger
+cannot make a version look older than it is.
+[restore-appliance-backups.md](../restore-appliance-backups.md) is the procedure: it copies those
+versions to `restores/<region>/<cutoff>/`, a prefix no writer can reach, and the restore reads the
+copy.
 
 Every request without TLS is denied by the bucket policy, and public access is blocked.
 
