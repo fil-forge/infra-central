@@ -58,9 +58,10 @@ one writer per region justifies today.
 So each entry in `appliance_regions` gets an IAM user, `forge-nodes-backup-<stage>-<region>`,
 created by Terraform. Terraform does not create its access key, because the secret would land in
 state. The provision Lambda's `appliance-backup-key` phase mints the key and wraps it through
-central OpenBao's `sys/wrapping/wrap` with a 24-hour TTL. The operator delivers the wrapping token
-the way they deliver the unseal token's, and the node exchanges it once. A failed exchange is a
-compromise, for the same reason [the unseal token's is](2026-08-region-onboarding.md#the-unseal-token-is-delivered-wrapped).
+central OpenBao's `sys/wrapping/wrap` with a 24-hour TTL. The operator delivers this wrapping token
+the same way as the one for the unseal token, and the node exchanges it once. A failed exchange is
+a compromise, for the same reason as
+[a failed exchange of the unseal token](2026-08-region-onboarding.md#the-unseal-token-is-delivered-wrapped).
 
 The node stores the key in its local OpenBao, so a disk taken from the appliance holds it only
 under the region's transit seal. Revocation is immediate. Deleting the key in IAM stops the node's
@@ -69,8 +70,9 @@ next unseal. Retiring a region removes its label from `appliance_regions`, and t
 deletes the user, its policy and its key.
 
 The key carries no `aws:SourceIp` condition, so a leaked key can write under its region's prefix
-from anywhere until it is deleted. It still cannot read, delete or overwrite a backup. Binding it to
-the node's egress CIDR, as the unseal token is bound, is a follow-up.
+from anywhere until it is deleted. It still cannot read or delete a backup, though it can put a
+newer version in front of one, as [Locked for 35 days, then expired](#locked-for-35-days-then-expired)
+describes. Binding it to the node's egress CIDR, as the unseal token is bound, is a follow-up.
 
 ## One mint for both credentials
 
@@ -127,10 +129,18 @@ bucket has four lifecycle rules:
   `days`.
 - Incomplete multipart uploads are aborted after seven days.
 
-The bucket does not enforce `If-None-Match` on puts, because WAL-G never sends the header. A put to
-an existing key adds a version. The earlier version stays locked until its own retention ends, 35
-days after it was written, and is deleted after that like any other backup. WAL-G re-archives a WAL
-segment when an upload is retried, so some keys collect several versions.
+The bucket does not enforce `If-None-Match` on puts. WAL-G never sends the header, and it
+re-archives a WAL segment when an upload is retried, so a refused retry would stop WAL archiving. A
+put to an existing key therefore adds a version, and some keys collect several. The earlier version
+stays locked until its own retention ends, 35 days after it was written, and is deleted after that
+like any other backup.
+
+That meets RFC 37's overwrite requirement only in part. A leaked key cannot destroy a backup, but
+it can put a forged object at a backup's key. The forged version becomes current, and a plain
+`GetObject`, which is how WAL-G restores, reads it while the genuine version stays locked behind it.
+A restore after a leak therefore reads, for each key, the latest version written before the leak,
+by version ID, rather than the current one. Writing that procedure down is a follow-up, together
+with the restore role in [Who can read the backups](#who-can-read-the-backups).
 
 Every request without TLS is denied by the bucket policy, and public access is blocked.
 
@@ -155,7 +165,7 @@ outside the state bucket.
 
 ## The node's half
 
-Central wraps five fields: `access_key_id`, `secret_access_key`, `bucket`, `prefix` and
+Central wraps five fields: `access_key_id`, `secret_access_key`, `bucket`, `key_prefix` and
 `aws_region`. The node stores all five in its local OpenBao at `filone/backup-target`, and its
 `node.env` says only whether it takes backups, as `FILONE_TAKES_BACKUPS`. A copy of the target in
 `node.env` could be left out, which made a staging or prod node silently take no backups, or edited
