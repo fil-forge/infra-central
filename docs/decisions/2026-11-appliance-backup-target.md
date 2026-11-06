@@ -74,15 +74,16 @@ the node's egress CIDR, as the unseal token is bound, is a follow-up.
 
 ## One mint for both credentials
 
-`scripts/mint-appliance-token.sh` runs both the `appliance-token` and the `appliance-backup-key`
-phases. It mints whichever of the two credentials the region lacks, skips the ones it holds, and
-prints a wrapping token for each one it minted. A second run mints nothing. The `appliance-token`
-phase skips a region whose unseal token is live, so a node still never holds two live unseal
-tokens, and mints again for a region whose token has lapsed.
+`scripts/mint-appliance-credentials.sh`, run as `make mint-appliance-credentials`, mints every
+credential central issues an appliance: the unseal token through the `appliance-token` phase and the
+backup key through the `appliance-backup-key` phase. It mints whichever of them the region lacks,
+skips the ones it holds, and prints a wrapping token for each one it minted. A second run mints
+nothing. The `appliance-token` phase skips a region whose unseal token is live, so a node still
+never holds two live unseal tokens, and mints again for a region whose token has lapsed. A
+credential added later gets its own phase in the same script.
 
-`--reissue` still replaces the unseal token, and a new `--reissue-backup-key` deletes the region's
-backup key and mints another. The two flags are independent, so a leaked backup key never forces an
-unseal-token rotation.
+Each credential has its own reissue flag, `--reissue-unseal-token` and `--reissue-backup-key`, so a
+leaked backup key never forces an unseal-token rotation.
 
 Reissuing the unseal token on every run was considered, so that one run always hands over both
 credentials. Every such run would revoke the token the node is renewing, and the node's
