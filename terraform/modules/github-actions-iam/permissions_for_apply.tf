@@ -139,7 +139,9 @@ data "aws_iam_policy_document" "apply" {
   # Destroying a bucket with force_destroy set first empties it: the provider
   # lists every object version (ListBucketVersions, above) and deletes them in
   # bulk. Without these two actions a stage that is allowed to be destroyed
-  # fails on its first non-empty bucket. Nothing here reads or writes an object.
+  # fails on its first non-empty bucket. Listing versions returns keys and
+  # version IDs, and deleting needs no read, so the role can remove an object
+  # but never read or overwrite its contents.
   dynamic "statement" {
     for_each = var.allow_emptying_stage_buckets ? [1] : []
 
