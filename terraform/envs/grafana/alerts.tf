@@ -3221,18 +3221,18 @@ resource "grafana_rule_group" "appliance" {
   # needs a Piri release.
   #
   # `for` is 5m. no_data_state is OK: Piri reports the series only while an
-  # add is unrecorded.
+  # add is untracked.
   rule {
-    name           = "Piri has piece additions it has not recorded"
+    name           = "Piri has untracked add pieces"
     condition      = "B"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has a piece addition that succeeded on chain over 10 minutes ago and is still unrecorded"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has a piece addition that succeeded on chain over 10 minutes ago and is still untracked"
       description = "An addPieces transaction for this proof set succeeded on chain, but Curio, inside Piri, has not recorded its pieces from the receipt, and retries on every chain head without reporting a failure. A new proof set is not scheduled for proving until its first addition is recorded, and the added pieces are not proven. Check the Piri container's logs for \"failed to extract pieces from receipt\". The usual cause is a PDPVerifier upgrade that emits an event Piri's Curio cannot parse, which needs a Piri release. Act within a day."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-has-piece-additions-it-has-not-recorded"
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-has-untracked-add-pieces"
     }
 
     labels = {
