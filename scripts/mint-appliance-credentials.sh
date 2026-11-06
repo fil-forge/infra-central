@@ -28,18 +28,18 @@
 # being created on the spot.
 #
 # Usage:
-#   scripts/mint-appliance-token.sh --region us-east-9 --node-ip 203.0.113.7
+#   scripts/mint-appliance-credentials.sh --region us-east-9 --node-ip 203.0.113.7
 #
 # Options:
-#   --region              appliance region label                  (required)
-#   --node-ip             the node's Elastic IP, bound as a /32   (required)
-#   --node-cidr           bind to this CIDR instead of --node-ip
-#   --stage               stage holding the transit key            (default: dev)
-#   --period              renewal tolerance                        (default: 72h)
-#   --wrap-ttl            how long the hand-off may sit unclaimed  (default: 24h)
-#   --reissue             replace the region's live unseal token
-#   --reissue-backup-key  delete the region's backup key and mint another
-#   --yes                 skip the interactive prompt
+#   --region                appliance region label                  (required)
+#   --node-ip               the node's Elastic IP, bound as a /32   (required)
+#   --node-cidr             bind to this CIDR instead of --node-ip
+#   --stage                 stage holding the transit key            (default: dev)
+#   --period                renewal tolerance                        (default: 72h)
+#   --wrap-ttl              how long the hand-off may sit unclaimed  (default: 24h)
+#   --reissue-unseal-token  replace the region's live unseal token
+#   --reissue-backup-key    delete the region's backup key and mint another
+#   --yes                   skip the interactive prompt
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
@@ -52,21 +52,27 @@ NODE_IP=""
 NODE_CIDR=""
 PERIOD=""
 WRAP_TTL=""
-REISSUE=false
+REISSUE_UNSEAL_TOKEN=false
 REISSUE_BACKUP_KEY=false
 ASSUME_YES=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --region)             REGION="$2"; shift 2 ;;
-    --node-ip)            NODE_IP="$2"; shift 2 ;;
-    --node-cidr)          NODE_CIDR="$2"; shift 2 ;;
-    --stage)              STAGE="$2"; shift 2 ;;
-    --period)             PERIOD="$2"; shift 2 ;;
-    --wrap-ttl)           WRAP_TTL="$2"; shift 2 ;;
-    --reissue)            REISSUE=true; shift ;;
-    --reissue-backup-key) REISSUE_BACKUP_KEY=true; shift ;;
-    --yes|-y)             ASSUME_YES=true; shift ;;
+    --region)               REGION="$2"; shift 2 ;;
+    --node-ip)              NODE_IP="$2"; shift 2 ;;
+    --node-cidr)            NODE_CIDR="$2"; shift 2 ;;
+    --stage)                STAGE="$2"; shift 2 ;;
+    --period)               PERIOD="$2"; shift 2 ;;
+    --wrap-ttl)             WRAP_TTL="$2"; shift 2 ;;
+    --reissue-unseal-token) REISSUE_UNSEAL_TOKEN=true; shift ;;
+    --reissue-backup-key)   REISSUE_BACKUP_KEY=true; shift ;;
+    --yes|-y)               ASSUME_YES=true; shift ;;
+    # Named for what it reissues now that the script mints more than one
+    # credential. Refused rather than mapped, so an old runbook command stops
+    # and says which credential it means.
+    --reissue)
+      echo "--reissue is now --reissue-unseal-token; use --reissue-backup-key for the backup key" >&2
+      exit 2 ;;
     -h|--help)
       # The comment block at the top of this file, up to the first code line.
       awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
@@ -105,7 +111,7 @@ trap 'rm -f "$RESPONSE"' EXIT INT TERM HUP
 invoke() {
   local phase="$1" confirm="$2" reissue payload response
   case "$phase" in
-    appliance-token)      reissue="$REISSUE" ;;
+    appliance-token)      reissue="$REISSUE_UNSEAL_TOKEN" ;;
     appliance-backup-key) reissue="$REISSUE_BACKUP_KEY" ;;
     *) echo "ERROR: invoke: unknown phase $phase" >&2; return 1 ;;
   esac
@@ -188,8 +194,8 @@ mints() { [ "$1" = mint ] || [ "$1" = reissue ]; }
 if ! mints "$token_action" && ! mints "$backup_action"; then
   echo "Nothing to mint: the region holds every credential it needs."
   echo
-  echo "If a credential leaked or never reached the node, re-run with --reissue for"
-  echo "the unseal token or --reissue-backup-key for the backup key."
+  echo "If a credential leaked or never reached the node, re-run with"
+  echo "--reissue-unseal-token for the unseal token or --reissue-backup-key for the backup key."
   exit 0
 fi
 
@@ -281,8 +287,8 @@ Chat is an acceptable channel for a wrapping token; a view-once 1Password link
 is better. There is nothing for the operator to unwrap or write by hand.
 
 If an exchange on the node fails, treat it as a compromise rather than a
-hiccup: someone else spent the token. Re-run this script with --reissue for
-the unseal token or --reissue-backup-key for the backup key, and find out who
+hiccup: someone else spent the token. Re-run this script with --reissue-unseal-token
+for the unseal token or --reissue-backup-key for the backup key, and find out who
 read the channel.
 EOF
 
