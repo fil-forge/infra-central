@@ -32,7 +32,7 @@ variable "name_prefix" {
 }
 
 variable "allow_emptying_stage_buckets" {
-  description = "Whether the apply role may delete objects in the fc-* buckets, which destroying a bucket with force_destroy set requires. True in the non-prod account, so a CI apply can remove a dev or staging bucket and whatever it still holds. False in prod, where no bucket sets force_destroy and the role then holds no object action at all."
+  description = "Whether the apply role may delete objects in the fc-* buckets, which destroying a bucket with force_destroy set requires. True in the non-prod account, so a CI apply can remove a dev or staging bucket and whatever it still holds. False in prod, where no bucket sets force_destroy and the role then holds no object action on an fc-* bucket."
   type        = bool
   default     = false
 }

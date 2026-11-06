@@ -54,7 +54,8 @@ module "github_actions_iam" {
   state_bucket_name         = module.tfstate.bucket_name
 
   # Dev and staging can be destroyed by a CI apply, buckets included. Prod
-  # leaves this off, so its apply role cannot delete a single object.
+  # leaves this off, so its apply role cannot delete an object in a stage
+  # bucket.
   allow_emptying_stage_buckets = true
 
   # Every non-prod stage the workflow deploys, from the one list the regional
