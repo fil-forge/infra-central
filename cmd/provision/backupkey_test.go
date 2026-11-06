@@ -91,8 +91,8 @@ func TestMintBackupKeyLeavesExistingKeysAloneOnAMint(t *testing.T) {
 	}
 }
 
-// The node stores the key pair and checks the other three against its
-// node.env, so these five names are a contract with infra-nodes.
+// The node stores all five fields in its OpenBao and its backup jobs read them
+// by these names, so they are a contract with infra-nodes.
 func TestMintBackupKeyWrapsTheKeyWithItsTarget(t *testing.T) {
 	var wrapped map[string]any
 

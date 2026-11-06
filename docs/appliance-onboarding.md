@@ -157,12 +157,15 @@ node's backup jobs ([FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-
 [FIL-1745](https://linear.app/filecoin-foundation/issue/FIL-1745) for OpenBao) depend on the
 following:
 
-- The node keeps the target in its `node.env`, as `BACKUP_S3_BUCKET`, `BACKUP_S3_PREFIX`
-  (`<region>/`) and `BACKUP_S3_REGION`. Copy them from what the mint script prints for your record.
-- The node stores only the key pair in its local OpenBao, at `filone/backup-target`, never in a
-  plain file. The unwrapped payload has five fields: `access_key_id` and `secret_access_key`, which
-  it stores, and `bucket`, `prefix` and `aws_region`, which it checks against `node.env` and refuses
-  the key on a mismatch.
+- The node's `node.env` says only whether it takes backups, as `FILONE_TAKES_BACKUPS=true` or
+  `false`, and every node must set it.
+- The node stores all five fields of the unwrapped payload in its local OpenBao, at
+  `filone/backup-target`, never in a plain file: `access_key_id`, `secret_access_key`, `bucket`,
+  `prefix` (`<region>/`) and `aws_region`. It refuses a key whose prefix is not its own region's.
+  The backup jobs read the target and the key from there, so the two cannot disagree.
+- After storing the key, the node puts a small object at `<region>/provisioning-check/` with it, so
+  a key that cannot write fails during provisioning. The bucket's lifecycle removes that object
+  with the backups.
 - WAL-G writes under `WALG_S3_PREFIX=s3://<bucket>/<region>/postgres`. Leave `S3_RETENTION_PERIOD`
   unset, so the bucket's 35-day compliance lock applies. The key can read back only the timeline
   history files under that prefix, which WAL-G checks before overwriting one, and can delete
