@@ -120,15 +120,17 @@ bucket has four lifecycle rules:
 
 - The current version of every object expires after 35 days, which puts a delete marker in front of
   it.
-- Noncurrent versions are deleted a day after they become noncurrent, once their lock has lapsed. A
-  backup is therefore gone 36 days after it was written.
+- Noncurrent versions are deleted one day after they become noncurrent or when their lock lapses,
+  whichever comes later, because lifecycle cannot delete a locked version. With a 35-day lock that
+  is almost always the lock, so a backup is gone about 36 days after it was written.
 - Expired delete markers are removed, in a rule of their own because S3 refuses that action beside
   `days`.
 - Incomplete multipart uploads are aborted after seven days.
 
 The bucket does not enforce `If-None-Match` on puts, because WAL-G never sends the header. A put to
-an existing key adds a version, and the earlier version stays locked until its own retention ends.
-WAL-G re-archives a WAL segment when an upload is retried, so some keys collect several versions.
+an existing key adds a version. The earlier version stays locked until its own retention ends, 35
+days after it was written, and is deleted after that like any other backup. WAL-G re-archives a WAL
+segment when an upload is retried, so some keys collect several versions.
 
 Every request without TLS is denied by the bucket policy, and public access is blocked.
 
