@@ -156,10 +156,13 @@ outside the state bucket.
 ## The node's half
 
 Central wraps five fields: `access_key_id`, `secret_access_key`, `bucket`, `prefix` and
-`aws_region`. The node keeps the bucket, prefix and AWS region in its `node.env` as
-`BACKUP_S3_BUCKET`, `BACKUP_S3_PREFIX` and `BACKUP_S3_REGION`, where a change to them is reviewed
-in git, and refuses a key whose wrapped target differs. Its local OpenBao holds only the key pair,
-at `filone/backup-target`. FIL-1599 and FIL-1745 read both when they render their configuration. Both uploaders must send `Content-MD5` or
+`aws_region`. The node stores all five in its local OpenBao at `filone/backup-target`, and its
+`node.env` says only whether it takes backups, as `FILONE_TAKES_BACKUPS`. A copy of the target in
+`node.env` could be left out, which made a staging or prod node silently take no backups, or edited
+after the key was stored, which went unnoticed until the first upload failed. With one copy,
+written by the central that created the bucket, neither can happen. After storing the key the node
+puts one small object with it, so a key that cannot write fails during provisioning. FIL-1599 and
+FIL-1745 read all five when they render their configuration. Both uploaders must send `Content-MD5` or
 an `x-amz-checksum-*` header, because Object Lock refuses a put without one; WAL-G, AWS CLI v2 and
 current AWS SDKs do so by default. WAL-G must run with `S3_RETENTION_PERIOD` unset, so the bucket's
 default retention applies.
