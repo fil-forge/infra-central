@@ -145,7 +145,7 @@ module "platform" {
   }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
-  # about 80 of them with OpenBao's 24 included.
+  # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
   openbao_max_parallel = 24
 
   # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
