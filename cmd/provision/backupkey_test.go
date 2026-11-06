@@ -105,7 +105,7 @@ func TestMintBackupKeyWrapsTheKeyWithItsTarget(t *testing.T) {
 		"access_key_id":     "AKIANEW",
 		"secret_access_key": "secret-new",
 		"bucket":            "forge-nodes-backups-staging-654654381893",
-		"prefix":            "eu-central-3/",
+		"key_prefix":        "eu-central-3/",
 		"aws_region":        "us-east-2",
 	}
 	if !reflect.DeepEqual(wrapped, want) {
@@ -125,7 +125,7 @@ func TestMintBackupKeyReturnsOnlyTheWrappingTokenAndPublicFields(t *testing.T) {
 		WrappingToken: "wrap-1",
 		AccessKeyID:   "AKIANEW",
 		Bucket:        "forge-nodes-backups-staging-654654381893",
-		Prefix:        "eu-central-3/",
+		KeyPrefix:     "eu-central-3/",
 		AWSRegion:     "us-east-2",
 		WrapTTL:       "24h",
 	}
@@ -210,7 +210,7 @@ func testBackupKeyPlan(action string, existing ...string) *BackupKeyPlan {
 		User:           "forge-nodes-backup-staging-eu-central-3",
 		ExistingKeyIDs: existing,
 		Bucket:         "forge-nodes-backups-staging-654654381893",
-		Prefix:         "eu-central-3/",
+		KeyPrefix:      "eu-central-3/",
 		WrapTTL:        "24h",
 	}
 }

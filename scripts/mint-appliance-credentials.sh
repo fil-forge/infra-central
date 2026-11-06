@@ -178,7 +178,7 @@ jq -r '
   else
     "  User:         \(.backup_key_plan.user)",
     "  Bucket:       \(.backup_key_plan.bucket)",
-    "  Prefix:       \(.backup_key_plan.prefix)",
+    "  Key prefix:   \(.backup_key_plan.key_prefix)",
     (if (.backup_key_plan.existing_key_ids // []) == [] then empty else
       "  On record:    access key \(.backup_key_plan.existing_key_ids | join(", "))"
     end)
@@ -259,7 +259,7 @@ if mints "$backup_action"; then
       "",
       "For your record (not secret):",
       "  Bucket:         \(.backup_key_result.bucket)",
-      "  Prefix:         \(.backup_key_result.prefix)",
+      "  Key prefix:     \(.backup_key_result.key_prefix)",
       "  AWS region:     \(.backup_key_result.aws_region)",
       "  Access key ID:  \(.backup_key_result.access_key_id)",
       (if (.backup_key_result.deleted_key_ids // []) == [] then empty else

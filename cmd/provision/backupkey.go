@@ -64,7 +64,7 @@ func (d *deps) applianceBackupKey(ctx context.Context, req Request) (*Response, 
 		return nil, err
 	}
 	plan.Bucket = d.cfg.BackupBucket
-	plan.Prefix = backupPrefix(req.Region)
+	plan.KeyPrefix = backupKeyPrefix(req.Region)
 	plan.WrapTTL = wrapTTL
 
 	if !req.Confirm {
@@ -106,7 +106,7 @@ type BackupKeyPlan struct {
 	// all of them.
 	ExistingKeyIDs []string `json:"existing_key_ids,omitempty"`
 	Bucket         string   `json:"bucket,omitempty"`
-	Prefix         string   `json:"prefix,omitempty"`
+	KeyPrefix      string   `json:"key_prefix,omitempty"`
 	WrapTTL        string   `json:"wrap_ttl,omitempty"`
 }
 
@@ -119,7 +119,7 @@ type BackupKeyResult struct {
 	WrappingToken string `json:"wrapping_token"`
 	AccessKeyID   string `json:"access_key_id"`
 	Bucket        string `json:"bucket"`
-	Prefix        string `json:"prefix"`
+	KeyPrefix     string `json:"key_prefix"`
 	AWSRegion     string `json:"aws_region"`
 	WrapTTL       string `json:"wrap_ttl"`
 	// UnwrapAddress is where the node exchanges the wrapping token.
@@ -187,7 +187,7 @@ func mintBackupKey(ctx context.Context, client backupKeyIAM, wrap func(context.C
 	result := &BackupKeyResult{
 		Region:    plan.Region,
 		Bucket:    plan.Bucket,
-		Prefix:    plan.Prefix,
+		KeyPrefix: plan.KeyPrefix,
 		AWSRegion: awsRegion,
 		WrapTTL:   plan.WrapTTL,
 	}
@@ -222,7 +222,7 @@ func mintBackupKey(ctx context.Context, client backupKeyIAM, wrap func(context.C
 		"access_key_id":     keyID,
 		"secret_access_key": aws.ToString(created.AccessKey.SecretAccessKey),
 		"bucket":            plan.Bucket,
-		"prefix":            plan.Prefix,
+		"key_prefix":        plan.KeyPrefix,
 		"aws_region":        awsRegion,
 	})
 	if err != nil {
@@ -260,8 +260,8 @@ func deleteAccessKey(ctx context.Context, client backupKeyIAM, user, keyID strin
 	return nil
 }
 
-// backupPrefix is the key prefix a region writes under. The writer's policy
+// backupKeyPrefix is the key prefix a region writes under. The writer's policy
 // grants nothing outside it.
-func backupPrefix(region string) string {
+func backupKeyPrefix(region string) string {
 	return region + "/"
 }

@@ -96,7 +96,7 @@ Each credential stays inside central OpenBao until the node claims it, so neithe
 unseal token only the accessor is stored, at
 `/forge-central/<stage>/appliance/<region>/unseal-token.accessor`, which is enough to revoke the
 token later and not enough to use it. For the backup key only IAM holds it, and the script prints
-its ID with the bucket, prefix and AWS region for your record. In dev, which takes no backups, the
+its ID with the bucket, key prefix and AWS region for your record. In dev, which takes no backups, the
 script reports the backup key as not applicable.
 
 The script is safe to re-run. It skips a credential the region already holds and mints only what is
@@ -151,7 +151,7 @@ mints.
 ## What the node does with the backup key
 
 Staging and prod keep each appliance's backups in `forge-nodes-backups-<stage>-<account id>`, under
-the region's own prefix. Why it is built this way is in
+the region's own key prefix. Why it is built this way is in
 [decisions/2026-11-appliance-backup-target.md](decisions/2026-11-appliance-backup-target.md). The
 node's backup jobs ([FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599) for Postgres,
 [FIL-1745](https://linear.app/filecoin-foundation/issue/FIL-1745) for OpenBao) depend on the
@@ -161,8 +161,8 @@ following:
   `false`, and every node must set it.
 - The node stores all five fields of the unwrapped payload in its local OpenBao, at
   `filone/backup-target`, never in a plain file: `access_key_id`, `secret_access_key`, `bucket`,
-  `prefix` (`<region>/`) and `aws_region`. It refuses a key whose prefix is not its own region's.
-  The backup jobs read the target and the key from there, so the two cannot disagree.
+  `key_prefix` (`<region>/`) and `aws_region`. It refuses a key whose key prefix is not its own
+  region's. The backup jobs read the target and the key from there, so the two cannot disagree.
 - After storing the key, the node puts a small object at `<region>/provisioning-check/` with it, so
   a key that cannot write fails during provisioning. The bucket's lifecycle removes that object
   with the backups.
