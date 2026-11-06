@@ -67,7 +67,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
 | **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                                                                                                                                |
+| **S3 and DynamoDB through task roles**          | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -375,6 +375,13 @@ aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \
   | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
 ```
+
+Appliance backups survive a destroy too. In staging and prod each region's
+backups go to `forge-nodes-backups-<stage>-<account id>`, which is locked in
+compliance mode: S3 refuses to delete a backup, or the bucket holding it, until
+35 days after it was written, whoever asks. The bucket carries `prevent_destroy`,
+so a plan that would destroy it fails first. The writer users go with the stage,
+and with them every appliance's ability to add a backup.
 
 In staging and prod, the platform root refuses to destroy at all. Sprue's buckets
 are versioned there, and their versioning and lifecycle resources carry
@@ -763,7 +770,8 @@ anything anyone depends on.
 ### Onboarding a regional appliance
 
 A stage seals the appliances named in its `appliance_regions`, and
-`make mint-appliance-token` issues a node's unseal credential. The ordering across
+`make mint-appliance-token` issues a node's unseal credential and, in staging and
+prod, the access key it writes its backups with. The ordering across
 both repositories, how the credential is delivered to a node operator, and what
 retiring a region destroys are in
 [docs/appliance-onboarding.md](docs/appliance-onboarding.md).

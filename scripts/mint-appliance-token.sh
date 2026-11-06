@@ -1,34 +1,45 @@
 #!/usr/bin/env bash
-# Mint the credential a regional appliance unseals with, and print it once for
-# delivery to whoever operates that node.
+# Mint the credentials a regional appliance needs from central, and print each
+# one once for delivery to whoever operates that node:
 #
-# The minting happens inside the provision Lambda, in AWS. What comes back is not
-# the token: it is a single-use wrapping token with a short TTL, which the node
-# exchanges for the real one against central OpenBao. So the credential itself
-# never transits the channel that carries the hand-off, and an interception makes
-# the node's own exchange fail rather than passing unnoticed. See
-# docs/appliance-onboarding.md for the delivery rules, which matter.
+#   - the unseal token its OpenBao authenticates with to central's transit key
+#   - the access key it writes its backups with, in stages that take backups
 #
-# Two invocations, always in this order:
-#   1. without confirmation, which reads OpenBao and prints what would happen
+# The minting happens inside the provision Lambda, in AWS. What comes back is
+# not either credential: it is a single-use wrapping token with a short TTL per
+# credential, which the node exchanges against central OpenBao. So the
+# credentials never transit the channel that carries the hand-off, and an
+# interception makes the node's own exchange fail rather than passing
+# unnoticed. See docs/appliance-onboarding.md for the delivery rules, which
+# matter.
+#
+# Safe to re-run. A credential the region already holds is skipped, so running
+# this for an appliance that is already set up mints only what it lacks, and a
+# second run mints nothing. Dev takes no backups, so there the backup key is
+# reported as not applicable.
+#
+# Two rounds of invocations, always in this order:
+#   1. without confirmation, which reads OpenBao and IAM and prints the plan
 #   2. after you approve it, with confirmation, which mints
 #
-# The region's transit key must already exist. It is created by the vault phase
-# from appliance_regions in the stage's terraform.tfvars, so a region that has
-# not been committed and merged fails here rather than being created on the spot.
+# The region's transit key and backup writer user must already exist. Both are
+# created by the apply from appliance_regions in the stage's terraform.tfvars,
+# so a region that has not been committed and merged fails here rather than
+# being created on the spot.
 #
 # Usage:
 #   scripts/mint-appliance-token.sh --region us-east-9 --node-ip 203.0.113.7
 #
 # Options:
-#   --region     appliance region label                  (required)
-#   --node-ip    the node's Elastic IP, bound as a /32   (required)
-#   --node-cidr  bind to this CIDR instead of --node-ip
-#   --stage      stage holding the transit key            (default: dev)
-#   --period     renewal tolerance                        (default: 72h)
-#   --wrap-ttl   how long the hand-off may sit unclaimed  (default: 24h)
-#   --reissue    revoke the region's existing token first
-#   --yes        skip the interactive prompt
+#   --region              appliance region label                  (required)
+#   --node-ip             the node's Elastic IP, bound as a /32   (required)
+#   --node-cidr           bind to this CIDR instead of --node-ip
+#   --stage               stage holding the transit key            (default: dev)
+#   --period              renewal tolerance                        (default: 72h)
+#   --wrap-ttl            how long the hand-off may sit unclaimed  (default: 24h)
+#   --reissue             replace the region's live unseal token
+#   --reissue-backup-key  delete the region's backup key and mint another
+#   --yes                 skip the interactive prompt
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
@@ -42,20 +53,25 @@ NODE_CIDR=""
 PERIOD=""
 WRAP_TTL=""
 REISSUE=false
+REISSUE_BACKUP_KEY=false
 ASSUME_YES=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --region)    REGION="$2"; shift 2 ;;
-    --node-ip)   NODE_IP="$2"; shift 2 ;;
-    --node-cidr) NODE_CIDR="$2"; shift 2 ;;
-    --stage)     STAGE="$2"; shift 2 ;;
-    --period)    PERIOD="$2"; shift 2 ;;
-    --wrap-ttl)  WRAP_TTL="$2"; shift 2 ;;
-    --reissue)   REISSUE=true; shift ;;
-    --yes|-y)    ASSUME_YES=true; shift ;;
-    -h|--help)   sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)           echo "unknown option: $1" >&2; exit 2 ;;
+    --region)             REGION="$2"; shift 2 ;;
+    --node-ip)            NODE_IP="$2"; shift 2 ;;
+    --node-cidr)          NODE_CIDR="$2"; shift 2 ;;
+    --stage)              STAGE="$2"; shift 2 ;;
+    --period)             PERIOD="$2"; shift 2 ;;
+    --wrap-ttl)           WRAP_TTL="$2"; shift 2 ;;
+    --reissue)            REISSUE=true; shift ;;
+    --reissue-backup-key) REISSUE_BACKUP_KEY=true; shift ;;
+    --yes|-y)             ASSUME_YES=true; shift ;;
+    -h|--help)
+      # The comment block at the top of this file, up to the first code line.
+      awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+      exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -72,32 +88,39 @@ command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 FUNCTION="fc-${STAGE}-provision"
 
 # The one file the Lambda's response is written to, created with a private umask
-# and removed however this script ends. On the confirming call it holds the
-# wrapping token, and this is the only place on an operator's disk it ever
+# and removed however this script ends. On a confirming call it holds a
+# wrapping token, and this is the only place on an operator's disk one ever
 # exists. The signals are trapped so an interrupted script still cleans up:
 # bash runs no EXIT trap when an untrapped signal kills it, and the file would
 # be left holding a live wrapping token for the rest of its 24 hours.
 RESPONSE="$(umask 077; mktemp)"
 trap 'rm -f "$RESPONSE"' EXIT INT TERM HUP
 
-# invoke <confirm> — call the appliance-token phase and print its JSON response.
-# A Lambda error is reported as a successful invocation with FunctionError set,
-# so that is checked separately.
+# invoke <phase> <confirm> — call a phase and print its JSON response. A Lambda
+# error is reported as a successful invocation with FunctionError set, so that
+# is checked separately.
 #
 # Every failure has to become an explicit return: bash drops errexit inside
 # command substitution, and the callers read this function through one.
 invoke() {
-  local confirm="$1" payload response
+  local phase="$1" confirm="$2" reissue payload response
+  case "$phase" in
+    appliance-token)      reissue="$REISSUE" ;;
+    appliance-backup-key) reissue="$REISSUE_BACKUP_KEY" ;;
+    *) echo "ERROR: invoke: unknown phase $phase" >&2; return 1 ;;
+  esac
+
   payload="$(jq -nc \
+    --arg phase "$phase" \
     --argjson confirm "$confirm" \
     --arg region "$REGION" \
     --arg cidr "$NODE_CIDR" \
     --arg period "$PERIOD" \
     --arg wrap "$WRAP_TTL" \
-    --argjson reissue "$REISSUE" \
-    '{phase:"appliance-token", confirm:$confirm, region:$region, node_cidr:$cidr,
-      reissue:$reissue}
-     + (if $period == "" then {} else {period:$period} end)
+    --argjson reissue "$reissue" \
+    '{phase:$phase, confirm:$confirm, region:$region, reissue:$reissue}
+     + (if $phase  == "appliance-token" then {node_cidr:$cidr} else {} end)
+     + (if $period == "" or $phase != "appliance-token" then {} else {period:$period} end)
      + (if $wrap   == "" then {} else {wrap_ttl:$wrap} end)')"
 
   if ! response="$(aws lambda invoke \
@@ -106,28 +129,31 @@ invoke() {
     --payload "$payload" \
     --cli-read-timeout 900 \
     "$RESPONSE")"; then
-    echo "ERROR: aws lambda invoke failed" >&2
+    echo "ERROR: aws lambda invoke failed for the $phase phase" >&2
     return 1
   fi
 
   if [ "$(jq -r '.FunctionError // empty' <<<"$response")" != "" ]; then
-    echo "ERROR: the appliance-token phase failed:" >&2
+    echo "ERROR: the $phase phase failed:" >&2
     jq -r '.errorMessage // .' "$RESPONSE" >&2
     return 1
   fi
 
   cat "$RESPONSE"
+  : >"$RESPONSE"
 }
 
-echo "=== Mint the ${REGION} unseal token ==="
-echo "  Lambda:  $FUNCTION"
-echo "  Region:  $REGION"
+echo "=== Mint the ${REGION} appliance credentials ==="
+echo "  Lambda:   $FUNCTION"
+echo "  Region:   $REGION"
 echo "  Bound to: $NODE_CIDR"
 echo
 
-echo "Reading OpenBao (nothing is minted yet)…"
-plan="$(invoke false)"
+echo "Reading OpenBao and IAM (nothing is minted yet)…"
+token_plan="$(invoke appliance-token false)"
+backup_plan="$(invoke appliance-backup-key false)"
 
+echo "Unseal token:"
 jq -r '
   "  Transit key:  appliance-unseal-\(.token_plan.region)",
   "  Period:       \(.token_plan.period)",
@@ -136,49 +162,128 @@ jq -r '
   (if .token_plan.accessor == null then empty else
     "  On record:    accessor \(.token_plan.accessor), live: \(.token_plan.token_live)"
   end)
-' <<<"$plan"
+' <<<"$token_plan"
+echo
+echo "Backup key:"
+jq -r '
+  "  Action:       \(.backup_key_plan.action)",
+  (if .backup_key_plan.action == "not-applicable" then
+    "  This stage takes no appliance backups."
+  else
+    "  User:         \(.backup_key_plan.user)",
+    "  Bucket:       \(.backup_key_plan.bucket)",
+    "  Prefix:       \(.backup_key_plan.prefix)",
+    (if (.backup_key_plan.existing_key_ids // []) == [] then empty else
+      "  On record:    access key \(.backup_key_plan.existing_key_ids | join(", "))"
+    end)
+  end)
+' <<<"$backup_plan"
 echo
 
-action="$(jq -r '.token_plan.action' <<<"$plan")"
+token_action="$(jq -r '.token_plan.action' <<<"$token_plan")"
+backup_action="$(jq -r '.backup_key_plan.action' <<<"$backup_plan")"
 
-if [ "$action" = "refuse" ]; then
-  echo "This region already has a live unseal token. Two standing credentials for" >&2
-  echo "one node is a state nothing can reason about, so this stops here." >&2
-  echo >&2
-  echo "If the node never received the previous token, or it has leaked, re-run" >&2
-  echo "with --reissue, which revokes that token before minting another." >&2
-  exit 1
+mints() { [ "$1" = mint ] || [ "$1" = reissue ]; }
+
+if ! mints "$token_action" && ! mints "$backup_action"; then
+  echo "Nothing to mint: the region holds every credential it needs."
+  echo
+  echo "If a credential leaked or never reached the node, re-run with --reissue for"
+  echo "the unseal token or --reissue-backup-key for the backup key."
+  exit 0
 fi
 
 if [ "$ASSUME_YES" != true ]; then
-  if [ "$action" = "reissue" ]; then
-    echo "The region's current token will be REVOKED. A node still using it stops"
-    echo "being able to unseal at its next restart."
+  if [ "$token_action" = reissue ]; then
+    echo "The region's current unseal token will be REVOKED once its replacement is"
+    echo "minted. A node still using it stops being able to unseal at its next restart."
+  fi
+  if [ "$backup_action" = reissue ]; then
+    echo "The region's backup key will be DELETED before its replacement is minted."
+    echo "The node's uploads fail until it stores the new key."
   fi
   read -r -p "Type 'mint' to proceed: " reply
   [ "$reply" = "mint" ] || { echo "Aborted; nothing was minted."; exit 1; }
   echo
 fi
 
-result="$(invoke true)"
+# Each credential is minted and then printed straight away, so a failure in the
+# second phase cannot swallow a wrapping token the first one already issued.
+failed=false
 
-jq -r '
-  "Minted. Accessor \(.token_result.accessor) is recorded in SSM;",
-  "the token itself is stored nowhere and cannot be printed again.",
-  "",
-  "Give the node operator this wrapping token:",
-  "",
-  "    \(.token_result.wrapping_token)",
-  "",
-  "It can be exchanged once, within \(.token_result.wrap_ttl), and only for this",
-  "node'"'"'s credential. Chat is an acceptable channel; a view-once 1Password link",
-  "is better.",
-  "",
-  "On the node, scripts/host/provision-platform.sh asks for this token, exchanges",
-  "it at central and stores what comes back 0400 root. There is nothing for the",
-  "operator to unwrap or write by hand.",
-  "",
-  "If that exchange fails, treat it as a compromise rather than a hiccup: someone",
-  "else spent the token. Re-run this script with --reissue and find out who read",
-  "the channel."
-' <<<"$result"
+if mints "$token_action"; then
+  if token_result="$(invoke appliance-token true)"; then
+    jq -r '
+      "Minted the unseal token. Accessor \(.token_result.accessor) is recorded in SSM;",
+      "the token itself is stored nowhere and cannot be printed again.",
+      "",
+      "Give the node operator this unseal-token wrapping token:",
+      "",
+      "    \(.token_result.wrapping_token)",
+      "",
+      "It can be exchanged once, within \(.token_result.wrap_ttl), and only for this",
+      "node'"'"'s credential. On the node, scripts/host/provision-platform.sh asks for it,",
+      "exchanges it at central and stores what comes back 0400 root.",
+      ""
+    ' <<<"$token_result"
+    unset token_result
+  else
+    failed=true
+    echo "The unseal token was not minted; see the error above." >&2
+    echo >&2
+  fi
+else
+  echo "Unseal token skipped: the region already holds a live one."
+  echo
+fi
+
+if mints "$backup_action"; then
+  if backup_result="$(invoke appliance-backup-key true)"; then
+    jq -r '
+      "Minted the backup key. Only its ID is kept; the secret exists only inside",
+      "the wrapping token below and cannot be printed again.",
+      "",
+      "Give the node operator this backup-key wrapping token:",
+      "",
+      "    \(.backup_key_result.wrapping_token)",
+      "",
+      "It can be exchanged once, within \(.backup_key_result.wrap_ttl). On the node,",
+      "scripts/host/provision-backups.sh asks for it and stores the key in the",
+      "node'"'"'s own OpenBao.",
+      "",
+      "For your record (not secret):",
+      "  Bucket:         \(.backup_key_result.bucket)",
+      "  Prefix:         \(.backup_key_result.prefix)",
+      "  AWS region:     \(.backup_key_result.aws_region)",
+      "  Access key ID:  \(.backup_key_result.access_key_id)",
+      (if (.backup_key_result.deleted_key_ids // []) == [] then empty else
+        "  Deleted keys:   \(.backup_key_result.deleted_key_ids | join(", "))"
+      end),
+      ""
+    ' <<<"$backup_result"
+    unset backup_result
+  else
+    failed=true
+    echo "The backup key was not minted; see the error above. A re-run skips the" >&2
+    echo "unseal token if it was minted, and retries only the backup key." >&2
+    echo >&2
+  fi
+elif [ "$backup_action" = not-applicable ]; then
+  echo "Backup key not applicable: this stage takes no appliance backups."
+  echo
+else
+  echo "Backup key skipped: the region's writer already has one."
+  echo
+fi
+
+cat <<'EOF'
+Chat is an acceptable channel for a wrapping token; a view-once 1Password link
+is better. There is nothing for the operator to unwrap or write by hand.
+
+If an exchange on the node fails, treat it as a compromise rather than a
+hiccup: someone else spent the token. Re-run this script with --reissue for
+the unseal token or --reissue-backup-key for the backup key, and find out who
+read the channel.
+EOF
+
+[ "$failed" = false ] || exit 1

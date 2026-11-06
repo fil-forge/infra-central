@@ -249,6 +249,7 @@ type fakeOpenBao struct {
 	revokedAccessors []string
 	wrapTTLSeen      string
 	tokenCreateBody  map[string]any
+	wrappedData      map[string]any
 }
 
 func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -409,6 +410,21 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"wrapped_accessor": "acc-1",
 				"ttl":              86400,
 			},
+		})
+
+	case key == "PUT /v1/sys/wrapping/wrap":
+		if err := json.NewDecoder(r.Body).Decode(&f.wrappedData); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		f.wrapTTLSeen = r.Header.Get("X-Vault-Wrap-TTL")
+		if f.wrapTTLSeen == "" || f.refuseToWrap {
+			// Without the header OpenBao refuses rather than echoing the data.
+			http.Error(w, `{"errors":["wrapping requested but no TTL given"]}`, http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"wrap_info": map[string]any{"token": "wrap-2", "accessor": "wrap-acc-2", "ttl": 86400},
 		})
 
 	case key == "POST /v1/auth/token/lookup-accessor":

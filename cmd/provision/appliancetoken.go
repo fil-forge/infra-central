@@ -65,10 +65,10 @@ func (d *deps) applianceToken(ctx context.Context, req Request) (*Response, erro
 		slog.Info("appliance token plan prepared", "region", req.Region, "action", plan.Action)
 		return &Response{Phase: "appliance-token", DryRun: true, TokenPlan: plan}, nil
 	}
-	if plan.Action == tokenActionRefuse {
-		return nil, fmt.Errorf(
-			"region %s already has a live unseal token (accessor %s); pass --reissue to revoke it and mint another",
-			req.Region, plan.Accessor)
+	if plan.Action == tokenActionSkip {
+		slog.Info("the region already has a live unseal token, minting nothing",
+			"region", req.Region, "accessor", plan.Accessor)
+		return &Response{Phase: "appliance-token", TokenPlan: plan}, nil
 	}
 
 	return d.mintApplianceToken(ctx, client, req, plan)
@@ -78,13 +78,13 @@ func (d *deps) applianceToken(ctx context.Context, req Request) (*Response, erro
 const (
 	tokenActionMint    = "mint"
 	tokenActionReissue = "reissue"
-	tokenActionRefuse  = "refuse"
+	tokenActionSkip    = "skip"
 )
 
 // TokenPlan is what the dry run reports.
 type TokenPlan struct {
 	Region string `json:"region"`
-	// Action is mint, reissue or refuse.
+	// Action is mint, reissue or skip.
 	Action string `json:"action"`
 	// Accessor of the token already on record, if any. Never the token.
 	Accessor string `json:"accessor,omitempty"`
@@ -164,12 +164,14 @@ func validateTokenDurations(plan *TokenPlan) error {
 // decideTokenAction settles what to do about a region that already has an
 // accessor on record.
 //
-// Minting is the one operation in this project that is not idempotent, which is
-// what the refusal is for: a second token means two live credentials for one
-// node, and nothing afterwards would say which of them the node is using. A
-// token that has already lapsed is a different case entirely and needs no flag,
-// because a node offline past its renewal period is the ordinary reason for it
-// and minting again is the repair.
+// A live token is skipped, so the mint script can be re-run for an appliance
+// that already holds one and mint only the credentials it lacks. The skip is
+// what keeps minting from being the one operation in this project that is not
+// idempotent: a second token means two live credentials for one node, and
+// nothing afterwards would say which of them the node is using. A token that
+// has already lapsed is a different case entirely and needs no flag, because a
+// node offline past its renewal period is the ordinary reason for it and
+// minting again is the repair.
 func decideTokenAction(tokenLive, reissue bool) string {
 	switch {
 	case !tokenLive:
@@ -177,7 +179,7 @@ func decideTokenAction(tokenLive, reissue bool) string {
 	case reissue:
 		return tokenActionReissue
 	default:
-		return tokenActionRefuse
+		return tokenActionSkip
 	}
 }
 
