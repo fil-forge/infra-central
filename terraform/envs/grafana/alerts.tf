@@ -3203,6 +3203,102 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
+  # Curio, inside Piri, proves a sub-piece above 32 MiB padded only from a
+  # cached Merkle layer, one hash per 4 MiB, which its PDPv0_SaveCache task
+  # builds by reading the piece once after Piri parks it. Every Piri
+  # aggregate is at least 128 MiB, so a piece without its layer fails every
+  # proof once it is in a proof set and challenged. The value is how long the
+  # oldest parked piece above 32 MiB has waited for its layer, including a
+  # piece a SaveCache task has claimed: a task that hangs or keeps failing
+  # holds its claim, and the piece still cannot be proven. Piri returns a
+  # piece to the queue if its task is dropped.
+  #
+  # A layer is normally built within minutes of parking, and a piece is
+  # parked well before it is added to a proof set, so thirty minutes is a
+  # stalled task: the task engine down, or the blobstore reads failing. A
+  # warning: nothing is lost until the piece is challenged, and "Piri proving
+  # is failing" pages once proofs fail. Expect it after the Piri release that
+  # adds the cache, until every piece parked before it has its layer.
+  #
+  # Grouped by instance as well as node, like the other Piri-wide rules: each
+  # Piri has its own task engine. `for` is 10m on top of the threshold.
+  #
+  # no_data_state is OK: a Piri older than the release that adds the cache
+  # reports no series, and "Appliance has stopped reporting" covers a silent
+  # node.
+  rule {
+    name           = "Piri proof cache builds have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} has a piece that has waited over 30 minutes for its proof cache layer"
+      description = "A piece above 32 MiB padded has no proof cache layer, and Curio, inside Piri, proves such a piece only from its layer, so its proofs will fail once it is challenged. Check the Piri container's logs for the PDPv0_SaveCache task and its blobstore reads, and that Piri's harmonytask engine is running: `piri status` in the Piri container. After the Piri release that adds the cache, this fires until pieces parked before it all have their layers."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
   # A proof set has an addPieces transaction that succeeded on chain more than
   # 20 epochs ago whose pieces Curio, inside Piri, has still not recorded from
   # the receipt. The value is epochs past that grace; the current epoch is the
@@ -3299,102 +3395,6 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0] }
-        }]
-      })
-    }
-  }
-
-  # Curio, inside Piri, proves a sub-piece above 32 MiB padded only from a
-  # cached Merkle layer, one hash per 4 MiB, which its PDPv0_SaveCache task
-  # builds by reading the piece once after Piri parks it. Every Piri
-  # aggregate is at least 128 MiB, so a piece without its layer fails every
-  # proof once it is in a proof set and challenged. The value is how long the
-  # oldest parked piece above 32 MiB has waited for its layer, including a
-  # piece a SaveCache task has claimed: a task that hangs or keeps failing
-  # holds its claim, and the piece still cannot be proven. Piri returns a
-  # piece to the queue if its task is dropped.
-  #
-  # A layer is normally built within minutes of parking, and a piece is
-  # parked well before it is added to a proof set, so thirty minutes is a
-  # stalled task: the task engine down, or the blobstore reads failing. A
-  # warning: nothing is lost until the piece is challenged, and "Piri proving
-  # is failing" pages once proofs fail. Expect it after the Piri release that
-  # adds the cache, until every piece parked before it has its layer.
-  #
-  # Grouped by instance as well as node, like the other Piri-wide rules: each
-  # Piri has its own task engine. `for` is 10m on top of the threshold.
-  #
-  # no_data_state is OK: a Piri older than the release that adds the cache
-  # reports no series, and "Appliance has stopped reporting" covers a silent
-  # node.
-  rule {
-    name           = "Piri proof cache builds have stalled"
-    condition      = "B"
-    for            = "10m"
-    no_data_state  = "OK"
-    exec_err_state = "Error"
-
-    annotations = {
-      summary     = "Piri {{ $labels.instance }} has a piece that has waited over 30 minutes for its proof cache layer"
-      description = "A piece above 32 MiB padded has no proof cache layer, and Curio, inside Piri, proves such a piece only from its layer, so its proofs will fail once it is challenged. Check the Piri container's logs for the PDPv0_SaveCache task and its blobstore reads, and that Piri's harmonytask engine is running: `piri status` in the Piri container. After the Piri release that adds the cache, this fires until pieces parked before it all have their layers."
-    }
-
-    labels = {
-      team_name = "forge"
-      component = "appliance"
-      stage     = local.appliance_stage_label
-      severity  = "warning"
-    }
-
-    notification_settings {
-      policy = local.forge_policy
-    }
-
-    data {
-      ref_id         = "A"
-      datasource_uid = var.prometheus_datasource_uid
-
-      relative_time_range {
-        from = 600
-        to   = 0
-      }
-
-      model = jsonencode(merge(local.query_defaults, {
-        refId      = "A"
-        instant    = true
-        range      = false
-        intervalMs = 1000
-        expr       = <<-PROMQL
-          max by (appliance, region, node, instance) (
-            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
-          )
-        PROMQL
-      }))
-    }
-
-    data {
-      ref_id         = "B"
-      query_type     = "expression"
-      datasource_uid = "__expr__"
-
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-
-      model = jsonencode({
-        refId         = "B"
-        type          = "threshold"
-        expression    = "A"
-        datasource    = { type = "__expr__", uid = "__expr__" }
-        intervalMs    = 1000
-        maxDataPoints = 43200
-        conditions = [{
-          type      = "query"
-          operator  = { type = "and" }
-          query     = { params = ["B"] }
-          reducer   = { type = "last", params = [] }
-          evaluator = { type = "gt", params = [1800] }
         }]
       })
     }
