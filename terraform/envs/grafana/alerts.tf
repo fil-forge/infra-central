@@ -3582,8 +3582,15 @@ resource "grafana_rule_group" "appliance" {
   # 429 for a key over its own limit or the account over its plan's.
   # Cancelled calls are left out of the share, since they say nothing about
   # the endpoint. Calls are retried, so this is a warning: it is a delay, and
-  # a limit that blocks Piri for long shows as a stale chain head. `for` is
-  # 10m, so a brief burst does not fire.
+  # a limit that blocks Piri for long shows as a stale chain head.
+  #
+  # The window is five minutes, the evaluation interval, so each evaluation
+  # sees calls the last did not, and `for` = 10m needs three windows in a row
+  # over the threshold, ten to fifteen minutes of rate limiting. A longer
+  # window would not do: a single minute of refusals stays in a fifteen-minute
+  # one, above 5% of it, for three evaluations, and would fire ten minutes
+  # after the endpoint recovered. Going over a per-minute limit refuses the
+  # rest of that minute, so such bursts are expected.
   rule {
     name           = "Piri's chain RPC is rate limiting it"
     condition      = "B"
@@ -3593,7 +3600,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "Piri {{ $labels.instance }} is being rate limited by its chain RPC endpoint"
-      description = "More than one in twenty of Piri's calls to its chain RPC endpoint (Chain.Love) have been refused as over a rate limit for at least ten minutes. Calls are retried, so Piri falls behind rather than failing, but proofs and piece additions are delayed. Check the key's request limit and the account's credits in Chain.Love's dashboard, and whether something else shares the key."
+      description = "More than one in twenty of Piri's calls to its chain RPC endpoint (Chain.Love) have been refused as over a rate limit in each of three five-minute windows in a row. Calls are retried, so Piri falls behind rather than failing, but proofs and piece additions are delayed. Check the key's request limit and the account's credits in Chain.Love's dashboard, and whether something else shares the key."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
@@ -3613,7 +3620,7 @@ resource "grafana_rule_group" "appliance" {
       datasource_uid = var.prometheus_datasource_uid
 
       relative_time_range {
-        from = 900
+        from = 300
         to   = 0
       }
 
@@ -3624,11 +3631,11 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           sum by (appliance, region, node, instance) (
-            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="rate_limited"}[15m])
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="rate_limited"}[5m])
           )
           /
           sum by (appliance, region, node, instance) (
-            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome!="canceled"}[15m])
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome!="canceled"}[5m])
           )
         PROMQL
       }))
