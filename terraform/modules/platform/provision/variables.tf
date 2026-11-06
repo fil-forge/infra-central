@@ -119,6 +119,15 @@ variable "allow_list_table_arn" {
   type        = string
 }
 
+variable "appliance_backups" {
+  description = "The appliance backup bucket and the prefix of its writer users, which the appliance-backup-key phase mints access keys for. Null in a stage that takes no backups, where the phase reports it does not apply."
+  type = object({
+    bucket_name = string
+    user_prefix = string
+  })
+  default = null
+}
+
 variable "log_forwarding" {
   description = "Firehose ARN and the role CloudWatch Logs assumes to write to it, from the log-forwarding module. Null leaves the function's log group in CloudWatch only."
   type = object({
