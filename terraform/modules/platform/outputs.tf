@@ -86,6 +86,11 @@ output "dynamodb_table_arns" {
   value = module.storage.table_arns
 }
 
+output "appliance_backup_bucket" {
+  description = "The bucket appliances push their backups to, or null in a stage that takes none."
+  value       = one(module.appliance_backups[*].bucket_name)
+}
+
 output "chain" {
   description = "Consumed by the apps workspace so chain configuration lives in one place per stage."
   value       = var.chain

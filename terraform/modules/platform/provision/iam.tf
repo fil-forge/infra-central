@@ -106,6 +106,26 @@ data "aws_iam_policy_document" "this" {
     resources = [var.allow_list_table_arn]
   }
 
+  # The appliance-backup-key phase mints each region's backup key, so the
+  # secret never enters Terraform state. The grant is the three calls it makes
+  # and only on the writer users. Creating or deleting the users themselves is
+  # Terraform's, under the CI apply role.
+  dynamic "statement" {
+    for_each = var.appliance_backups == null ? [] : [var.appliance_backups]
+
+    content {
+      sid = "MintApplianceBackupKeys"
+
+      actions = [
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:ListAccessKeys",
+      ]
+
+      resources = ["arn:aws:iam::${var.account_id}:user/${statement.value.user_prefix}*"]
+    }
+  }
+
   # The RDS master credentials, which Terraform never sees because
   # manage_master_user_password keeps them out of state.
   statement {

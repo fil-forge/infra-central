@@ -78,16 +78,10 @@ func MintApplianceToken(ctx context.Context, client *api.Client, cfg ApplianceTo
 
 	name := ApplianceKeyName(cfg.Region)
 
-	// Wrapping is requested per call, through a header the client adds when its
-	// lookup function returns a TTL. The function answers for every request the
-	// client makes, so it goes on a clone used for this one call and nothing
-	// else; setting it on the caller's client would wrap unrelated requests.
-	wrapped, err := client.Clone()
+	wrapped, err := wrappingClient(client, wrapTTL)
 	if err != nil {
-		return "", "", fmt.Errorf("clone the openbao client: %w", err)
+		return "", "", err
 	}
-	wrapped.SetToken(client.Token())
-	wrapped.SetWrappingLookupFunc(func(operation, path string) string { return wrapTTL })
 
 	// The role's allowed_policies would supply the same set when a request
 	// names none, but that is a fallback inside OpenBao's token store. Naming
@@ -105,6 +99,50 @@ func MintApplianceToken(ctx context.Context, client *api.Client, cfg ApplianceTo
 	}
 
 	return resp.WrapInfo.Token, resp.WrapInfo.WrappedAccessor, nil
+}
+
+// WrapData stores data in OpenBao's cubbyhole for a single-use wrapping token,
+// and returns that token.
+//
+// It is how a credential minted outside OpenBao travels to a node the same way
+// the unseal token does: the operator carries a token that can be spent once,
+// and an interception makes the node's own unwrap fail. The node exchanges it
+// at sys/wrapping/unwrap and finds data under the response's data field.
+func WrapData(ctx context.Context, client *api.Client, data map[string]any, wrapTTL string) (string, error) {
+	if wrapTTL == "" {
+		return "", fmt.Errorf("a wrapping TTL is required; without one the data comes back in the clear")
+	}
+
+	wrapped, err := wrappingClient(client, wrapTTL)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := wrapped.Logical().WriteWithContext(ctx, "sys/wrapping/wrap", data)
+	if err != nil {
+		return "", fmt.Errorf("wrap the data: %w", err)
+	}
+	if resp == nil || resp.WrapInfo == nil || resp.WrapInfo.Token == "" {
+		return "", fmt.Errorf("sys/wrapping/wrap returned no wrapping token")
+	}
+	return resp.WrapInfo.Token, nil
+}
+
+// wrappingClient returns a copy of client whose every request asks OpenBao to
+// wrap the response for wrapTTL.
+//
+// Wrapping is requested per call, through a header the client adds when its
+// lookup function returns a TTL. The function answers for every request the
+// client makes, so it goes on a clone used for one call and nothing else;
+// setting it on the caller's client would wrap unrelated requests.
+func wrappingClient(client *api.Client, wrapTTL string) (*api.Client, error) {
+	wrapped, err := client.Clone()
+	if err != nil {
+		return nil, fmt.Errorf("clone the openbao client: %w", err)
+	}
+	wrapped.SetToken(client.Token())
+	wrapped.SetWrappingLookupFunc(func(operation, path string) string { return wrapTTL })
+	return wrapped, nil
 }
 
 // refuseUnwrappedToken turns a response that came back unwrapped into an error,
