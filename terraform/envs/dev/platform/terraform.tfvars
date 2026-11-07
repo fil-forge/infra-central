@@ -44,3 +44,16 @@ chain = {
 # in us-east-2.
 appliance_regions         = ["us-east-9"]
 retired_appliance_regions = []
+
+# The appliances' egress addresses, the only sources the signing service admits,
+# since it signs with the payer key for whoever reaches it. Each key is a label
+# from appliance_regions. Null admits any source and an empty map closes the
+# route; docs/appliance-onboarding.md has the step that adds an address.
+#
+# us-east-9 is the dev node's Elastic IP, which fil-forge/infra-nodes allocates
+# and associates with the instance (terraform/modules/node/main.tf, aws_eip.node),
+# so the node also sends from it. The node's Ingot and Piri DNS records point at
+# the same address.
+signer_allowed_sources = {
+  us-east-9 = "3.16.7.182"
+}

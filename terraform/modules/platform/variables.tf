@@ -195,6 +195,24 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+variable "signer_allowed_sources" {
+  description = "Egress IPv4 address of each appliance, by region label: the only sources the signing service admits, since it signs with the payer key for whoever reaches it. Null admits any source. An empty map gives the service no public route. The apps root applies it; this root holds it beside appliance_regions so both change in one commit."
+  type        = map(string)
+
+  validation {
+    condition = var.signer_allowed_sources == null ? true : alltrue([
+      for address in values(var.signer_allowed_sources) : can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", address)) && can(cidrhost("${address}/32", 0))
+    ])
+    error_message = "Each signer_allowed_sources value must be a bare IPv4 address, without a prefix length."
+  }
+
+  # A retired region's node must lose its access along with its unseal key.
+  validation {
+    condition     = var.signer_allowed_sources == null ? true : alltrue([for region in keys(var.signer_allowed_sources) : contains(var.appliance_regions, region)])
+    error_message = "Every signer_allowed_sources key must be a label in appliance_regions. Retiring a region removes its address too."
+  }
+}
+
 variable "vault_trigger" {
   description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole."
   type        = string

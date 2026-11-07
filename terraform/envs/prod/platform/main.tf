@@ -74,6 +74,11 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+variable "signer_allowed_sources" {
+  description = "The appliances' egress addresses the signing service admits, in terraform.tfvars beside appliance_regions. See docs/appliance-onboarding.md."
+  type        = map(string)
+}
+
 # Created by the regional bootstrap, which outlives this root.
 data "aws_kms_alias" "aurora" {
   name = module.constants.prod_aurora_key_alias
@@ -107,6 +112,7 @@ module "platform" {
 
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
+  signer_allowed_sources    = var.signer_allowed_sources
 
   # Three availability zones with a NAT gateway in each, where dev accepts two
   # and a single shared gateway. Appliances depend on this stage being

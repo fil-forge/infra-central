@@ -148,6 +148,23 @@ check "pandora_sites_have_a_cluster" {
   }
 }
 
+locals {
+  # Active appliances the signing service does not admit yet.
+  signer_unadmitted_regions = var.signer_allowed_sources == null ? [] : [
+    for region in var.appliance_regions : region if !contains(keys(var.signer_allowed_sources), region)
+  ]
+}
+
+# A warning, not a validation: onboarding commits a region's label before its
+# node has an address (docs/appliance-onboarding.md). Until the address is
+# added, every signing call from that node gets the signer's 403.
+check "signer_admits_every_appliance" {
+  assert {
+    condition     = length(local.signer_unadmitted_regions) == 0
+    error_message = "The signing service admits no address for ${join(", ", local.signer_unadmitted_regions)}, so that appliance's signing calls get a 403. Add its egress address to signer_allowed_sources once the node has one."
+  }
+}
+
 module "storage" {
   source = "./storage"
 
