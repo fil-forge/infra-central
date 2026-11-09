@@ -12,14 +12,10 @@
 // starts; but OpenBao must be running before it can be configured. Phase seed
 // runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
 //
-// Six more phases exist that Terraform must never invoke, because an apply must
-// not move money, issue a credential or delete a registration. Phase fund
-// deposits USDFC for the payer, appliance-token mints a regional appliance's
-// unseal credential, appliance-backup-key mints the access key it writes its
-// backups with, onboard admits an appliance, retire removes a region's Ingot
-// identity so it can be admitted again under a different DID, and reset-apps
-// wipes the apps' databases and hilt's tenant secrets on dev or staging. All six
-// are run by an operator through a script that shows the plan and asks first.
+// Every other phase is for an operator, and Terraform must never invoke it: an
+// apply must not move money, issue a credential or delete a registration. An
+// operator runs each one through a script in scripts/ that shows the plan and
+// asks before acting. The switch in handle lists them all.
 package main
 
 import (
