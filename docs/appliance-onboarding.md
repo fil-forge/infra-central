@@ -103,6 +103,12 @@ The script is safe to re-run. It skips a credential the region already holds and
 missing, so it is also how an appliance that predates the backup key gets one: a plain run skips
 the live unseal token and mints the backup key.
 
+A run that fails while minting is the exception. The Lambda may have created the credential before
+the failure, for example when the CLI times out or the Lambda does, and a plain re-run would then
+skip a credential nobody received. Re-run with the reissue flag the script names,
+`MINT_ARGS=--reissue-unseal-token` or `MINT_ARGS=--reissue-backup-key`. Each replaces whatever the
+failed run left, and mints as usual when there is nothing.
+
 ### Delivering them
 
 Send the wrapping tokens to whoever operates the node. Chat is acceptable: each can be spent once,

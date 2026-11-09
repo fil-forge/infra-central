@@ -18,6 +18,11 @@
 # second run mints nothing. Dev takes no backups, so there the backup key is
 # reported as not applicable.
 #
+# After a run that failed while minting, re-run with the reissue flag the
+# failure names. The failed call may have created a credential before its
+# response was lost, and a plain re-run would skip a credential nobody received.
+# Each reissue flag mints as usual when the region holds nothing.
+#
 # Two rounds of invocations, always in this order:
 #   1. without confirmation, which reads OpenBao and IAM and prints the plan
 #   2. after you approve it, with confirmation, which mints
@@ -238,7 +243,9 @@ if mints "$token_action"; then
     unset token_result
   else
     failed=true
-    echo "The unseal token was not minted; see the error above." >&2
+    echo "The unseal token was not delivered; see the error above. The phase may" >&2
+    echo "have minted it before failing, so re-run with --reissue-unseal-token: it" >&2
+    echo "revokes a token nobody received, and mints as usual if there is none." >&2
     echo >&2
   fi
 else
@@ -273,8 +280,9 @@ if mints "$backup_action"; then
     unset backup_result
   else
     failed=true
-    echo "The backup key was not minted; see the error above. A re-run skips the" >&2
-    echo "unseal token if it was minted, and retries only the backup key." >&2
+    echo "The backup key was not delivered; see the error above. The phase may have" >&2
+    echo "created it before failing, so re-run with --reissue-backup-key: it deletes" >&2
+    echo "a key nobody received, and mints as usual if there is none." >&2
     echo >&2
   fi
 elif [ "$backup_action" = not-applicable ]; then
