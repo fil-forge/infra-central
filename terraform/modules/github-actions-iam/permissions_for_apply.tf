@@ -157,10 +157,12 @@ data "aws_iam_policy_document" "apply" {
   }
 
   # The appliance backup bucket, one per stage. The wildcard matches the
-  # bucket's object ARNs too, so the action list is what keeps CI out of the
-  # backups: every action here works on the bucket and none reads or writes an
-  # object. Adding s3:GetObject or s3:* would let any change merged to main
-  # read every appliance's database backups.
+  # bucket's object ARNs too, so the action list is what withholds object
+  # access: every action here works on the bucket and none reads or writes an
+  # object. Adding s3:GetObject or s3:* would give every apply direct read
+  # access to every appliance's database backups. The role can still reach them
+  # indirectly, through the bucket policy or an fc-* role it writes, and review
+  # of the merged change is the control there.
   statement {
     sid       = "ManageApplianceBackupBucket"
     resources = ["arn:aws:s3:::forge-nodes-backups-*"]
