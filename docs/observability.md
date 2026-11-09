@@ -153,6 +153,14 @@ parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with 
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
 
+No rule watches appliance backups yet. Freshness alerts for the Postgres and OpenBao backups arrive
+with the jobs that upload them,
+[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599) and
+[FIL-1745](https://linear.app/filecoin-foundation/issue/FIL-1745); a rule added before them would
+fire with nothing uploading. Whether the backup bucket and a region's writer are set up correctly is
+checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
+[appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
+
 ## Adding an alert or panel
 
 What a change needs so that on-call hears when it breaks. Appliance services (Piri, Ingot and the
