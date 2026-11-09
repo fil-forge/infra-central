@@ -16,7 +16,7 @@ require (
 	github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8
 	github.com/fil-forge/ucantool v0.1.0
 	github.com/hashicorp/go-secure-stdlib/parseutil v0.2.0
-	github.com/jackc/pgx/v5 v5.11.0
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/openbao/openbao/api/v2 v2.7.1
 	gitlab.com/yawning/secp256k1-voi v0.0.0-20230925100816-f2616030848b
 	go.uber.org/zap v1.28.0
