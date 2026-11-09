@@ -137,6 +137,7 @@ appliance label.
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
 | Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
+| Appliance OpenBao snapshot is stale                  | Forge Regions            | snapshot stamp                | FIL-1745 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
@@ -153,11 +154,11 @@ parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with 
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
 
-No rule watches appliance backups yet. Freshness alerts for the Postgres and OpenBao backups arrive
-with the jobs that upload them,
-[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599) and
-[FIL-1745](https://linear.app/filecoin-foundation/issue/FIL-1745); a rule added before them would
-fire with nothing uploading. Whether the backup bucket and a region's writer are set up correctly is
+"Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
+backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
+infra-nodes' snapshot job stamps after each upload, so only appliances that take backups report it.
+The Postgres backups get a freshness rule with the job that uploads them,
+[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
 [appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
 

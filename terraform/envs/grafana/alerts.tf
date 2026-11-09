@@ -3298,6 +3298,99 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # The appliance's last OpenBao raft snapshot in the backup bucket is over a
+  # day old. openbao_snapshot_last_success_timestamp is a textfile-collector
+  # gauge, like the deploy stamp, written by infra-nodes
+  # scripts/host/snapshot-openbao.sh after each upload, so a job that fails or
+  # a timer that stops firing leaves the series present and its value ageing.
+  # The timer fires daily with up to 30 minutes of random delay, so 26 hours
+  # is a missed run rather than a late one: infra-nodes docs/observability.md
+  # documents the same threshold.
+  #
+  # Only appliances that take backups report the series: dev has none, and a
+  # node reports it from its first snapshot, which provision-backups.sh takes
+  # in the foreground before it enables the timer. no_data_state is OK for
+  # that reason, and "Appliance has stopped reporting" covers a silent node.
+  #
+  # A warning: the node keeps serving, and what is at risk is losing the
+  # secrets written since the last snapshot if the node is lost before the
+  # next one.
+  #
+  # Last in the group, so that adding it moved no other rule's uid.
+  rule {
+    name           = "Appliance OpenBao snapshot is stale"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
+      description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. On the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          max by (node, region, appliance) (
+            time() - openbao_snapshot_last_success_timestamp{${local.appliance_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [93600] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
