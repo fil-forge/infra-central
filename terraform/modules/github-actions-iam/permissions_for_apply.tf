@@ -156,6 +156,62 @@ data "aws_iam_policy_document" "apply" {
     }
   }
 
+  # The appliance backup bucket, one per stage. The wildcard matches the
+  # bucket's object ARNs too, so the action list is what withholds object
+  # access: every action here works on the bucket and none reads or writes an
+  # object. Adding s3:GetObject or s3:* would give every apply direct read
+  # access to every appliance's database backups. The role can still reach them
+  # indirectly, through the bucket policy or an fc-* role it writes, and review
+  # of the merged change is the control there. CreateBucket sends the bucket's
+  # tags inline, which AWS authorises as s3:TagResource.
+  statement {
+    sid       = "ManageApplianceBackupBucket"
+    resources = ["arn:aws:s3:::forge-nodes-backups-*"]
+
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:DeleteBucketPolicy",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucket*",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:ListBucket",
+      "s3:PutBucket*",
+      "s3:PutEncryptionConfiguration",
+      "s3:PutLifecycleConfiguration",
+      "s3:TagResource",
+    ]
+  }
+
+  # Each region's backup writer. CI creates and deletes the users and their
+  # inline policy, and never mints a key: the provision Lambda does that, so the
+  # secret stays out of state. The deletes are what the AWS provider's
+  # force_destroy calls when a retired region's user goes. DeleteLoginProfile
+  # runs on every delete, and the others run when the user holds that kind of
+  # credential, which in practice is the access key the Lambda minted.
+  statement {
+    sid       = "WriteApplianceBackupUsers"
+    resources = ["arn:aws:iam::${var.account_id}:user/forge-nodes-backup-*"]
+
+    actions = [
+      "iam:CreateUser",
+      "iam:DeactivateMFADevice",
+      "iam:DeleteAccessKey",
+      "iam:DeleteLoginProfile",
+      "iam:DeleteServiceSpecificCredential",
+      "iam:DeleteSigningCertificate",
+      "iam:DeleteSSHPublicKey",
+      "iam:DeleteUser",
+      "iam:DeleteUserPolicy",
+      "iam:DetachUserPolicy",
+      "iam:PutUserPolicy",
+      "iam:TagUser",
+      "iam:UntagUser",
+    ]
+  }
+
   statement {
     sid       = "ListBuckets"
     actions   = ["s3:ListAllMyBuckets"]
