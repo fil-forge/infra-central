@@ -98,9 +98,12 @@ FUNCTION="fc-${STAGE}-provision"
 # wrapping token, and this is the only place on an operator's disk one ever
 # exists. The signals are trapped so an interrupted script still cleans up:
 # bash runs no EXIT trap when an untrapped signal kills it, and the file would
-# be left holding a live wrapping token for the rest of its 24 hours.
+# be left holding a live wrapping token for the rest of its 24 hours. The
+# signal handler exits, which runs the EXIT trap; a handler that only removed
+# the file would let the script carry on minting.
 RESPONSE="$(umask 077; mktemp)"
-trap 'rm -f "$RESPONSE"' EXIT INT TERM HUP
+trap 'rm -f "$RESPONSE"' EXIT
+trap 'exit 130' INT TERM HUP
 
 # invoke <phase> <confirm> — call a phase and print its JSON response. A Lambda
 # error is reported as a successful invocation with FunctionError set, so that
