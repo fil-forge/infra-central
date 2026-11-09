@@ -108,6 +108,10 @@ module "platform" {
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
 
+  # Each backup is locked for 35 days in compliance mode, which is what RFC 37
+  # asks of the appliance backup target.
+  appliance_backups = { retention_days = 35 }
+
   # Three availability zones with a NAT gateway in each, where dev accepts two
   # and a single shared gateway. Appliances depend on this stage being
   # reachable, so losing a zone must not cost it egress.

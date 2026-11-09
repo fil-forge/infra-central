@@ -195,6 +195,19 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+variable "appliance_backups" {
+  description = <<-EOT
+    The bucket appliances push their database and OpenBao backups to, and a
+    writer user for each label in appliance_regions. Null for a stage whose
+    appliances take no backups. retention_days is how long each backup is locked
+    in compliance mode. See docs/decisions/2026-11-appliance-backup-target.md.
+  EOT
+  type = object({
+    retention_days = number
+  })
+  default = null
+}
+
 variable "vault_trigger" {
   description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole."
   type        = string

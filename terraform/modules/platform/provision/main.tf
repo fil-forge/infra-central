@@ -70,6 +70,12 @@ resource "aws_lambda_function" "this" {
       # hilt already takes to resolve sprue's did:web document.
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
 
+      # Used only by the appliance-backup-key phase, which Terraform never
+      # invokes. Empty in a stage that takes no backups: Lambda rejects a null
+      # value, and the phase reads the empty bucket as "not applicable".
+      FORGE_BACKUP_BUCKET      = try(var.appliance_backups.bucket_name, "")
+      FORGE_BACKUP_USER_PREFIX = try(var.appliance_backups.user_prefix, "")
+
       # Used only by the fund phase, which Terraform never invokes.
       FORGE_CHAIN_RPC_URL        = var.chain.rpc_url
       FORGE_CHAIN_ID             = tostring(var.chain.chain_id)
