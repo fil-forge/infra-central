@@ -57,11 +57,10 @@ alert_stages = ["staging", "prod"]
 live_appliances = ["staging-eu-central-3"]
 
 # The alert_stages whose appliances push backups to central: those whose
-# platform root sets appliance_backups. Prod's backup target comes with its own
-# change, which adds prod here too. scripts/check-backup-stages.sh fails the
+# platform root sets appliance_backups. scripts/check-backup-stages.sh fails the
 # build when the two disagree, so the stale-snapshot rule cannot miss a stage
 # that takes backups or page for one that takes none.
-appliance_backup_stages = ["staging"]
+appliance_backup_stages = ["staging", "prod"]
 
 # The contact point for the IRM integration Forge shares with FilOne, which
 # routing.tf's tree delivers every alert to. Alerting -> Contact points; it was
