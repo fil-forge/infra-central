@@ -162,7 +162,8 @@ data "aws_iam_policy_document" "apply" {
   # object. Adding s3:GetObject or s3:* would give every apply direct read
   # access to every appliance's database backups. The role can still reach them
   # indirectly, through the bucket policy or an fc-* role it writes, and review
-  # of the merged change is the control there.
+  # of the merged change is the control there. CreateBucket sends the bucket's
+  # tags inline, which AWS authorises as s3:TagResource.
   statement {
     sid       = "ManageApplianceBackupBucket"
     resources = ["arn:aws:s3:::forge-nodes-backups-*"]
@@ -180,6 +181,7 @@ data "aws_iam_policy_document" "apply" {
       "s3:PutBucket*",
       "s3:PutEncryptionConfiguration",
       "s3:PutLifecycleConfiguration",
+      "s3:TagResource",
     ]
   }
 
