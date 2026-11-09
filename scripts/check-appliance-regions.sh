@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail if expected_appliances in the grafana root disagrees with the
+# Fail if live_appliances in the grafana root disagrees with the
 # appliance_regions of the alert stages' platform roots.
 #
 # The rules that read absence need to know which appliances should be alive:
@@ -26,11 +26,11 @@ if [ -z "$alert_stages" ]; then
   echo "could not read alert_stages from $grafana_tfvars" >&2
   exit 1
 fi
-if ! grep -q '^expected_appliances *= *\[' "$grafana_tfvars"; then
-  echo "could not read expected_appliances from $grafana_tfvars" >&2
+if ! grep -q '^live_appliances *= *\[' "$grafana_tfvars"; then
+  echo "could not read live_appliances from $grafana_tfvars" >&2
   exit 1
 fi
-listed="$(read_list expected_appliances "$grafana_tfvars" | sort)"
+listed="$(read_list live_appliances "$grafana_tfvars" | sort)"
 
 live=""
 for stage in $alert_stages; do
@@ -50,8 +50,8 @@ done
 live="$(printf '%s' "$live" | sed '/^$/d' | sort)"
 
 if [ "$listed" != "$live" ]; then
-  printf 'expected_appliances in %s: %s\n' "$grafana_tfvars" "$(paste -sd' ' - <<<"$listed")" >&2
+  printf 'live_appliances in %s: %s\n' "$grafana_tfvars" "$(paste -sd' ' - <<<"$listed")" >&2
   printf 'appliance_regions of the alert stages: %s\n' "$(paste -sd' ' - <<<"$live")" >&2
-  printf '\nEdit expected_appliances to match.\n' >&2
+  printf '\nEdit live_appliances to match.\n' >&2
   exit 1
 fi

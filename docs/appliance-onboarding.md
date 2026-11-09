@@ -38,7 +38,7 @@ appliance_regions = ["us-east-9"]
 The region label is the appliance's virtual S3 region, not an AWS one. It has to match the node's
 Ingot `region:` config and what clients sign with, or requests fail without naming the cause.
 
-In staging and prod, add `<stage>-<region>` to `expected_appliances` in
+In staging and prod, add `<stage>-<region>` to `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
 "Appliance has stopped reporting" reads that list and pages for the new region from about 25
 minutes after the grafana apply until its node first reports, so bring the node up promptly or
@@ -348,7 +348,7 @@ appliance_regions         = []
 retired_appliance_regions = ["us-east-9"]
 ```
 
-In staging and prod, remove `<stage>-<region>` from `expected_appliances` in
+In staging and prod, remove `<stage>-<region>` from `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
 Metrics cannot tell a retired appliance from a dead one, since both stop reporting, so that list is
 what keeps "Appliance has stopped reporting" from paging when the retired node goes dark.

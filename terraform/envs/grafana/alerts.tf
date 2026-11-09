@@ -28,13 +28,13 @@ variable "alert_stages" {
   default     = ["prod"]
 }
 
-variable "expected_appliances" {
+variable "live_appliances" {
   description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. An appliance on this list that is not reporting pages about 25 minutes after the apply. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
   type        = list(string)
 
   validation {
-    condition     = length(var.expected_appliances) > 0
-    error_message = "expected_appliances is empty. \"Appliance has stopped reporting\" builds its query from this list and cannot be created from an empty one."
+    condition     = length(var.live_appliances) > 0
+    error_message = "live_appliances is empty. \"Appliance has stopped reporting\" builds its query from this list and cannot be created from an empty one."
   }
 }
 
@@ -86,7 +86,7 @@ locals {
   # the equality matchers and nothing else, so label_replace adds the region
   # that the summary and the dashboard link read.
   stopped_reporting_expr = join("\nor\n", [
-    for appliance in var.expected_appliances :
+    for appliance in var.live_appliances :
     "label_replace(absent_over_time(deploy_last_success_timestamp{project=\"reconcile\", appliance=\"${appliance}\", service_name=~\"appliance-.*-host\"}[15m]), \"region\", \"${trimprefix(appliance, "${split("-", appliance)[0]}-")}\", \"\", \"\")"
   ])
 
@@ -96,7 +96,7 @@ locals {
   # alternation matches nothing, and a rule that alerts on no data would fire
   # forever.
   backup_appliances = [
-    for appliance in var.expected_appliances : appliance
+    for appliance in var.live_appliances : appliance
     if contains(var.appliance_backup_stages, split("-", appliance)[0])
   ]
   backup_appliance_matcher = "appliance=~\"(${join("|", local.backup_appliances)})\", service_name=~\"appliance-.*-host\""
@@ -1068,7 +1068,7 @@ resource "grafana_rule_group" "appliance" {
   # returns 1 for each listed appliance with no reconcile stamp in the last 15
   # minutes, and the threshold stage is `gt 0`.
   #
-  # The appliances watched are the expected_appliances list, which
+  # The appliances watched are the live_appliances list, which
   # scripts/check-appliance-regions.sh keeps in step with each stage's
   # appliance_regions. A listed appliance alerts from the moment it has no data,
   # whether it has never reported or stopped long ago, and keeps alerting until
@@ -3335,7 +3335,7 @@ resource "grafana_rule_group" "appliance" {
 
   # The appliance's last OpenBao raft snapshot in the backup bucket is over a
   # day old, or the appliance has stopped reporting when it was. It watches
-  # the live appliances (expected_appliances) in the stages that push backups
+  # the live_appliances in the stages that push backups
   # (appliance_backup_stages), two lists that scripts/check-appliance-regions.sh
   # and scripts/check-backup-stages.sh hold in step with the platform roots.
   # Every such appliance owes a snapshot: central mints a backup key for each
