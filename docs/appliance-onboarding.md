@@ -39,9 +39,10 @@ The region label is the appliance's virtual S3 region, not an AWS one. It has to
 Ingot `region:` config and what clients sign with, or requests fail without naming the cause.
 
 In staging and prod, add `<stage>-<region>` to `expected_appliances` in
-`terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do. The
-rules that watch for an appliance going dark read that list, and they stay quiet for the new
-region until its node first reports.
+`terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
+"Appliance has stopped reporting" reads that list and pages for the new region from about 25
+minutes after the grafana apply until its node first reports, so bring the node up promptly or
+silence the rule for that appliance.
 
 The apply creates the transit key `appliance-unseal-us-east-9` and a policy of the same name
 granting `update` on exactly that key's encrypt and decrypt paths. In staging and prod it also

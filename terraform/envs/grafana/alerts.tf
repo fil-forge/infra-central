@@ -29,9 +29,13 @@ variable "alert_stages" {
 }
 
 variable "expected_appliances" {
-  description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
+  description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. An appliance on this list that is not reporting pages about 25 minutes after the apply. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
   type        = list(string)
-  default     = []
+
+  validation {
+    condition     = length(var.expected_appliances) > 0
+    error_message = "expected_appliances is empty. \"Appliance has stopped reporting\" builds its query from this list and cannot be created from an empty one."
+  }
 }
 
 variable "appliance_backup_stages" {
@@ -77,11 +81,14 @@ locals {
   # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
 
-  # The live appliances by name, for the rules that read absence. Metrics alone
-  # cannot tell a retired appliance from a dead one, since both stop reporting;
-  # this list is what says which is which. A retired region leaves it in the
-  # commit that retires it, so it drops out of these rules at once.
-  live_appliance_matcher = "appliance=~\"(${join("|", var.expected_appliances)})\", service_name=~\"appliance-.*-host\""
+  # One clause per live appliance, each returning a series only while that
+  # appliance's reconcile stamp is missing. absent_over_time keeps the labels of
+  # the equality matchers and nothing else, so label_replace adds the region
+  # that the summary and the dashboard link read.
+  stopped_reporting_expr = join("\nor\n", [
+    for appliance in var.expected_appliances :
+    "label_replace(absent_over_time(deploy_last_success_timestamp{project=\"reconcile\", appliance=\"${appliance}\", service_name=~\"appliance-.*-host\"}[15m]), \"region\", \"${trimprefix(appliance, "${split("-", appliance)[0]}-")}\", \"\", \"\")"
+  ])
 
   # The live appliances in the stages that push backups, each of which owes an
   # OpenBao snapshot. Empty when no stage takes backups or none of their regions
@@ -1049,7 +1056,7 @@ resource "grafana_rule_group" "appliance" {
   interval_seconds = 300
 
   # The node has gone away: nothing from its host exporter in the last fifteen
-  # minutes, though it reported some time in the last day. This is the rule
+  # minutes from an appliance that should be live. This is the rule
   # that catches a whole appliance going dark: the other appliance rules read
   # data that vanishes with the node, and are built to stay quiet when it does.
   # It cannot tell a dead box from a live one whose host exporter or Alloy has
@@ -1058,23 +1065,22 @@ resource "grafana_rule_group" "appliance" {
   # reconciling", at the end of this group.
   #
   # Absence is the signal, so there is no value to compare: the expression
-  # tests for a series that was there and is not. The result is 1, so the
-  # threshold stage is `gt 0`.
+  # returns 1 for each listed appliance with no reconcile stamp in the last 15
+  # minutes, and the threshold stage is `gt 0`.
   #
-  # Only the live appliances are watched, the expected_appliances list that
+  # The appliances watched are the expected_appliances list, which
   # scripts/check-appliance-regions.sh keeps in step with each stage's
-  # appliance_regions. A retired appliance stops reporting exactly as a dead
-  # one does, and the list is what tells them apart: retiring a region removes
-  # it in the same commit, so its node going dark never fires this. A region
-  # being brought up has no history yet and stays quiet until it first reports.
-  # The 24h window bounds how long a dead node alerts; after that it falls out
-  # of both sides.
+  # appliance_regions. A listed appliance alerts from the moment it has no data,
+  # whether it has never reported or stopped long ago, and keeps alerting until
+  # it reports or leaves the list. A retired appliance stops reporting exactly
+  # as a dead one does; retiring a region removes it from the list in the same
+  # commit, so its node going dark never fires this. A new region alerts from
+  # about 25 minutes after the apply that lists it until its node first reports.
   #
-  # Recovery is a no-data event: a node that reports again satisfies both
-  # present_over_time clauses, the `unless` cancels them, and nothing is left.
-  # no_data_state = OK is what turns that into Normal. An instant query, so no
-  # reduce stage: a range query reduced with `last` would keep the last point
-  # it fired on for the window's length after the node came back.
+  # Recovery is a no-data event: once every listed appliance reports, every
+  # clause is empty, and no_data_state = OK turns that into Normal. An instant
+  # query, so no reduce stage: a range query reduced with `last` would keep the
+  # last point it fired on for the window's length after the node came back.
   #
   # Critical: a node that has gone dark may be serving nothing, and nothing
   # else would say so.
@@ -1086,7 +1092,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Alerting"
 
     annotations = {
-      summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
+      summary          = "{{ $labels.appliance }} has stopped reporting"
       description      = "Nothing from this node's host exporter has arrived for fifteen minutes. Either the node is down or unreachable, or its host exporter or Alloy has stopped, and the dashboards can no longer tell which."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
@@ -1119,15 +1125,7 @@ resource "grafana_rule_group" "appliance" {
         instant      = true
         range        = false
         legendFormat = "{{appliance}}"
-        expr         = <<-PROMQL
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.live_appliance_matcher}}[24h])
-          )
-          unless
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.live_appliance_matcher}}[15m])
-          )
-        PROMQL
+        expr         = local.stopped_reporting_expr
       }))
     }
 
