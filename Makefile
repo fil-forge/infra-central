@@ -198,6 +198,10 @@ check:
 # because the dashboards carry Grafana's own ${...} interpolation and so cannot
 # be generated, so CI compares them rather than trusting anyone to edit both.
 	scripts/check-stage-picker.sh
+# The stale-snapshot rule watches the alert_stages that take appliance backups,
+# which the grafana root lists itself because it cannot read the platform roots
+# that decide it. CI compares the two.
+	scripts/check-backup-stages.sh
 
 .PHONY: fmt
 fmt:

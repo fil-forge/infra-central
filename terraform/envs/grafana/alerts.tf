@@ -28,6 +28,12 @@ variable "alert_stages" {
   default     = ["prod"]
 }
 
+variable "appliance_backup_stages" {
+  description = "Stages whose appliances push backups to central, the alert_stages whose platform root sets appliance_backups. Every appliance in one of them is expected to report its OpenBao snapshot stamp. scripts/check-backup-stages.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+  default     = []
+}
+
 variable "prometheus_datasource_uid" {
   description = "UID of the grafanacloud-prom data source. Alert rules address a data source by uid where a dashboard can use its name. It is in the URL of the data source's settings page, and it is not a secret."
   type        = string
@@ -64,6 +70,12 @@ locals {
   # by node label is a requirement; it happens in Terraform because a Grafana
   # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
+
+  # The same, narrowed to the stages whose appliances push backups. Empty when
+  # none does, and then the rules that use it are not created: an empty
+  # alternation matches nothing, and a rule that alerts on no data would fire
+  # forever.
+  appliance_backup_matcher = "appliance=~\"(${join("|", var.appliance_backup_stages)})-.*\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
   # zone, once per target group and once for the whole balancer. The two extra
@@ -3300,97 +3312,116 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # The appliance's last OpenBao raft snapshot in the backup bucket is over a
-  # day old. openbao_snapshot_last_success_timestamp is a textfile-collector
-  # gauge, like the deploy stamp, written by infra-nodes
-  # scripts/host/snapshot-openbao.sh after each upload, so a job that fails or
-  # a timer that stops firing leaves the series present and its value ageing.
-  # The timer fires daily with up to 30 minutes of random delay, so 26 hours
-  # is a missed run rather than a late one: infra-nodes docs/observability.md
-  # documents the same threshold.
+  # day old, or the appliance has stopped reporting when it was. Only stages
+  # whose appliances push backups are watched, the appliance_backup_stages
+  # scripts/check-backup-stages.sh holds in step with the platform roots, and
+  # every appliance in such a stage owes a snapshot: central mints a backup key
+  # for each region in its appliance_regions.
   #
-  # Every appliance that takes backups reports the series: infra-nodes'
-  # reconcile pass writes it as 0 on a node that has never uploaded a
-  # snapshot or has lost its stamp, so a missing snapshot fires this rule
-  # rather than leaving it without data. An appliance that takes no backups,
-  # dev among them, reports nothing, which is why no_data_state is OK. A node
-  # whose metrics stop altogether is "Appliance has stopped reporting".
+  # openbao_snapshot_last_success_timestamp is a textfile-collector gauge, like
+  # the deploy stamp, written by infra-nodes scripts/host/snapshot-openbao.sh
+  # after each upload, so a job that fails or a timer that stops firing leaves
+  # the series present and its value ageing. The timer fires daily with up to
+  # 30 minutes of random delay, so 26 hours is a missed run rather than a late
+  # one: infra-nodes docs/observability.md documents the same threshold.
+  #
+  # The second half of the query catches an appliance that still reconciles
+  # but reports no stamp at all: one that never uploaded a snapshot, lost its
+  # stamp file, or runs code that stopped writing it. `or` keeps every series
+  # from the left and adds those right-hand series whose labels the left lacks,
+  # so such an appliance reads as 1e10 seconds stale. A finite number, because
+  # +Inf does not survive the trip through Grafana's expressions.
+  #
+  # no_data_state is Alerting: with at least one backup stage, no data means no
+  # appliance there reports even its reconcile stamp. That overlaps "Appliance
+  # has stopped reporting" on purpose, so that a broken stamp pipeline cannot
+  # silence this rule. The rule is not created while no stage takes backups,
+  # because then it would have nothing to match and would fire forever.
   #
   # A warning: the node keeps serving, and what is at risk is losing the
   # secrets written since the last snapshot if the node is lost before the
   # next one.
   #
   # Last in the group, so that adding it moved no other rule's uid.
-  rule {
-    name           = "Appliance OpenBao snapshot is stale"
-    condition      = "B"
-    for            = "10m"
-    no_data_state  = "OK"
-    exec_err_state = "Error"
+  dynamic "rule" {
+    for_each = length(var.appliance_backup_stages) > 0 ? [1] : []
 
-    annotations = {
-      summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
-      description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. An age of decades means the stamp is 0: the node takes backups and has never uploaded a snapshot, so run provision-backups.sh on it. Otherwise, on the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
-      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
-    }
+    content {
+      name           = "Appliance OpenBao snapshot is stale"
+      condition      = "B"
+      for            = "10m"
+      no_data_state  = "Alerting"
+      exec_err_state = "Error"
 
-    labels = {
-      team_name = "forge"
-      component = "appliance"
-      stage     = local.appliance_stage_label
-      severity  = "warning"
-    }
-
-    notification_settings {
-      policy = local.forge_policy
-    }
-
-    data {
-      ref_id         = "A"
-      datasource_uid = var.prometheus_datasource_uid
-
-      relative_time_range {
-        from = 600
-        to   = 0
+      annotations = {
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
+        description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. An age of centuries means the appliance reconciles but reports no snapshot stamp: it never uploaded a snapshot, so run provision-backups.sh on it, or the code that writes the stamp is broken. With no data at all, no appliance in a backup stage is reporting. Otherwise, on the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
+        runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       }
 
-      model = jsonencode(merge(local.query_defaults, {
-        refId        = "A"
-        instant      = true
-        range        = false
-        legendFormat = "{{appliance}}"
-        expr         = <<-PROMQL
-          max by (node, region, appliance) (
-            time() - openbao_snapshot_last_success_timestamp{${local.appliance_matcher}}
-          )
-        PROMQL
-      }))
-    }
-
-    data {
-      ref_id         = "B"
-      query_type     = "expression"
-      datasource_uid = "__expr__"
-
-      relative_time_range {
-        from = 0
-        to   = 0
+      labels = {
+        team_name = "forge"
+        component = "appliance"
+        stage     = local.appliance_stage_label
+        severity  = "warning"
       }
 
-      model = jsonencode({
-        refId         = "B"
-        type          = "threshold"
-        expression    = "A"
-        datasource    = { type = "__expr__", uid = "__expr__" }
-        intervalMs    = 1000
-        maxDataPoints = 43200
-        conditions = [{
-          type      = "query"
-          operator  = { type = "and" }
-          query     = { params = ["B"] }
-          reducer   = { type = "last", params = [] }
-          evaluator = { type = "gt", params = [93600] }
-        }]
-      })
+      notification_settings {
+        policy = local.forge_policy
+      }
+
+      data {
+        ref_id         = "A"
+        datasource_uid = var.prometheus_datasource_uid
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        model = jsonencode(merge(local.query_defaults, {
+          refId        = "A"
+          instant      = true
+          range        = false
+          legendFormat = "{{appliance}}"
+          expr         = <<-PROMQL
+              max by (node, region, appliance) (
+                time() - openbao_snapshot_last_success_timestamp{${local.appliance_backup_matcher}}
+              )
+              or
+              max by (node, region, appliance) (
+                deploy_last_success_timestamp{project="reconcile", ${local.appliance_backup_matcher}}
+              ) * 0 + 1e10
+            PROMQL
+        }))
+      }
+
+      data {
+        ref_id         = "B"
+        query_type     = "expression"
+        datasource_uid = "__expr__"
+
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+
+        model = jsonencode({
+          refId         = "B"
+          type          = "threshold"
+          expression    = "A"
+          datasource    = { type = "__expr__", uid = "__expr__" }
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            type      = "query"
+            operator  = { type = "and" }
+            query     = { params = ["B"] }
+            reducer   = { type = "last", params = [] }
+            evaluator = { type = "gt", params = [93600] }
+          }]
+        })
+      }
     }
   }
 }

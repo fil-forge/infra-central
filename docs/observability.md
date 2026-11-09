@@ -108,7 +108,10 @@ Otherwise it is a `warning`, or `info` if nobody needs to act on it.
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
-appliance label.
+appliance label. The backup rules watch only the stages in
+`appliance_backup_stages`, the alert stages whose platform root sets
+`appliance_backups`; `scripts/check-backup-stages.sh` fails `make check` when
+the two disagree.
 
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
@@ -156,9 +159,9 @@ The pull request that deploys the fix removes its `is_paused = true` in
 
 "Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
 backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
-infra-nodes' snapshot job stamps after each upload. Every appliance that takes backups reports it,
-as `0` until its first snapshot, so a node that never uploads one fires the rule too.
-The Postgres backups get a freshness rule with the job that uploads them,
+infra-nodes' snapshot job stamps after each upload. Every appliance in a backup stage owes a
+snapshot, so the rule also fires for one that reconciles but reports no stamp at all, and alerts on
+no data when no appliance in a backup stage reports anything. The Postgres backups get a freshness rule with the job that uploads them,
 [FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
 [appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
