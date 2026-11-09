@@ -156,7 +156,8 @@ The pull request that deploys the fix removes its `is_paused = true` in
 
 "Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
 backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
-infra-nodes' snapshot job stamps after each upload, so only appliances that take backups report it.
+infra-nodes' snapshot job stamps after each upload. Every appliance that takes backups reports it,
+as `0` until its first snapshot, so a node that never uploads one fires the rule too.
 The Postgres backups get a freshness rule with the job that uploads them,
 [FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in

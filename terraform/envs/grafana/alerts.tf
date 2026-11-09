@@ -3308,10 +3308,12 @@ resource "grafana_rule_group" "appliance" {
   # is a missed run rather than a late one: infra-nodes docs/observability.md
   # documents the same threshold.
   #
-  # Only appliances that take backups report the series: dev has none, and a
-  # node reports it from its first snapshot, which provision-backups.sh takes
-  # in the foreground before it enables the timer. no_data_state is OK for
-  # that reason, and "Appliance has stopped reporting" covers a silent node.
+  # Every appliance that takes backups reports the series: infra-nodes'
+  # reconcile pass writes it as 0 on a node that has never uploaded a
+  # snapshot or has lost its stamp, so a missing snapshot fires this rule
+  # rather than leaving it without data. An appliance that takes no backups,
+  # dev among them, reports nothing, which is why no_data_state is OK. A node
+  # whose metrics stop altogether is "Appliance has stopped reporting".
   #
   # A warning: the node keeps serving, and what is at risk is losing the
   # secrets written since the last snapshot if the node is lost before the
@@ -3327,7 +3329,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
-      description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. On the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
+      description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. An age of decades means the stamp is 0: the node takes backups and has never uploaded a snapshot, so run provision-backups.sh on it. Otherwise, on the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
     }
 
