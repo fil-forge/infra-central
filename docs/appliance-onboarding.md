@@ -176,6 +176,9 @@ following:
   unset, so the bucket's 35-day compliance lock applies. The key can read back only the timeline
   history files under that prefix, which WAL-G checks before overwriting one, and can delete
   nothing.
+- Set `S3_ENABLE_VERSIONING=disabled` for WAL-G. Left unset, WAL-G asks S3 whether the bucket is
+  versioned, and the key is not allowed to ask. A versioned bucket would switch WAL-G to listing
+  object versions, which the key cannot do either. The bucket's lock and lifecycle rules still apply.
 - Raft snapshots go under `<region>/openbao/` and need nothing but `PutObject`.
 - Both uploaders must send `Content-MD5` or an `x-amz-checksum-*` header, because Object Lock
   refuses a put without one. WAL-G, AWS CLI v2 and current AWS SDKs do by default; keep that
