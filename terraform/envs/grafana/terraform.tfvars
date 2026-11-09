@@ -49,6 +49,13 @@ loki_datasource_uid = "grafanacloud-logs"
 # dashboard offers from going unnoticed.
 alert_stages = ["staging", "prod"]
 
+# The live appliances of the alert stages: <stage>-<region> for every label in
+# each stage's appliance_regions. Retiring a region removes it here in the same
+# commit that moves it to retired_appliance_regions, which is what keeps
+# "Appliance has stopped reporting" from firing for it.
+# scripts/check-appliance-regions.sh fails the build when the two disagree.
+expected_appliances = ["staging-eu-central-3"]
+
 # The alert_stages whose appliances push backups to central: those whose
 # platform root sets appliance_backups. Prod's backup target comes with its own
 # change, which adds prod here too. scripts/check-backup-stages.sh fails the

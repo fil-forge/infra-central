@@ -28,6 +28,12 @@ variable "alert_stages" {
   default     = ["prod"]
 }
 
+variable "expected_appliances" {
+  description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+  default     = []
+}
+
 variable "appliance_backup_stages" {
   description = "Stages whose appliances push backups to central, the alert_stages whose platform root sets appliance_backups. Every appliance in one of them is expected to report its OpenBao snapshot stamp. scripts/check-backup-stages.sh fails the build when this disagrees with the platform roots."
   type        = list(string)
@@ -71,11 +77,22 @@ locals {
   # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
 
-  # The same, narrowed to the stages whose appliances push backups. Empty when
-  # none does, and then the rules that use it are not created: an empty
+  # The live appliances by name, for the rules that read absence. Metrics alone
+  # cannot tell a retired appliance from a dead one, since both stop reporting;
+  # this list is what says which is which. A retired region leaves it in the
+  # commit that retires it, so it drops out of these rules at once.
+  live_appliance_matcher = "appliance=~\"(${join("|", var.expected_appliances)})\", service_name=~\"appliance-.*-host\""
+
+  # The live appliances in the stages that push backups, each of which owes an
+  # OpenBao snapshot. Empty when no stage takes backups or none of their regions
+  # is live, and then the rule that uses it is not created: an empty
   # alternation matches nothing, and a rule that alerts on no data would fire
   # forever.
-  appliance_backup_matcher = "appliance=~\"(${join("|", var.appliance_backup_stages)})-.*\", service_name=~\"appliance-.*-host\""
+  backup_appliances = [
+    for appliance in var.expected_appliances : appliance
+    if contains(var.appliance_backup_stages, split("-", appliance)[0])
+  ]
+  backup_appliance_matcher = "appliance=~\"(${join("|", local.backup_appliances)})\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
   # zone, once per target group and once for the whole balancer. The two extra
@@ -1041,9 +1058,17 @@ resource "grafana_rule_group" "appliance" {
   # reconciling", at the end of this group.
   #
   # Absence is the signal, so there is no value to compare: the expression
-  # tests for a series that was there and is not. Its 24h window is what makes
-  # it self-cleaning, since a node decommissioned longer ago than that falls out
-  # of both sides on its own. The result is 1, so the threshold stage is `gt 0`.
+  # tests for a series that was there and is not. The result is 1, so the
+  # threshold stage is `gt 0`.
+  #
+  # Only the live appliances are watched, the expected_appliances list that
+  # scripts/check-appliance-regions.sh keeps in step with each stage's
+  # appliance_regions. A retired appliance stops reporting exactly as a dead
+  # one does, and the list is what tells them apart: retiring a region removes
+  # it in the same commit, so its node going dark never fires this. A region
+  # being brought up has no history yet and stays quiet until it first reports.
+  # The 24h window bounds how long a dead node alerts; after that it falls out
+  # of both sides.
   #
   # Recovery is a no-data event: a node that reports again satisfies both
   # present_over_time clauses, the `unless` cancels them, and nothing is left.
@@ -1096,11 +1121,11 @@ resource "grafana_rule_group" "appliance" {
         legendFormat = "{{appliance}}"
         expr         = <<-PROMQL
           max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.live_appliance_matcher}}[24h])
           )
           unless
           max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
+            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.live_appliance_matcher}}[15m])
           )
         PROMQL
       }))
@@ -3312,11 +3337,13 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # The appliance's last OpenBao raft snapshot in the backup bucket is over a
-  # day old, or the appliance has stopped reporting when it was. Only stages
-  # whose appliances push backups are watched, the appliance_backup_stages
-  # scripts/check-backup-stages.sh holds in step with the platform roots, and
-  # every appliance in such a stage owes a snapshot: central mints a backup key
-  # for each region in its appliance_regions.
+  # day old, or the appliance has stopped reporting when it was. It watches
+  # the live appliances (expected_appliances) in the stages that push backups
+  # (appliance_backup_stages), two lists that scripts/check-appliance-regions.sh
+  # and scripts/check-backup-stages.sh hold in step with the platform roots.
+  # Every such appliance owes a snapshot: central mints a backup key for each
+  # region in its stage's appliance_regions. A retired appliance leaves the
+  # list in the commit that retires it, so it never fires this.
   #
   # openbao_snapshot_last_success_timestamp is a textfile-collector gauge, like
   # the deploy stamp, written by infra-nodes scripts/host/snapshot-openbao.sh
@@ -3330,13 +3357,16 @@ resource "grafana_rule_group" "appliance" {
   # stamp file, or runs code that stopped writing it. `or` keeps every series
   # from the left and adds those right-hand series whose labels the left lacks,
   # so such an appliance reads as 1e10 seconds stale. A finite number, because
-  # +Inf does not survive the trip through Grafana's expressions.
+  # +Inf does not survive the trip through Grafana's expressions. A region
+  # still being brought up reports no reconcile stamp either, so it stays quiet
+  # until its node first reconciles.
   #
-  # no_data_state is Alerting: with at least one backup stage, no data means no
-  # appliance there reports even its reconcile stamp. That overlaps "Appliance
-  # has stopped reporting" on purpose, so that a broken stamp pipeline cannot
-  # silence this rule. The rule is not created while no stage takes backups,
-  # because then it would have nothing to match and would fire forever.
+  # no_data_state is Alerting: no data means no live appliance in a backup
+  # stage reports even its reconcile stamp. That overlaps "Appliance has
+  # stopped reporting" on purpose, so that a broken stamp pipeline cannot
+  # silence this rule. The rule is not created while there is no live appliance
+  # in a backup stage, which includes a backup stage whose last region was
+  # retired: it would have nothing to match and would fire forever.
   #
   # A warning: the node keeps serving, and what is at risk is losing the
   # secrets written since the last snapshot if the node is lost before the
@@ -3344,7 +3374,7 @@ resource "grafana_rule_group" "appliance" {
   #
   # Last in the group, so that adding it moved no other rule's uid.
   dynamic "rule" {
-    for_each = length(var.appliance_backup_stages) > 0 ? [1] : []
+    for_each = length(local.backup_appliances) > 0 ? [1] : []
 
     content {
       name           = "Appliance OpenBao snapshot is stale"
@@ -3386,11 +3416,11 @@ resource "grafana_rule_group" "appliance" {
           legendFormat = "{{appliance}}"
           expr         = <<-PROMQL
               max by (node, region, appliance) (
-                time() - openbao_snapshot_last_success_timestamp{${local.appliance_backup_matcher}}
+                time() - openbao_snapshot_last_success_timestamp{${local.backup_appliance_matcher}}
               )
               or
               max by (node, region, appliance) (
-                deploy_last_success_timestamp{project="reconcile", ${local.appliance_backup_matcher}}
+                deploy_last_success_timestamp{project="reconcile", ${local.backup_appliance_matcher}}
               ) * 0 + 1e10
             PROMQL
         }))

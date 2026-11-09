@@ -108,10 +108,17 @@ Otherwise it is a `warning`, or `info` if nobody needs to act on it.
 The rules watch staging and prod, the stages listed in `alert_stages` in
 `terraform/envs/grafana/terraform.tfvars`. A Central rule matches the stage's
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
-appliance label. The backup rules watch only the stages in
-`appliance_backup_stages`, the alert stages whose platform root sets
-`appliance_backups`; `scripts/check-backup-stages.sh` fails `make check` when
-the two disagree.
+appliance label.
+
+The rules that read absence, "Appliance has stopped reporting" and "Appliance
+OpenBao snapshot is stale", watch only the live appliances listed in
+`expected_appliances`: every `<stage>-<region>` in the alert stages'
+`appliance_regions`. A retired appliance and a dead one both stop reporting,
+and the list is what tells them apart. The snapshot rule further keeps to the
+stages in `appliance_backup_stages`, the alert stages whose platform root sets
+`appliance_backups`. `scripts/check-appliance-regions.sh` and
+`scripts/check-backup-stages.sh` fail `make check` when either list disagrees
+with the platform roots.
 
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
@@ -159,9 +166,10 @@ The pull request that deploys the fix removes its `is_paused = true` in
 
 "Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
 backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
-infra-nodes' snapshot job stamps after each upload. Every appliance in a backup stage owes a
+infra-nodes' snapshot job stamps after each upload. Every live appliance in a backup stage owes a
 snapshot, so the rule also fires for one that reconciles but reports no stamp at all, and alerts on
-no data when no appliance in a backup stage reports anything. The Postgres backups get a freshness rule with the job that uploads them,
+no data when none of them reports anything. The Postgres backups get a freshness rule with the job
+that uploads them,
 [FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
 [appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).

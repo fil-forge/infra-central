@@ -198,6 +198,10 @@ check:
 # because the dashboards carry Grafana's own ${...} interpolation and so cannot
 # be generated, so CI compares them rather than trusting anyone to edit both.
 	scripts/check-stage-picker.sh
+# The rules that read absence watch the live appliances, which the grafana root
+# lists itself because metrics cannot tell a retired appliance from a dead one.
+# CI compares the list with the stages' appliance_regions.
+	scripts/check-appliance-regions.sh
 # The stale-snapshot rule watches the alert_stages that take appliance backups,
 # which the grafana root lists itself because it cannot read the platform roots
 # that decide it. CI compares the two.

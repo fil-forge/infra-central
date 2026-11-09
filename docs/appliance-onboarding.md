@@ -38,6 +38,11 @@ appliance_regions = ["us-east-9"]
 The region label is the appliance's virtual S3 region, not an AWS one. It has to match the node's
 Ingot `region:` config and what clients sign with, or requests fail without naming the cause.
 
+In staging and prod, add `<stage>-<region>` to `expected_appliances` in
+`terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do. The
+rules that watch for an appliance going dark read that list, and they stay quiet for the new
+region until its node first reports.
+
 The apply creates the transit key `appliance-unseal-us-east-9` and a policy of the same name
 granting `update` on exactly that key's encrypt and decrypt paths. In staging and prod it also
 creates the IAM user `forge-nodes-backup-<stage>-us-east-9`, which can write under `us-east-9/` in
@@ -341,6 +346,11 @@ merge:
 appliance_regions         = []
 retired_appliance_regions = ["us-east-9"]
 ```
+
+In staging and prod, remove `<stage>-<region>` from `expected_appliances` in
+`terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
+Metrics cannot tell a retired appliance from a dead one, since both stop reporting, so that list is
+what keeps "Appliance has stopped reporting" from paging when the retired node goes dark.
 
 The apply revokes the node's unseal token, deletes its token role, deletes its parameters and
 destroys its transit key. **This is not reversible.** The node behind that key can never unseal
