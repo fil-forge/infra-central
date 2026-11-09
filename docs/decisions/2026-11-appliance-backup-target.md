@@ -157,10 +157,15 @@ There is no dedicated restore role yet. Engineers restore with the `Administrato
 and `ReadOnlyAccess`, which carries `s3:GetObject` on every bucket, can read the backups too. A
 restore role, and keeping `ReadOnlyAccess` out of this bucket, are deferred.
 
-CI cannot read them. The apply role's grant on `forge-nodes-backups-*` names bucket-level actions
-only. The ARN pattern also matches the bucket's objects, so it is the action list that keeps CI out,
-and the grant's comment says so for whoever edits it next. The plan role holds no `s3:GetObject`
-outside the state bucket.
+CI holds no permission to read them. The apply role's grant on `forge-nodes-backups-*` names
+bucket-level actions only. The ARN pattern also matches the bucket's objects, so it is the action
+list that withholds object access, and the grant's comment says so for whoever edits it next. The
+plan role holds no `s3:GetObject` outside the state bucket.
+
+A change merged to main can still read them. The apply role writes the bucket policy, which can
+grant read access to any principal, and it writes `fc-*` roles, which a Lambda can run as. Every
+apply runs a reviewed change, and that review is the control for now. Moving the bucket and its
+policy to the hand-applied bootstrap root would remove both paths.
 
 ## The node's half
 
