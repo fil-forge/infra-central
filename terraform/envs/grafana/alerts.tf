@@ -1839,9 +1839,8 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
-  # The four rules that watch Piri itself rather than a proof set (chain head
-  # is stale, no chain head, proof set is unrecoverable, Prove task has not run)
-  # also group by instance, and their summaries name the Piri by it. A node can
+  # They also group by instance, and their summaries name the Piri by it, so an
+  # alert says which Piri to open even when it names a proof set. A node can
   # run several Piris, each reporting instance <node>/piri-<n>, and grouping by
   # node alone would let one healthy Piri hide another's stall, or leave the
   # alert unable to say which Piri it means. A Piri that reports another
@@ -2114,7 +2113,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had its next proving period scheduled"
       description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
@@ -2147,11 +2146,11 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
                 piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
               + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
             )
@@ -2219,7 +2218,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
       description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds; or Piri has been unable to read the proof set's last proven epoch from PDPVerifier, so the stall cannot be ruled out (the Piri logs say \"reading proof set's last proven epoch\"). Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
@@ -2252,25 +2251,25 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
             )
           )
-          - on (appliance, region, node, proof_set)
-          max by (appliance, region, node, proof_set) (
+          - on (appliance, region, node, instance, proof_set)
+          max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
           )
           or
           (
-            0 * max by (appliance, region, node, proof_set) (
+            0 * max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             )
-            unless on (appliance, region, node, proof_set)
+            unless on (appliance, region, node, instance, proof_set)
             piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
           ) + 1
         PROMQL
@@ -3164,7 +3163,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has had piece removals queued for draining longer than a proving period"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has had piece removals queued for draining longer than a proving period"
       description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
     }
@@ -3196,13 +3195,13 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           (
-            time() - max by (appliance, region, node, proof_set) (
+            time() - max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
             )
           )
-          - on (appliance, region, node, proof_set)
+          - on (appliance, region, node, instance, proof_set)
           (
-            30 * max by (appliance, region, node, proof_set) (
+            30 * max by (appliance, region, node, instance, proof_set) (
               max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
             )
           )
