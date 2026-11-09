@@ -2769,101 +2769,6 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # Once Piri folds blobs into an aggregate, a PDPAddRoots task adds the
-  # aggregate's root on chain and deletes the blobs' pipeline rows. A full batch
-  # of pdp.aggregation.manager.batch_size roots goes out at once and a partial
-  # one on the next poll_interval (30s by default), so the oldest blob still
-  # waiting was folded under a minute or so ago. Ten minutes is about twenty
-  # polls: AddRoots failing on every retry (the chain RPC, gas, a contract
-  # revert), or folding outpacing what AddRoots sends. The blobs stay
-  # retrievable but are not proven until they land: a warning. `for` is 10m on
-  # top of the threshold's ten minutes, so a brief chain RPC outage that
-  # AddRoots retries through does not page. The age is used rather than the
-  # count of waiting blobs, which rises and falls with each batch under steady
-  # uploads and so cannot tell a stall from a burst.
-  #
-  # Grouped by instance as well as node, like the Piri-wide proving rules: each
-  # Piri on a node has its own AddRoots tasks, and one stalled Piri gets an
-  # alert of its own.
-  #
-  # no_data_state is OK: a Piri with nothing aggregated reports 0, and
-  # "Appliance has stopped reporting" covers a silent node.
-  rule {
-    name           = "Piri is not adding aggregates on chain"
-    condition      = "B"
-    for            = "10m"
-    no_data_state  = "OK"
-    exec_err_state = "Error"
-
-    annotations = {
-      summary          = "Piri {{ $labels.instance }} has had aggregated blobs waiting over 10 minutes to be added on chain"
-      description      = "Blobs folded into an aggregate are not being added to the proof set, so they are not proven. Check the PDPAddRoots task's logs in the Piri container for the error it retries on, and Piri's chain RPC. If roots are still landing but this age keeps climbing, aggregates are folded faster than AddRoots sends them: raise pdp.aggregation.manager.batch_size."
-      dashboard_url    = "${local.regions_dashboard}&viewPanel=37"
-      __dashboardUid__ = "forge-regions"
-      __panelId__      = "37"
-    }
-
-    labels = {
-      team_name = "forge"
-      component = "appliance"
-      stage     = local.appliance_stage_label
-      severity  = "warning"
-    }
-
-    notification_settings {
-      policy = local.forge_policy
-    }
-
-    data {
-      ref_id         = "A"
-      datasource_uid = var.prometheus_datasource_uid
-
-      relative_time_range {
-        from = 600
-        to   = 0
-      }
-
-      model = jsonencode(merge(local.query_defaults, {
-        refId      = "A"
-        instant    = true
-        range      = false
-        intervalMs = 1000
-        expr       = <<-PROMQL
-          max by (appliance, region, node, instance) (
-            piri_pdp_aggregated_blobs_oldest_seconds{${local.piri_metric_matcher}}
-          )
-        PROMQL
-      }))
-    }
-
-    data {
-      ref_id         = "B"
-      query_type     = "expression"
-      datasource_uid = "__expr__"
-
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-
-      model = jsonencode({
-        refId         = "B"
-        type          = "threshold"
-        expression    = "A"
-        datasource    = { type = "__expr__", uid = "__expr__" }
-        intervalMs    = 1000
-        maxDataPoints = 43200
-        conditions = [{
-          type      = "query"
-          operator  = { type = "and" }
-          query     = { params = ["B"] }
-          reducer   = { type = "last", params = [] }
-          evaluator = { type = "gt", params = [600] }
-        }]
-      })
-    }
-  }
-
   # Every PDP task and every blob/accept on a Piri shares one Postgres pool,
   # sized by pool_max_conns on its Postgres URL. pgx counts the acquires that
   # had to wait because no connection was free; this is their share of all
@@ -3389,6 +3294,102 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
+  # Once Piri folds blobs into an aggregate, a PDPAddRoots task adds the
+  # aggregate's root on chain and deletes the blobs' pipeline rows. A full batch
+  # of pdp.aggregation.manager.batch_size roots goes out at once and a partial
+  # one on the next poll_interval (30s by default), and the task then waits
+  # eight epochs (4 minutes) for the transaction to confirm before deleting the
+  # rows. So the oldest blob still waiting was folded under about 5 minutes ago.
+  # Ten minutes is twice that: AddRoots failing on every retry (the chain RPC,
+  # gas, a contract revert), or folding outpacing what AddRoots sends. The blobs
+  # stay retrievable but are not proven until they land: a warning. `for` is
+  # 10m on top of the threshold's ten minutes, so a brief chain RPC outage that
+  # AddRoots retries through does not page. The age is used rather than the
+  # count of waiting blobs, which rises and falls with each batch under steady
+  # uploads and so cannot tell a stall from a burst.
+  #
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri on a node has its own AddRoots tasks, and one stalled Piri gets an
+  # alert of its own.
+  #
+  # no_data_state is OK: a Piri with nothing aggregated reports 0, and
+  # "Appliance has stopped reporting" covers a silent node.
+  rule {
+    name           = "Piri is not adding aggregates on chain"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri {{ $labels.instance }} has had aggregated blobs waiting over 10 minutes to be added on chain"
+      description      = "Blobs folded into an aggregate are not being added to the proof set, so they are not proven. Check the PDPAddRoots task's logs in the Piri container for the error it retries on, and Piri's chain RPC. If roots are still landing but this age keeps climbing, aggregates are folded faster than AddRoots sends them: raise pdp.aggregation.manager.batch_size."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=37"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "37"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_aggregated_blobs_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
         }]
       })
     }

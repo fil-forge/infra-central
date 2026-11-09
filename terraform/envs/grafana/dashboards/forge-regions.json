@@ -5051,7 +5051,7 @@
         "spec": {
           "id": 37,
           "title": "Piri oldest blob waiting for AddRoots",
-          "description": "How long ago the oldest blob still waiting for AddRoots was folded into its aggregate, per node. It stays under a few poll intervals while AddRoots keeps up; \"Piri is not adding aggregates on chain\" warns once it passes 10 minutes for 10 minutes.",
+          "description": "How long ago the oldest blob still waiting for AddRoots was folded into its aggregate, per node. AddRoots sends a batch within a poll interval and waits eight epochs (4 minutes) for it to confirm, so this stays under about 5 minutes while AddRoots keeps up; \"Piri is not adding aggregates on chain\" warns once it passes 10 minutes for 10 minutes.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
