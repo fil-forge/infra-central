@@ -126,8 +126,9 @@ with the platform roots.
 service with no tasks has no registered targets, and CloudWatch then stops
 publishing `HealthyHostCount` for its target group instead of reporting 0. So
 the rule counts any stage and service seen in the last day but silent now as 0
-healthy hosts. It fires about ten minutes after the last sample. A service
-removed on purpose alerts until a day has passed, so silence it for that long.
+healthy hosts. It fires about ten minutes after the last sample. A service or
+stage removed or renamed on purpose alerts until a day has passed, so silence it
+on `stage` and `service` for that long.
 
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |

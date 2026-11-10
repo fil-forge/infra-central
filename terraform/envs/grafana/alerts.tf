@@ -318,8 +318,11 @@ resource "grafana_rule_group" "central" {
   # last day but silent now. Found on 2026-11-10 by scaling fc-staging-swarf to
   # 0 (FIL-1151): the rule stayed Normal with only the first half. With both,
   # it fires about ten minutes after the last sample: five for the series to go
-  # stale and five for `for`. A service removed on purpose pages for up to a
-  # day, until it falls out of the lookback; silence it for that long.
+  # stale and five for `for`. A service or stage removed or renamed on purpose
+  # alerts for up to a day, until it falls out of the lookback; silence it on
+  # its stage and service for that long. The second half also means
+  # no_data_state rarely applies now: if CloudWatch delivery stops everywhere,
+  # each stage and service alerts on its own rather than as one NoData alert.
   rule {
     name           = "Service has no healthy hosts"
     condition      = "B"
@@ -328,7 +331,7 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}, or its target group has stopped reporting"
       dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
