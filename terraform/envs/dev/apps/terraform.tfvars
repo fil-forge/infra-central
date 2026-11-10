@@ -15,7 +15,7 @@
 image_digests = {
   sprue = "sha256:8e000ed3e7fb3a09d53c4ce35de943d454b0528678fcc6250679d5a1cc1f226c"
 
-  hilt = "sha256:b2a5c96966aa2b37bad6b3d3e7216dce6b93208f5c0d3ecf9c6523632d8ccc9d"
+  hilt = "sha256:f6ea56d17a6e9dce9e26fc48699c7462a9f846cfcff7c0c4b0c24af1a1f1aea5"
 
   swarf = "sha256:e14607ef2ae00409c5342145dc01b01901d8dcb4e4f124a76ea5a19732fcc695"
 
