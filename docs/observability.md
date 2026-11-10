@@ -130,6 +130,8 @@ with the platform roots.
 | Provision Lambda errors                              | Forge Central            | Lambda, CloudWatch            | FIL-1151 |
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
+| Prod KMS key changed                                 | Forge Central            | CloudTrail, Loki              | FIL-1445 |
+| Prod KMS key change denied                           | Forge Central            | CloudTrail, Loki              | FIL-1445 |
 | Service response time is high                        | Forge Central latency    | ALB, CloudWatch               | FIL-1213 |
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
@@ -176,6 +178,17 @@ that uploads them,
 [FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
 [appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
+
+"Prod KMS key changed" and "Prod KMS key change denied" read CloudTrail's record of a guarded call
+on the prod Aurora or OpenBao seal key or a DR replica: disabling a key, scheduling its deletion,
+changing its policy, deleting or moving its alias, or moving its primary region. The guard and the
+break-glass role are in [region-loss.md](region-loss.md#the-guard). EventBridge rules in the prod
+bootstrap root match the calls in us-east-2 and the DR region and write them to
+`/forge-central/prod/kms-key-changes`, one line per event:
+
+```logql
+{aws_log_group="/forge-central/prod/kms-key-changes"} | json
+```
 
 ## Adding an alert or panel
 

@@ -162,6 +162,10 @@ locals {
   # /forge-central/<stage>/hilt, with the stage also in the environment label.
   hilt_log_matcher = "aws_log_group=~\"/forge-central/(${local.stages})/hilt\""
 
+  # The guarded calls on the prod KMS keys, which the prod bootstrap root's
+  # EventBridge rules write here. Prod only: the guard exists only there.
+  kms_key_changes_log_group = "/forge-central/prod/kms-key-changes"
+
   # Caddy's request metrics, narrowed to traffic the appliance's own sites
   # answered. caddy_http_request_duration_seconds_count is the series to read:
   # the plain request counter carries no code label at all, because Caddy
@@ -935,6 +939,180 @@ resource "grafana_rule_group" "central" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "lt", params = [0.5] }
+        }]
+      })
+    }
+  }
+
+  # A guarded action on a prod Aurora or OpenBao seal key, or on its DR replica,
+  # that went through. Only the break-glass role and the account root can take
+  # one, so it is either planned work or a credential that should not have
+  # them. A disabled key stops Aurora and OpenBao now, which is what makes it
+  # critical. The events reach Loki through the bootstrap root's EventBridge
+  # rules (envs/bootstrap/prod/us-east-2), one line per CloudTrail event.
+  #
+  # Each line counts for 15 minutes, so a late delivery from CloudTrail is
+  # still caught, and the alert resolves on its own once the window passes.
+  # no_data_state is OK because no line is the normal state.
+  rule {
+    name           = "Prod KMS key changed"
+    condition      = "B"
+    for            = "0s"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.detail_eventName }} succeeded on a prod KMS key in {{ $labels.region }}"
+      description = "{{ $labels.detail_userIdentity_arn }} called {{ $labels.detail_eventName }} on the prod Aurora or OpenBao seal key, or its replica, in {{ $labels.region }}. Unless it was planned break-glass work, undo it: EnableKey reverses a disable and CancelKeyDeletion a scheduled deletion, and anyone may call either. A disabled key stops Aurora and OpenBao. Read the event with {aws_log_group=\"${local.kms_key_changes_log_group}\"}."
+      runbook_url = "https://github.com/fil-forge/infra-central/blob/main/docs/region-loss.md#the-guard"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (region, detail_eventName, detail_userIdentity_arn) (
+            count_over_time(
+              {aws_log_group="${local.kms_key_changes_log_group}"}
+                | json
+                | detail_errorCode = ""
+              [15m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The same actions, refused by the key guard. Nothing changed, so it can wait
+  # for the working day, but someone without break-glass tried to end a key's
+  # use: a mistake, a tool with too broad a role, or a credential in the wrong
+  # hands. Same window and no-data handling as the rule above.
+  rule {
+    name           = "Prod KMS key change denied"
+    condition      = "B"
+    for            = "0s"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.detail_eventName }} on a prod KMS key was denied in {{ $labels.region }}"
+      description = "The key guard refused {{ $labels.detail_eventName }} by {{ $labels.detail_userIdentity_arn }} on the prod Aurora or OpenBao seal key, or its replica, in {{ $labels.region }} ({{ $labels.detail_errorCode }}). The key is unchanged. Find out who made the call and why. Read the event with {aws_log_group=\"${local.kms_key_changes_log_group}\"}."
+      runbook_url = "https://github.com/fil-forge/infra-central/blob/main/docs/region-loss.md#the-guard"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (region, detail_eventName, detail_userIdentity_arn, detail_errorCode) (
+            count_over_time(
+              {aws_log_group="${local.kms_key_changes_log_group}"}
+                | json
+                | detail_errorCode != ""
+              [15m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }

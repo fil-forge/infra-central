@@ -1,7 +1,8 @@
 # Regional bootstrap for the prod account in us-east-2: the ECR repository the
 # prod stage pulls its provision image from, the Firehoses and metric stream
 # that carry the stage's logs and metrics to Grafana Cloud, and the KMS keys of
-# its Aurora cluster and its OpenBao seal, with their replicas in the DR region.
+# its Aurora cluster and its OpenBao seal, with their replicas in the DR region,
+# and the EventBridge rules that tell Grafana when one of those keys changes.
 #
 # Apply it with -var break_glass=true whenever a key's policy or replica
 # changes, so both providers act as the break-glass role from ../account/; see
@@ -265,6 +266,152 @@ module "telemetry" {
   grafana_logs_user    = var.grafana_logs_user
   grafana_metrics_user = var.grafana_metrics_user
   grafana_push_token   = var.grafana_push_token
+}
+
+# ── Guarded key changes, to Grafana ──────────────────────────────────────────
+#
+# KMS publishes no metric for a key's state, so on-call hears of a guarded
+# action on the four keys from CloudTrail: EventBridge matches the call in the
+# region it was made in, the DR region forwards its matches here, and a rule
+# here writes both regions' matches to a log group that ships to Grafana like
+# the services' logs. The Grafana root's alerts.tf pages on a call that
+# succeeded and notifies on one the guard denied.
+#
+# The pattern names the keys and aliases rather than matching every KMS call,
+# because the account holds other teams' keys. A call can name a key by id, ARN,
+# alias or alias ARN, and CloudTrail records the resolved key in `resources`, so
+# the pattern accepts any of them in either place. ReplicateKey is guarded but
+# left out: it adds a replica and takes nothing away.
+locals {
+  kms_guarded_keys    = [aws_kms_key.aurora, aws_kms_key.openbao_seal, aws_kms_replica_key.aurora, aws_kms_replica_key.openbao_seal]
+  kms_guarded_aliases = [aws_kms_alias.aurora, aws_kms_alias.openbao_seal, aws_kms_alias.aurora_dr, aws_kms_alias.openbao_seal_dr]
+
+  kms_guarded_key_names = distinct(concat(
+    [for key in local.kms_guarded_keys : key.key_id],
+    [for key in local.kms_guarded_keys : key.arn],
+    [for alias in local.kms_guarded_aliases : alias.name],
+    [for alias in local.kms_guarded_aliases : alias.arn],
+  ))
+
+  kms_key_change_pattern = jsonencode({
+    source      = ["aws.kms"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventName = ["DisableKey", "ScheduleKeyDeletion", "PutKeyPolicy", "DeleteAlias", "UpdateAlias", "UpdatePrimaryRegion"]
+    }
+    "$or" = [
+      { detail = { resources = { ARN = local.kms_guarded_key_names } } },
+      { detail = { requestParameters = { keyId = local.kms_guarded_key_names } } },
+      { detail = { requestParameters = { aliasName = local.kms_guarded_key_names } } },
+    ]
+  })
+
+  primary_event_bus_arn = "arn:aws:events:us-east-2:${module.constants.prod_account_id}:event-bus/default"
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_changes_dr" {
+  provider = aws.dr
+
+  name          = "fc-prod-kms-key-changes"
+  description   = "Guarded calls on the prod Aurora and OpenBao seal keys, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_change_pattern
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_changes_dr" {
+  provider = aws.dr
+
+  rule     = aws_cloudwatch_event_rule.kms_key_changes_dr.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
+}
+
+data "aws_iam_policy_document" "kms_key_changes_forwarder_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [module.constants.prod_account_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "kms_key_changes_forwarder" {
+  statement {
+    actions   = ["events:PutEvents"]
+    resources = [local.primary_event_bus_arn]
+  }
+}
+
+resource "aws_iam_role" "kms_key_changes_forwarder" {
+  name               = "fc-prod-kms-key-changes-forwarder"
+  assume_role_policy = data.aws_iam_policy_document.kms_key_changes_forwarder_assume.json
+}
+
+resource "aws_iam_role_policy" "kms_key_changes_forwarder" {
+  name   = "put-events-us-east-2"
+  role   = aws_iam_role.kms_key_changes_forwarder.id
+  policy = data.aws_iam_policy_document.kms_key_changes_forwarder.json
+}
+
+# Under /forge-central/prod/, so Loki finds it beside the stage's other groups.
+resource "aws_cloudwatch_log_group" "kms_key_changes" {
+  name              = "/forge-central/prod/kms-key-changes"
+  retention_in_days = 30
+}
+
+# Matches this region's calls and the ones forwarded from the DR region, which
+# keep their own `region`.
+resource "aws_cloudwatch_event_rule" "kms_key_changes" {
+  name          = "fc-prod-kms-key-changes"
+  description   = "Guarded calls on the prod Aurora and OpenBao seal keys, to CloudWatch Logs for Grafana."
+  event_pattern = local.kms_key_change_pattern
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_changes" {
+  rule = aws_cloudwatch_event_rule.kms_key_changes.name
+  arn  = aws_cloudwatch_log_group.kms_key_changes.arn
+}
+
+# EventBridge writes to a log group only under a resource policy that lets it.
+data "aws_iam_policy_document" "kms_key_changes_log_writer" {
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.kms_key_changes.arn}:*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com", "delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [aws_cloudwatch_event_rule.kms_key_changes.arn]
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_resource_policy" "kms_key_changes" {
+  policy_name     = "fc-prod-kms-key-changes"
+  policy_document = data.aws_iam_policy_document.kms_key_changes_log_writer.json
+}
+
+# The stage's log role belongs to the prod platform root
+# (modules/platform/log-forwarding), so its ARN is built from the name both
+# roots state rather than looked up.
+resource "aws_cloudwatch_log_subscription_filter" "kms_key_changes" {
+  name            = "grafana-loki"
+  log_group_name  = aws_cloudwatch_log_group.kms_key_changes.name
+  filter_pattern  = ""
+  destination_arn = module.telemetry.log_firehose_arns["prod"]
+  role_arn        = "arn:aws:iam::${module.constants.prod_account_id}:role/fc-prod-logs-to-firehose"
 }
 
 variable "grafana_logs_user" {
