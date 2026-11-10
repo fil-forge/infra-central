@@ -28,6 +28,22 @@ variable "alert_stages" {
   default     = ["prod"]
 }
 
+variable "live_appliances" {
+  description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. An appliance on this list that is not reporting pages about 25 minutes after the apply. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.live_appliances) > 0
+    error_message = "live_appliances is empty. \"Appliance has stopped reporting\" builds its query from this list and cannot be created from an empty one."
+  }
+}
+
+variable "appliance_backup_stages" {
+  description = "Stages whose appliances push backups to central, the alert_stages whose platform root sets appliance_backups. Every appliance in one of them is expected to report its OpenBao snapshot stamp. scripts/check-backup-stages.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+  default     = []
+}
+
 variable "prometheus_datasource_uid" {
   description = "UID of the grafanacloud-prom data source. Alert rules address a data source by uid where a dashboard can use its name. It is in the URL of the data source's settings page, and it is not a secret."
   type        = string
@@ -64,6 +80,26 @@ locals {
   # by node label is a requirement; it happens in Terraform because a Grafana
   # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
+
+  # One clause per live appliance, each returning a series only while that
+  # appliance's reconcile stamp is missing. absent_over_time keeps the labels of
+  # the equality matchers and nothing else, so label_replace adds the region
+  # that the summary and the dashboard link read.
+  stopped_reporting_expr = join("\nor\n", [
+    for appliance in var.live_appliances :
+    "label_replace(absent_over_time(deploy_last_success_timestamp{project=\"reconcile\", appliance=\"${appliance}\", service_name=~\"appliance-.*-host\"}[15m]), \"region\", \"${trimprefix(appliance, "${split("-", appliance)[0]}-")}\", \"\", \"\")"
+  ])
+
+  # The live appliances in the stages that push backups, each of which owes an
+  # OpenBao snapshot. Empty when no stage takes backups or none of their regions
+  # is live, and then the rule that uses it is not created: an empty
+  # alternation matches nothing, and a rule that alerts on no data would fire
+  # forever.
+  backup_appliances = [
+    for appliance in var.live_appliances : appliance
+    if contains(var.appliance_backup_stages, split("-", appliance)[0])
+  ]
+  backup_appliance_matcher = "appliance=~\"(${join("|", local.backup_appliances)})\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
   # zone, once per target group and once for the whole balancer. The two extra
@@ -1020,7 +1056,7 @@ resource "grafana_rule_group" "appliance" {
   interval_seconds = 300
 
   # The node has gone away: nothing from its host exporter in the last fifteen
-  # minutes, though it reported some time in the last day. This is the rule
+  # minutes from an appliance that should be live. This is the rule
   # that catches a whole appliance going dark: the other appliance rules read
   # data that vanishes with the node, and are built to stay quiet when it does.
   # It cannot tell a dead box from a live one whose host exporter or Alloy has
@@ -1029,15 +1065,22 @@ resource "grafana_rule_group" "appliance" {
   # reconciling", at the end of this group.
   #
   # Absence is the signal, so there is no value to compare: the expression
-  # tests for a series that was there and is not. Its 24h window is what makes
-  # it self-cleaning, since a node decommissioned longer ago than that falls out
-  # of both sides on its own. The result is 1, so the threshold stage is `gt 0`.
+  # returns 1 for each listed appliance with no reconcile stamp in the last 15
+  # minutes, and the threshold stage is `gt 0`.
   #
-  # Recovery is a no-data event: a node that reports again satisfies both
-  # present_over_time clauses, the `unless` cancels them, and nothing is left.
-  # no_data_state = OK is what turns that into Normal. An instant query, so no
-  # reduce stage: a range query reduced with `last` would keep the last point
-  # it fired on for the window's length after the node came back.
+  # The appliances watched are the live_appliances list, which
+  # scripts/check-appliance-regions.sh keeps in step with each stage's
+  # appliance_regions. A listed appliance alerts from the moment it has no data,
+  # whether it has never reported or stopped long ago, and keeps alerting until
+  # it reports or leaves the list. A retired appliance stops reporting exactly
+  # as a dead one does; retiring a region removes it from the list in the same
+  # commit, so its node going dark never fires this. A new region alerts from
+  # about 25 minutes after the apply that lists it until its node first reports.
+  #
+  # Recovery is a no-data event: once every listed appliance reports, every
+  # clause is empty, and no_data_state = OK turns that into Normal. An instant
+  # query, so no reduce stage: a range query reduced with `last` would keep the
+  # last point it fired on for the window's length after the node came back.
   #
   # Critical: a node that has gone dark may be serving nothing, and nothing
   # else would say so.
@@ -1049,7 +1092,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Alerting"
 
     annotations = {
-      summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
+      summary          = "{{ $labels.appliance }} has stopped reporting"
       description      = "Nothing from this node's host exporter has arrived for fifteen minutes. Either the node is down or unreachable, or its host exporter or Alloy has stopped, and the dashboards can no longer tell which."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
@@ -1082,15 +1125,7 @@ resource "grafana_rule_group" "appliance" {
         instant      = true
         range        = false
         legendFormat = "{{appliance}}"
-        expr         = <<-PROMQL
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
-          )
-          unless
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
-          )
-        PROMQL
+        expr         = local.stopped_reporting_expr
       }))
     }
 
@@ -1804,9 +1839,8 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
-  # The four rules that watch Piri itself rather than a proof set (chain head
-  # is stale, no chain head, proof set is unrecoverable, Prove task has not run)
-  # also group by instance, and their summaries name the Piri by it. A node can
+  # They also group by instance, and their summaries name the Piri by it, so an
+  # alert says which Piri to open even when it names a proof set. A node can
   # run several Piris, each reporting instance <node>/piri-<n>, and grouping by
   # node alone would let one healthy Piri hide another's stall, or leave the
   # alert unable to say which Piri it means. A Piri that reports another
@@ -2079,7 +2113,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had its next proving period scheduled"
       description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
@@ -2112,11 +2146,11 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
                 piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
               + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
             )
@@ -2184,7 +2218,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
       description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds; or Piri has been unable to read the proof set's last proven epoch from PDPVerifier, so the stall cannot be ruled out (the Piri logs say \"reading proof set's last proven epoch\"). Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
@@ -2217,25 +2251,25 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
             )
           )
-          - on (appliance, region, node, proof_set)
-          max by (appliance, region, node, proof_set) (
+          - on (appliance, region, node, instance, proof_set)
+          max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
           )
           or
           (
-            0 * max by (appliance, region, node, proof_set) (
+            0 * max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             )
-            unless on (appliance, region, node, proof_set)
+            unless on (appliance, region, node, instance, proof_set)
             piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
           ) + 1
         PROMQL
@@ -3099,6 +3133,322 @@ resource "grafana_rule_group" "appliance" {
           evaluator = { type = "gt", params = [1800] }
         }]
       })
+    }
+  }
+
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
+  #
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
+  #
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed: this rule names the cause, and the loss
+  # is a delay that stops once the drain is cleared.
+  #
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
+  rule {
+    name           = "Piri's deletion drain is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node, instance, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, instance, proof_set)
+          (
+            30 * max by (appliance, region, node, instance, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Curio, inside Piri, proves a sub-piece above 32 MiB padded only from a
+  # cached Merkle layer, one hash per 4 MiB, which its PDPv0_SaveCache task
+  # builds by reading the piece once after Piri parks it. Every Piri
+  # aggregate is at least 128 MiB, so a piece without its layer fails every
+  # proof once it is in a proof set and challenged. The value is how long the
+  # oldest parked piece above 32 MiB has waited for its layer, including a
+  # piece a SaveCache task has claimed: a task that hangs or keeps failing
+  # holds its claim, and the piece still cannot be proven. Piri returns a
+  # piece to the queue if its task is dropped.
+  #
+  # A layer is normally built within minutes of parking, and a piece is
+  # parked well before it is added to a proof set, so thirty minutes is a
+  # stalled task: the task engine down, or the blobstore reads failing. A
+  # warning: nothing is lost until the piece is challenged, and "Piri proving
+  # is failing" pages once proofs fail. Expect it after the Piri release that
+  # adds the cache, until every piece parked before it has its layer.
+  #
+  # Grouped by instance as well as node, like the other Piri-wide rules: each
+  # Piri has its own task engine. `for` is 10m on top of the threshold.
+  #
+  # no_data_state is OK: a Piri older than the release that adds the cache
+  # reports no series, and "Appliance has stopped reporting" covers a silent
+  # node.
+  rule {
+    name           = "Piri proof cache builds have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} has a piece that has waited over 30 minutes for its proof cache layer"
+      description = "A piece above 32 MiB padded has no proof cache layer, and Curio, inside Piri, proves such a piece only from its layer, so its proofs will fail once it is challenged. Check the Piri container's logs for the PDPv0_SaveCache task and its blobstore reads, and that Piri's harmonytask engine is running: `piri status` in the Piri container. After the Piri release that adds the cache, this fires until pieces parked before it all have their layers."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
+  # The appliance's last OpenBao raft snapshot in the backup bucket is over a
+  # day old, or the appliance has stopped reporting when it was. It watches
+  # the live_appliances in the stages that push backups
+  # (appliance_backup_stages), two lists that scripts/check-appliance-regions.sh
+  # and scripts/check-backup-stages.sh hold in step with the platform roots.
+  # Every such appliance owes a snapshot: central mints a backup key for each
+  # region in its stage's appliance_regions. A retired appliance leaves the
+  # list in the commit that retires it, so it never fires this.
+  #
+  # openbao_snapshot_last_success_timestamp is a textfile-collector gauge, like
+  # the deploy stamp, written by infra-nodes scripts/host/snapshot-openbao.sh
+  # after each upload, so a job that fails or a timer that stops firing leaves
+  # the series present and its value ageing. The timer fires daily with up to
+  # 30 minutes of random delay, so 26 hours is a missed run rather than a late
+  # one: infra-nodes docs/observability.md documents the same threshold.
+  #
+  # The second half of the query catches an appliance that still reconciles
+  # but reports no stamp at all: one that never uploaded a snapshot, lost its
+  # stamp file, or runs code that stopped writing it. `or` keeps every series
+  # from the left and adds those right-hand series whose labels the left lacks,
+  # so such an appliance reads as 1e10 seconds stale. A finite number, because
+  # +Inf does not survive the trip through Grafana's expressions. A region
+  # still being brought up reports no reconcile stamp either, so it stays quiet
+  # until its node first reconciles.
+  #
+  # no_data_state is Alerting: no data means no live appliance in a backup
+  # stage reports even its reconcile stamp. That overlaps "Appliance has
+  # stopped reporting" on purpose, so that a broken stamp pipeline cannot
+  # silence this rule. The rule is not created while there is no live appliance
+  # in a backup stage, which includes a backup stage whose last region was
+  # retired: it would have nothing to match and would fire forever.
+  #
+  # A warning: the node keeps serving, and what is at risk is losing the
+  # secrets written since the last snapshot if the node is lost before the
+  # next one.
+  #
+  # Last in the group, so that adding it moved no other rule's uid.
+  dynamic "rule" {
+    for_each = length(local.backup_appliances) > 0 ? [1] : []
+
+    content {
+      name           = "Appliance OpenBao snapshot is stale"
+      condition      = "B"
+      for            = "10m"
+      no_data_state  = "Alerting"
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
+        description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. An age of centuries means the appliance reconciles but reports no snapshot stamp: it never uploaded a snapshot, so run provision-backups.sh on it, or the code that writes the stamp is broken. With no data at all, no appliance in a backup stage is reporting. Otherwise, on the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
+        runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      }
+
+      labels = {
+        team_name = "forge"
+        component = "appliance"
+        stage     = local.appliance_stage_label
+        severity  = "warning"
+      }
+
+      notification_settings {
+        policy = local.forge_policy
+      }
+
+      data {
+        ref_id         = "A"
+        datasource_uid = var.prometheus_datasource_uid
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        model = jsonencode(merge(local.query_defaults, {
+          refId        = "A"
+          instant      = true
+          range        = false
+          legendFormat = "{{appliance}}"
+          expr         = <<-PROMQL
+              max by (node, region, appliance) (
+                time() - openbao_snapshot_last_success_timestamp{${local.backup_appliance_matcher}}
+              )
+              or
+              max by (node, region, appliance) (
+                deploy_last_success_timestamp{project="reconcile", ${local.backup_appliance_matcher}}
+              ) * 0 + 1e10
+            PROMQL
+        }))
+      }
+
+      data {
+        ref_id         = "B"
+        query_type     = "expression"
+        datasource_uid = "__expr__"
+
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+
+        model = jsonencode({
+          refId         = "B"
+          type          = "threshold"
+          expression    = "A"
+          datasource    = { type = "__expr__", uid = "__expr__" }
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            type      = "query"
+            operator  = { type = "and" }
+            query     = { params = ["B"] }
+            reducer   = { type = "last", params = [] }
+            evaluator = { type = "gt", params = [93600] }
+          }]
+        })
+      }
     }
   }
 }
