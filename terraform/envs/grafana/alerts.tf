@@ -118,11 +118,18 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The same filesystem filter the dashboards use. What wants watching is the
-  # control and data volumes, but their mountpoints differ between the EC2 nodes
-  # and the Servers.com host, so this covers every real filesystem instead --
-  # a superset, and one that needs no per-node edit.
-  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
+  # The EC2 nodes' volume that holds only Ingot's spool, cache and catalog log
+  # (infra-nodes terraform/modules/node, aws_ebs_volume.data). Ingot keeps it
+  # near its byte budget by design, so it gets its own, lower threshold.
+  ingot_volume_mountpoint = "/mnt/fil-one/data"
+
+  # The same filesystem filter the dashboards use, less Ingot's volume. What
+  # wants watching is the control and Piri volumes, but their mountpoints differ
+  # between the EC2 nodes and the Servers.com host, so this covers every real
+  # filesystem instead -- a superset, and one that needs no per-node edit.
+  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*|${local.ingot_volume_mountpoint}\""
+
+  ingot_volume_matcher = "${local.appliance_matcher}, mountpoint=\"${local.ingot_volume_mountpoint}\""
 
   # Ingot's OTLP metrics. Alloy names them appliance-<stage>-<region>-ingot
   # from Ingot's service.name and stamps appliance, region and node on them,
@@ -3449,6 +3456,89 @@ resource "grafana_rule_group" "appliance" {
           }]
         })
       }
+    }
+  }
+
+  # Ingot's volume on the EC2 nodes, left out of "Appliance free disk space
+  # below 40%". Its cache stays near the byte budget by design, so 40% free
+  # would fire for as long as Ingot runs; the budget is sized to stay under this
+  # line instead (infra-nodes docs/RUNBOOK.md). Same query shape, data source
+  # and silence on absent data as that rule.
+  rule {
+    name           = "Ingot volume free space below 10%"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.appliance }} has less than 10% free on Ingot's volume"
+      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's spool, cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          min by (appliance, region, node, mountpoint) (
+            node_filesystem_avail_bytes{${local.ingot_volume_matcher}}
+            / node_filesystem_size_bytes{${local.ingot_volume_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [0.1] }
+        }]
+      })
     }
   }
 }
