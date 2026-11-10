@@ -48,6 +48,11 @@ output "prod_stages" {
   value       = ["prod"]
 }
 
+output "dr_region" {
+  description = "The region that holds a stage's backup replicas, so a lost region can be restored from them. The provision Lambda replicates each key secret here, and the Aurora secondary (FIL-1297) lives here too. Restoring a stage may target a different region, closer to the one it lost."
+  value       = "eu-central-1"
+}
+
 output "prod_aurora_key_alias" {
   description = "Alias of the KMS key encrypting the prod Aurora cluster. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
   value       = "alias/fc-prod-aurora"

@@ -58,7 +58,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
-| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, which can be replicated to a DR region; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, replicated to the DR region where a stage sets `backup_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
@@ -67,7 +67,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
 | **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere. This is what replaces MinIO's root user and password.                                                                                                                                                                                                                                                |
+| **S3 and DynamoDB through task roles**          | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -141,7 +141,7 @@ internal/fund/                the three FilecoinPay transactions
 internal/onboard/             the appliance registration writes and their verification
 build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
-scripts/mint-appliance-token.sh  issues an appliance's unseal credential, wrapped
+scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and backup key, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
@@ -371,10 +371,28 @@ aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
+# A secret with a DR replica cannot be deleted until the replica is removed.
+# list-secrets does not report replicas, so ask each secret.
+for name in $(aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text); do
+  regions=$(aws secretsmanager describe-secret --secret-id "$name" \
+    --query 'ReplicationStatus[].Region' --output text)
+  if [ -n "$regions" ] && [ "$regions" != None ]; then
+    aws secretsmanager remove-regions-from-replication --secret-id "$name" \
+      --remove-replica-regions $regions
+  fi
+done
 aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \
   | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
 ```
+
+Appliance backups survive a destroy too. In staging and prod each region's
+backups go to `forge-nodes-backups-<stage>-<account id>`, which is locked in
+compliance mode: S3 refuses to delete a backup, or the bucket holding it, until
+35 days after it was written, whoever asks. The bucket carries `prevent_destroy`,
+so a plan that would destroy it fails first. The writer users go with the stage,
+and with them every appliance's ability to add a backup.
 
 In staging and prod, the platform root refuses to destroy at all. Sprue's buckets
 are versioned there, and their versioning and lifecycle resources carry
@@ -763,7 +781,8 @@ anything anyone depends on.
 ### Onboarding a regional appliance
 
 A stage seals the appliances named in its `appliance_regions`, and
-`make mint-appliance-token` issues a node's unseal credential. The ordering across
+`make mint-appliance-credentials` issues a node's unseal credential and, in staging and
+prod, the access key it writes its backups with. The ordering across
 both repositories, how the credential is delivered to a node operator, and what
 retiring a region destroys are in
 [docs/appliance-onboarding.md](docs/appliance-onboarding.md).
@@ -946,6 +965,22 @@ and wallets, Secrets Manager secrets.
 A key the seed phase moved out of SSM is reused, not minted, so moving the keys
 leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
+### Backup replicas of the keys
+
+A stage that sets `backup_replica_region` in its platform root, normally to
+`module.constants.dr_region`, keeps a replica of every identity and wallet key
+there. It must differ from the stage's own region, or the plan fails. No stage
+sets it yet. Pin a provision image built with replication before setting it: an
+older image ignores the setting, and the seed invocation then fails the apply.
+
+Each seed run adds any replica that is missing, so a key minted before
+replication existed gets one on the next run, and a run that finds every
+replica in place changes nothing. A seed returns only once every replica is in
+sync; a replica that fails or does not sync in time fails the apply. Secrets
+Manager fails a replica when the backup region already holds a secret of the
+same name, and the run reports that rather than overwriting it, since that
+secret may hold a key worth keeping.
+
 ### Smoke-testing a stage
 
 ```bash
@@ -988,10 +1023,19 @@ stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
-Delete the secret, skipping the recovery window:
+In a stage that keeps DR replicas, remove the replica first. Secrets Manager
+refuses to delete a secret that still has one, and the seed run that mints the
+new key replicates it again:
 
 ```bash
-aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+aws secretsmanager remove-regions-from-replication \
+  --secret-id forge-central/<stage>/swarf/identity --remove-replica-regions eu-central-1
+```
+
+Then delete the secret, skipping the recovery window:
+
+```bash
+aws secretsmanager delete-secret --secret-id forge-central/<stage>/swarf/identity \
   --force-delete-without-recovery
 ```
 
