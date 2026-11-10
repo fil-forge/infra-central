@@ -68,14 +68,14 @@ func TestEnsureInitialisedReturnsTheNewCredentials(t *testing.T) {
 	}
 }
 
-func TestEnsureMountsCreatesBothMissingMounts(t *testing.T) {
+func TestEnsureMountsCreatesEveryMissingMount(t *testing.T) {
 	f := &fakeOpenBao{initialised: true}
 	client := newClient(t, f)
 
 	if err := EnsureMounts(context.Background(), client); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{HiltMount, TransitMount}; !reflect.DeepEqual(f.mountedPaths, want) {
+	if want := []string{HiltMount, TransitMount, ApplianceRootMount}; !reflect.DeepEqual(f.mountedPaths, want) {
 		t.Errorf("mounted paths = %v, want %v", f.mountedPaths, want)
 	}
 }
@@ -83,7 +83,11 @@ func TestEnsureMountsCreatesBothMissingMounts(t *testing.T) {
 func TestEnsureMountsLeavesExistingMountsAlone(t *testing.T) {
 	f := &fakeOpenBao{
 		initialised: true,
-		mounts:      map[string]string{HiltMount + "/": "kv", TransitMount + "/": "transit"},
+		mounts: map[string]string{
+			HiltMount + "/":          "kv",
+			TransitMount + "/":       "transit",
+			ApplianceRootMount + "/": "kv",
+		},
 	}
 	client := newClient(t, f)
 

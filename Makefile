@@ -127,6 +127,14 @@ MINT_ARGS  ?=
 mint-appliance-credentials:
 	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-credentials.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(MINT_ARGS)
 
+# Keep a second copy of an appliance OpenBao's root token and recovery key in
+# central's OpenBao. The script prompts for both; neither is passed here.
+#
+#   make store-appliance-root-credentials STAGE=staging REGION=us-east-9
+.PHONY: store-appliance-root-credentials
+store-appliance-root-credentials:
+	AWS_REGION=$(AWS_REGION) scripts/store-appliance-root-credentials.sh --stage $(STAGE) --region $(REGION)
+
 # Register an appliance with sprue, hilt and the delegator, and return the
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
 #

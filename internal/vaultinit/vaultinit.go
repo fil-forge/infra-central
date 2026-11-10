@@ -138,8 +138,9 @@ func EnsureInitialised(ctx context.Context, client *api.Client) (InitResult, err
 	}, nil
 }
 
-// EnsureMounts brings up hilt's KV v2 engine and the transit engine. The client
-// must carry a root or equivalently privileged token.
+// EnsureMounts brings up hilt's KV v2 engine, the transit engine and the KV v2
+// engine for the appliances' root credentials. The client must carry a root or
+// equivalently privileged token.
 //
 // The audit device is not enabled here: OpenBao 2.x rejects audit devices
 // created over the API and takes them only from the server config file, which
@@ -163,6 +164,16 @@ func EnsureMounts(ctx context.Context, client *api.Client) error {
 	if _, ok := mounts[TransitMount+"/"]; !ok {
 		if err := client.Sys().MountWithContext(ctx, TransitMount, &api.MountInput{Type: "transit"}); err != nil {
 			return fmt.Errorf("mount transit: %w", err)
+		}
+	}
+
+	if _, ok := mounts[ApplianceRootMount+"/"]; !ok {
+		err := client.Sys().MountWithContext(ctx, ApplianceRootMount, &api.MountInput{
+			Type:    "kv",
+			Options: map[string]string{"version": "2"},
+		})
+		if err != nil {
+			return fmt.Errorf("mount kv v2 at %s: %w", ApplianceRootMount, err)
 		}
 	}
 

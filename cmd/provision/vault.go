@@ -147,7 +147,8 @@ func (d *deps) reconcileApplianceKeys(ctx context.Context, client *api.Client, r
 }
 
 // retireAppliance revokes a retired region's unseal token, removes the
-// parameters describing it and destroys its transit key.
+// parameters describing it and the copy of its root credentials, and destroys
+// its transit key.
 //
 // Both ends of the order carry weight. Revoking first means the node loses its
 // unseal ability even if a later step fails, so a half-finished retirement still
@@ -178,6 +179,12 @@ func (d *deps) retireAppliance(ctx context.Context, client *api.Client, region s
 
 	deleted, err := d.store.DeletePrefix(ctx, service)
 	if err != nil {
+		return err
+	}
+
+	// A retired region's OpenBao never unseals again, so its root credentials
+	// open nothing. The 1Password entry is the operator's to delete.
+	if err := vaultinit.RemoveApplianceRootCredentials(ctx, client, region); err != nil {
 		return err
 	}
 

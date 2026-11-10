@@ -145,6 +145,7 @@ scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and ba
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
+scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
 scripts/set-pin.sh            pins one service of one stage at one image digest

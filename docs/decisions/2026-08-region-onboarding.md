@@ -74,8 +74,9 @@ The cost is a second list to keep, and one that only grows. A retired label stay
 forever, because dropping it is what the refusal is there to catch.
 
 Retirement fires the kill lever in a fixed order: revoke the node's unseal token, delete its token
-role, delete its parameters, destroy the transit key. Revoking first means a retirement that fails
-halfway has still contained the node it was meant to contain. Destroying the key last makes it the
+role, delete its parameters, delete the copy of its root credentials, destroy the transit key.
+Revoking first means a retirement that fails halfway has still contained the node it was meant to
+contain. Destroying the key last makes it the
 record of whether the sequence finished, since the key's presence is what puts the region back in
 front of the next apply; deleting it earlier would strand every step after it with nothing left to
 notice.
