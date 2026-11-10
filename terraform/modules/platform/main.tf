@@ -159,6 +159,18 @@ module "storage" {
   pitr_window_days       = var.pitr_window_days
 }
 
+# The appliances' backup target. Its writer users follow appliance_regions, so
+# retiring a region also deletes the user and the key its node writes with.
+module "appliance_backups" {
+  source = "./appliance-backups"
+  count  = var.appliance_backups == null ? 0 : 1
+
+  stage          = var.stage
+  account_id     = local.account_id
+  regions        = var.appliance_regions
+  retention_days = var.appliance_backups.retention_days
+}
+
 module "ingress" {
   source = "./ingress"
 
@@ -235,6 +247,11 @@ module "provision" {
 
   allow_list_table_name = module.storage.allow_list_table_name
   allow_list_table_arn  = module.storage.allow_list_table_arn
+
+  appliance_backups = var.appliance_backups == null ? null : {
+    bucket_name = module.appliance_backups[0].bucket_name
+    user_prefix = module.appliance_backups[0].user_prefix
+  }
 }
 
 # Mints every identity, wallet and password, and creates the per-service
