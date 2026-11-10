@@ -45,6 +45,10 @@ type Request struct {
 	// re-invocation by changing the input, which is how aws_lambda_invocation
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
+	// ImageDigest is ignored too. Terraform sends it with the vault phase so a
+	// new provision image re-invokes the phase, which is how a mount the new
+	// code adds reaches a stage that already exists.
+	ImageDigest string `json:"image_digest,omitempty"`
 
 	// --- vault phase only ---
 

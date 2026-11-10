@@ -344,9 +344,14 @@ resource "aws_lambda_invocation" "vault" {
 
   # The region lists are part of the input, so committing a label is what
   # re-invokes the phase to reconcile the keys against it.
+  #
+  # The image digest is part of it too, so a new provision image re-invokes
+  # the phase. A mount or policy the new code adds then reaches a stage that
+  # already exists. The phase only creates what is missing.
   input = jsonencode({
     phase                     = "vault"
     trigger                   = var.vault_trigger
+    image_digest              = var.provision_image_digest
     appliance_regions         = var.appliance_regions
     retired_appliance_regions = var.retired_appliance_regions
   })
