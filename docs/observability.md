@@ -142,6 +142,7 @@ on `stage` and `service` for that long.
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
+| Ingot volume free space below 10%                    | Forge Regions            | node exporter                 | FIL-1616 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's proving period has not advanced               | Forge Regions            | Piri's metrics                | FIL-1383 |
@@ -242,6 +243,14 @@ The provision Lambda, which uses the AWS-defined log group format:
 
 ```logql
 {aws_log_group="/aws/lambda/fc-dev-provision"}
+```
+
+A key the seed phase could not replicate to the DR region, or whose replica did not reach InSync
+within two minutes, fails the stage's platform apply. The error names the key and, for a failed
+replica, the reason Secrets Manager gave:
+
+```logql
+{aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
 ```
 
 ### Log labels
