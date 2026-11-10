@@ -122,6 +122,13 @@ stages in `appliance_backup_stages`, the alert stages whose platform root sets
 `scripts/check-backup-stages.sh` fail `make check` when either list disagrees
 with the platform roots.
 
+"Service has no healthy hosts" reads absence too, without a list. A Central
+service with no tasks has no registered targets, and CloudWatch then stops
+publishing `HealthyHostCount` for its target group instead of reporting 0. So
+the rule counts any stage and service seen in the last day but silent now as 0
+healthy hosts. It fires about ten minutes after the last sample. A service
+removed on purpose alerts until a day has passed, so silence it for that long.
+
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
 | Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch               | FIL-1151 |
