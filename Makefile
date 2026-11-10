@@ -111,18 +111,21 @@ DEPOSIT   ?= 3
 fund-payer:
 	AWS_REGION=$(AWS_REGION) scripts/fund-payer.sh --stage $(STAGE) --deposit $(DEPOSIT) $(FUND_ARGS)
 
-# Mint a regional appliance's unseal credential. The region's transit key must
-# already exist, which means its label committed to appliance_regions and merged.
+# Mint a regional appliance's unseal credential and, in stages that take
+# backups, its backup key. Each credential the region already holds is skipped,
+# so re-running is safe. The region's transit key and backup writer must already
+# exist, which means its label committed to appliance_regions and merged.
 #
-#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7
-#   make mint-appliance-token REGION=us-east-9 NODE_IP=203.0.113.7 TOKEN_ARGS=--reissue
+#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7
+#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-unseal-token
+#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-backup-key
 REGION     ?=
 NODE_IP    ?=
-TOKEN_ARGS ?=
+MINT_ARGS  ?=
 
-.PHONY: mint-appliance-token
-mint-appliance-token:
-	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-token.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(TOKEN_ARGS)
+.PHONY: mint-appliance-credentials
+mint-appliance-credentials:
+	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-credentials.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(MINT_ARGS)
 
 # Register an appliance with sprue, hilt and the delegator, and return the
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
@@ -195,6 +198,14 @@ check:
 # because the dashboards carry Grafana's own ${...} interpolation and so cannot
 # be generated, so CI compares them rather than trusting anyone to edit both.
 	scripts/check-stage-picker.sh
+# The rules that read absence watch the live appliances, which the grafana root
+# lists itself because metrics cannot tell a retired appliance from a dead one.
+# CI compares the list with the stages' appliance_regions.
+	scripts/check-appliance-regions.sh
+# The stale-snapshot rule watches the alert_stages that take appliance backups,
+# which the grafana root lists itself because it cannot read the platform roots
+# that decide it. CI compares the two.
+	scripts/check-backup-stages.sh
 
 .PHONY: fmt
 fmt:

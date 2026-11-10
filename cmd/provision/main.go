@@ -12,14 +12,10 @@
 // starts; but OpenBao must be running before it can be configured. Phase seed
 // runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
 //
-// Five more phases exist that Terraform must never invoke, because an apply must
-// not move money, issue a credential or delete a registration. Phase fund
-// deposits USDFC for the payer, appliance-token mints a regional appliance's
-// unseal credential, onboard admits an appliance, retire removes a region's
-// Ingot identity so it can be admitted again under a different DID, and
-// reset-apps wipes the apps' databases and hilt's tenant secrets on dev or
-// staging. All five are run by an operator through a script that shows the plan
-// and asks first.
+// Every other phase is for an operator, and Terraform must never invoke it: an
+// apply must not move money, issue a credential or delete a registration. An
+// operator runs each one through a script in scripts/ that shows the plan and
+// asks before acting. The switch in handle lists them all.
 package main
 
 import (
@@ -61,11 +57,12 @@ type Request struct {
 	ApplianceRegions        []string `json:"appliance_regions,omitempty"`
 	RetiredApplianceRegions []string `json:"retired_appliance_regions,omitempty"`
 
-	// --- appliance-token and retire phases ---
+	// --- appliance-token, appliance-backup-key and retire phases ---
 
 	// Region is the appliance's region label, naming its transit key and policy
-	// for the appliance-token phase, and the provider row and parameter prefix
-	// for retire.
+	// for the appliance-token phase, its backup writer user and key prefix for
+	// appliance-backup-key, and the provider row and parameter prefix for
+	// retire.
 	Region string `json:"region,omitempty"`
 
 	// --- appliance-token phase only ---
@@ -73,11 +70,17 @@ type Request struct {
 	// NodeCIDR is the node's egress address, its Elastic IP as a /32. The token
 	// is bound to it and is worthless anywhere else.
 	NodeCIDR string `json:"node_cidr,omitempty"`
-	// Period and WrapTTL override the defaults in appliancetoken.go.
-	Period  string `json:"period,omitempty"`
+	// Period overrides the default in appliancetoken.go.
+	Period string `json:"period,omitempty"`
+
+	// --- appliance-token and appliance-backup-key phases ---
+
+	// WrapTTL overrides the default in appliancetoken.go.
 	WrapTTL string `json:"wrap_ttl,omitempty"`
-	// Reissue revokes the region's existing token before minting another.
-	// Without it a region that already has a live token is refused, because two
+	// Reissue replaces the region's existing credential. The appliance-token
+	// phase revokes the old token after minting its replacement; the
+	// appliance-backup-key phase deletes the old keys before minting. Without it
+	// a region that already holds the credential is skipped, because two
 	// standing credentials for one node is a state nothing can reason about.
 	Reissue bool `json:"reissue,omitempty"`
 
@@ -105,7 +108,8 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token, onboard, retire and reset-apps phases ---
+	// --- fund, appliance-token, appliance-backup-key, onboard, retire and
+	// reset-apps phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
@@ -162,6 +166,12 @@ type Response struct {
 	// credential. That is why no aws_lambda_invocation calls that phase.
 	TokenPlan   *TokenPlan   `json:"token_plan,omitempty"`
 	TokenResult *TokenResult `json:"token_result,omitempty"`
+
+	// BackupKeyPlan and BackupKeyResult belong to the appliance-backup-key
+	// phase. The result carries a wrapping token that exchanges for a secret
+	// access key, so it is no safer for Terraform state than TokenResult.
+	BackupKeyPlan   *BackupKeyPlan   `json:"backup_key_plan,omitempty"`
+	BackupKeyResult *BackupKeyResult `json:"backup_key_result,omitempty"`
 
 	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
 	// public: the result's proof is a delegation, which is useless without the
@@ -222,6 +232,8 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.fund(ctx, req)
 	case "appliance-token":
 		return deps.applianceToken(ctx, req)
+	case "appliance-backup-key":
+		return deps.applianceBackupKey(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
 	case "retire":
@@ -230,7 +242,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
 }
 
