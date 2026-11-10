@@ -177,6 +177,12 @@ variable "container_insights" {
   default = false
 }
 
+variable "backup_replica_region" {
+  description = "Region the seed phase replicates every identity and wallet secret to, normally module.constants.dr_region. Null keeps no replicas."
+  type        = string
+  default     = null
+}
+
 variable "seed_trigger" {
   description = "Change to force the seed phase to run again."
   type        = string
@@ -211,6 +217,19 @@ variable "signer_allowed_sources" {
     condition     = var.signer_allowed_sources == null ? true : alltrue([for region in keys(var.signer_allowed_sources) : contains(var.appliance_regions, region)])
     error_message = "Every signer_allowed_sources key must be a label in appliance_regions. Retiring a region removes its address too."
   }
+}
+
+variable "appliance_backups" {
+  description = <<-EOT
+    The bucket appliances push their database and OpenBao backups to, and a
+    writer user for each label in appliance_regions. Null for a stage whose
+    appliances take no backups. retention_days is how long each backup is locked
+    in compliance mode. See docs/decisions/2026-11-appliance-backup-target.md.
+  EOT
+  type = object({
+    retention_days = number
+  })
+  default = null
 }
 
 variable "vault_trigger" {

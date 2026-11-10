@@ -71,6 +71,8 @@ data "aws_iam_policy_document" "this" {
       "secretsmanager:CreateSecret",
       "secretsmanager:GetSecretValue",
       "secretsmanager:PutSecretValue",
+      # Reads a key's replica status, never its value.
+      "secretsmanager:DescribeSecret",
     ]
 
     resources = [
@@ -78,8 +80,40 @@ data "aws_iam_policy_document" "this" {
     ]
   }
 
+  # Each key gets a replica in the DR region, so losing this region loses no
+  # key. The replica takes that region's AWS-managed key, as below. Replicating
+  # is allowed to the DR region only, and never over a secret of the same name
+  # already there. Nothing here removes a replica.
+  dynamic "statement" {
+    for_each = var.backup_replica_region == null ? [] : [var.backup_replica_region]
+
+    content {
+      sid = "ReplicateStageKeys"
+
+      actions = ["secretsmanager:ReplicateSecretToRegions"]
+
+      resources = [
+        "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:forge-central/${var.stage}/*",
+      ]
+
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "secretsmanager:AddReplicaRegions"
+        values   = [statement.value]
+      }
+
+      # The SDK omits the flag when it is false, hence IfExists.
+      condition {
+        test     = "BoolIfExists"
+        variable = "secretsmanager:ForceOverwriteReplicaSecret"
+        values   = ["false"]
+      }
+    }
+  }
+
   # The keys take the account's AWS-managed Secrets Manager key, for the same
-  # reason the SecureStrings take the AWS-managed SSM key.
+  # reason the SecureStrings take the AWS-managed SSM key, and their replicas
+  # take the DR region's.
   statement {
     sid       = "EncryptAndDecryptKeys"
     actions   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
@@ -88,7 +122,9 @@ data "aws_iam_policy_document" "this" {
     condition {
       test     = "StringEquals"
       variable = "kms:ViaService"
-      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+      values = [
+        for region in compact([var.region, var.backup_replica_region]) : "secretsmanager.${region}.amazonaws.com"
+      ]
     }
   }
 
@@ -104,6 +140,26 @@ data "aws_iam_policy_document" "this" {
     ]
 
     resources = [var.allow_list_table_arn]
+  }
+
+  # The appliance-backup-key phase mints each region's backup key, so the
+  # secret never enters Terraform state. The grant is the three calls it makes
+  # and only on the writer users. Creating or deleting the users themselves is
+  # Terraform's, under the CI apply role.
+  dynamic "statement" {
+    for_each = var.appliance_backups == null ? [] : [var.appliance_backups]
+
+    content {
+      sid = "MintApplianceBackupKeys"
+
+      actions = [
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:ListAccessKeys",
+      ]
+
+      resources = ["arn:aws:iam::${var.account_id}:user/${statement.value.user_prefix}*"]
+    }
   }
 
   # The RDS master credentials, which Terraform never sees because

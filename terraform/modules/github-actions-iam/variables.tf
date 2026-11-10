@@ -31,6 +31,12 @@ variable "name_prefix" {
   default     = "forge-central"
 }
 
+variable "allow_emptying_stage_buckets" {
+  description = "Whether the apply role may delete objects in the fc-* buckets, which destroying a bucket with force_destroy set requires. True in the non-prod account, so a CI apply can remove a dev or staging bucket and whatever it still holds. False in prod, where no bucket sets force_destroy and the role then holds no object action on an fc-* bucket."
+  type        = bool
+  default     = false
+}
+
 variable "account_id" {
   description = "Account these roles live in, used to scope the apply role's IAM writes to the fc-* roles this project creates. Passed in rather than read from aws_caller_identity, so a bootstrap applied with the wrong credentials fails on the provider's allowed_account_ids guard instead of quietly writing a policy for the wrong account."
   type        = string

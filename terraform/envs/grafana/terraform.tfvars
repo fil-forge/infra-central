@@ -49,6 +49,19 @@ loki_datasource_uid = "grafanacloud-logs"
 # dashboard offers from going unnoticed.
 alert_stages = ["staging", "prod"]
 
+# The live appliances of the alert stages: <stage>-<region> for every label in
+# each stage's appliance_regions. Retiring a region removes it here in the same
+# commit that moves it to retired_appliance_regions, which is what keeps
+# "Appliance has stopped reporting" from firing for it.
+# scripts/check-appliance-regions.sh fails the build when the two disagree.
+live_appliances = ["staging-eu-central-3"]
+
+# The alert_stages whose appliances push backups to central: those whose
+# platform root sets appliance_backups. scripts/check-backup-stages.sh fails the
+# build when the two disagree, so the stale-snapshot rule cannot miss a stage
+# that takes backups or page for one that takes none.
+appliance_backup_stages = ["staging", "prod"]
+
 # The contact point for the IRM integration Forge shares with FilOne, which
 # routing.tf's tree delivers every alert to. Alerting -> Contact points; it was
 # made in the UI, and its uid (RmlsT25l, in its edit page's address) is only its

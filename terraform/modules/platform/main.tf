@@ -176,6 +176,18 @@ module "storage" {
   pitr_window_days       = var.pitr_window_days
 }
 
+# The appliances' backup target. Its writer users follow appliance_regions, so
+# retiring a region also deletes the user and the key its node writes with.
+module "appliance_backups" {
+  source = "./appliance-backups"
+  count  = var.appliance_backups == null ? 0 : 1
+
+  stage          = var.stage
+  account_id     = local.account_id
+  regions        = var.appliance_regions
+  retention_days = var.appliance_backups.retention_days
+}
+
 module "ingress" {
   source = "./ingress"
 
@@ -252,6 +264,13 @@ module "provision" {
 
   allow_list_table_name = module.storage.allow_list_table_name
   allow_list_table_arn  = module.storage.allow_list_table_arn
+
+  backup_replica_region = var.backup_replica_region
+
+  appliance_backups = var.appliance_backups == null ? null : {
+    bucket_name = module.appliance_backups[0].bucket_name
+    user_prefix = module.appliance_backups[0].user_prefix
+  }
 }
 
 # Mints every identity, wallet and password, and creates the per-service
@@ -260,13 +279,17 @@ module "provision" {
 resource "aws_lambda_invocation" "seed" {
   function_name = module.provision.function_name
 
-  # The pandora host is here so that creating or replacing that cluster
-  # re-invokes the phase. The function reads the host from its environment.
-  input = jsonencode({
+  # The pandora host and the replica region are here so that changing either
+  # re-invokes the phase. The function reads both from its environment.
+  # The replica region joins the input only when set, so a stage that keeps no
+  # replicas sees the same input as before replication existed.
+  input = jsonencode(merge({
     phase           = "seed"
     trigger         = var.seed_trigger
     pandora_db_host = try(module.pandora_db[0].address, null)
-  })
+    }, var.backup_replica_region == null ? {} : {
+    backup_replica_region = var.backup_replica_region
+  }))
 
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
@@ -275,6 +298,17 @@ resource "aws_lambda_invocation" "seed" {
   # the function, so without it an apply that adds a grant and a phase that
   # needs it could invoke the phase first and fail with AccessDenied.
   depends_on = [module.database, module.aurora, module.pandora_db, module.provision]
+
+  # The function echoes the region it replicated to. An image built before
+  # replication existed ignores the setting and echoes nothing, and without
+  # this the apply would succeed with no replica made. After publishing a
+  # newer image, bump seed_trigger to re-run the phase.
+  lifecycle {
+    postcondition {
+      condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
+      error_message = "The seed phase did not replicate the keys to ${coalesce(var.backup_replica_region, "-")}. The provision image predates replication: publish a newer one, then bump seed_trigger."
+    }
+  }
 }
 
 module "openbao" {

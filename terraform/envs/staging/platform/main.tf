@@ -101,6 +101,10 @@ module "platform" {
   retired_appliance_regions = var.retired_appliance_regions
   signer_allowed_sources    = var.signer_allowed_sources
 
+  # Each backup is locked for 35 days in compliance mode, which is what RFC 37
+  # asks of the appliance backup target.
+  appliance_backups = { retention_days = 35 }
+
   # Staging keeps one database instance, while giving the shared Postgres and
   # OpenBao workload twice dev's memory and connection budget.
   db_instance_class    = "db.t4g.small"

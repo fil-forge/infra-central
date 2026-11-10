@@ -28,6 +28,22 @@ variable "alert_stages" {
   default     = ["prod"]
 }
 
+variable "live_appliances" {
+  description = "The live appliances of the alert stages, as <stage>-<region> appliance labels: every label in each stage's appliance_regions. An appliance on this list that is not reporting pages about 25 minutes after the apply. A retired region leaves this list in the commit that retires it. scripts/check-appliance-regions.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.live_appliances) > 0
+    error_message = "live_appliances is empty. \"Appliance has stopped reporting\" builds its query from this list and cannot be created from an empty one."
+  }
+}
+
+variable "appliance_backup_stages" {
+  description = "Stages whose appliances push backups to central, the alert_stages whose platform root sets appliance_backups. Every appliance in one of them is expected to report its OpenBao snapshot stamp. scripts/check-backup-stages.sh fails the build when this disagrees with the platform roots."
+  type        = list(string)
+  default     = []
+}
+
 variable "prometheus_datasource_uid" {
   description = "UID of the grafanacloud-prom data source. Alert rules address a data source by uid where a dashboard can use its name. It is in the URL of the data source's settings page, and it is not a secret."
   type        = string
@@ -50,6 +66,12 @@ variable "trace_spans_alert_threshold" {
   default     = null
 }
 
+variable "central_response_time_threshold_seconds" {
+  description = "Mean response time, in seconds over five minutes, above which a Central service's response time rule fires. Provisional: FIL-1242 defines the SLO this should match. Prod's slowest service, plc, peaked near 0.2s in the week the rule was written."
+  type        = number
+  default     = 1
+}
+
 locals {
   stages = join("|", var.alert_stages)
 
@@ -58,6 +80,26 @@ locals {
   # by node label is a requirement; it happens in Terraform because a Grafana
   # alert rule has no template variables of its own.
   appliance_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-host\""
+
+  # One clause per live appliance, each returning a series only while that
+  # appliance's reconcile stamp is missing. absent_over_time keeps the labels of
+  # the equality matchers and nothing else, so label_replace adds the region
+  # that the summary and the dashboard link read.
+  stopped_reporting_expr = join("\nor\n", [
+    for appliance in var.live_appliances :
+    "label_replace(absent_over_time(deploy_last_success_timestamp{project=\"reconcile\", appliance=\"${appliance}\", service_name=~\"appliance-.*-host\"}[15m]), \"region\", \"${trimprefix(appliance, "${split("-", appliance)[0]}-")}\", \"\", \"\")"
+  ])
+
+  # The live appliances in the stages that push backups, each of which owes an
+  # OpenBao snapshot. Empty when no stage takes backups or none of their regions
+  # is live, and then the rule that uses it is not created: an empty
+  # alternation matches nothing, and a rule that alerts on no data would fire
+  # forever.
+  backup_appliances = [
+    for appliance in var.live_appliances : appliance
+    if contains(var.appliance_backup_stages, split("-", appliance)[0])
+  ]
+  backup_appliance_matcher = "appliance=~\"(${join("|", local.backup_appliances)})\", service_name=~\"appliance-.*-host\""
 
   # The load balancer publishes each metric three times: once per availability
   # zone, once per target group and once for the whole balancer. The two extra
@@ -76,11 +118,18 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The same filesystem filter the dashboards use. What wants watching is the
-  # control and data volumes, but their mountpoints differ between the EC2 nodes
-  # and the Servers.com host, so this covers every real filesystem instead --
-  # a superset, and one that needs no per-node edit.
-  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
+  # The EC2 nodes' volume that holds only Ingot's spool, cache and catalog log
+  # (infra-nodes terraform/modules/node, aws_ebs_volume.data). Ingot keeps it
+  # near its byte budget by design, so it gets its own, lower threshold.
+  ingot_volume_mountpoint = "/mnt/fil-one/data"
+
+  # The same filesystem filter the dashboards use, less Ingot's volume. What
+  # wants watching is the control and Piri volumes, but their mountpoints differ
+  # between the EC2 nodes and the Servers.com host, so this covers every real
+  # filesystem instead -- a superset, and one that needs no per-node edit.
+  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*|${local.ingot_volume_mountpoint}\""
+
+  ingot_volume_matcher = "${local.appliance_matcher}, mountpoint=\"${local.ingot_volume_mountpoint}\""
 
   # Ingot's OTLP metrics. Alloy names them appliance-<stage>-<region>-ingot
   # from Ingot's service.name and stamps appliance, region and node on them,
@@ -105,6 +154,13 @@ locals {
 
   # OpenBao's container log stream, same scheme.
   openbao_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-openbao\""
+
+  # Ingot's container log stream, same scheme.
+  ingot_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-ingot\""
+
+  # Hilt's log, which reaches Loki from CloudWatch under its ECS log group,
+  # /forge-central/<stage>/hilt, with the stage also in the environment label.
+  hilt_log_matcher = "aws_log_group=~\"/forge-central/(${local.stages})/hilt\""
 
   # Caddy's request metrics, narrowed to traffic the appliance's own sites
   # answered. caddy_http_request_duration_seconds_count is the series to read:
@@ -885,6 +941,119 @@ resource "grafana_rule_group" "central" {
   }
 }
 
+# A group of its own, so the response time rule and its threshold can change
+# with the SLO without touching the rules above. 60s for the same reason as
+# "Forge Central".
+resource "grafana_rule_group" "central_latency" {
+  name             = "Forge Central latency"
+  folder_uid       = grafana_folder.alerts.uid
+  interval_seconds = 60
+
+  # The mean time each service's targets took to answer, over five minutes.
+  #
+  # TargetResponseTime ends when the target starts sending its response
+  # headers, so it is closer to TTFB than TTLB. Central's responses are small
+  # JSON, where the two barely differ, and it keeps swarf's SSE stream from
+  # reading as a request hours long. Central serves no S3 object operations, so
+  # there is nothing size-dependent to exclude.
+  #
+  # The stream carries no percentiles, so this is a mean: the sum of response
+  # times over their count, which weighs each request equally where averaging
+  # the per-minute averages would weigh each minute equally. CloudWatch
+  # publishes the metric only in minutes with requests, so an idle service has
+  # no series and no_data_state is OK.
+  rule {
+    name           = "Service response time is high"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
+      description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
+      __dashboardUid__ = "forge-central"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sum{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          /
+          sum by (stage, service) (
+            label_replace(
+              label_replace(
+                sum_over_time(aws_applicationelb_target_response_time_sample_count{${local.elb_matcher}}[5m]),
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [var.central_response_time_threshold_seconds] }
+        }]
+      })
+    }
+  }
+}
+
 # 300s although the host exporter is scraped once a minute. Nothing in this
 # group is time-critical enough to want the extra resolution, and a slower
 # interval costs nothing here.
@@ -894,7 +1063,7 @@ resource "grafana_rule_group" "appliance" {
   interval_seconds = 300
 
   # The node has gone away: nothing from its host exporter in the last fifteen
-  # minutes, though it reported some time in the last day. This is the rule
+  # minutes from an appliance that should be live. This is the rule
   # that catches a whole appliance going dark: the other appliance rules read
   # data that vanishes with the node, and are built to stay quiet when it does.
   # It cannot tell a dead box from a live one whose host exporter or Alloy has
@@ -903,15 +1072,22 @@ resource "grafana_rule_group" "appliance" {
   # reconciling", at the end of this group.
   #
   # Absence is the signal, so there is no value to compare: the expression
-  # tests for a series that was there and is not. Its 24h window is what makes
-  # it self-cleaning, since a node decommissioned longer ago than that falls out
-  # of both sides on its own. The result is 1, so the threshold stage is `gt 0`.
+  # returns 1 for each listed appliance with no reconcile stamp in the last 15
+  # minutes, and the threshold stage is `gt 0`.
   #
-  # Recovery is a no-data event: a node that reports again satisfies both
-  # present_over_time clauses, the `unless` cancels them, and nothing is left.
-  # no_data_state = OK is what turns that into Normal. An instant query, so no
-  # reduce stage: a range query reduced with `last` would keep the last point
-  # it fired on for the window's length after the node came back.
+  # The appliances watched are the live_appliances list, which
+  # scripts/check-appliance-regions.sh keeps in step with each stage's
+  # appliance_regions. A listed appliance alerts from the moment it has no data,
+  # whether it has never reported or stopped long ago, and keeps alerting until
+  # it reports or leaves the list. A retired appliance stops reporting exactly
+  # as a dead one does; retiring a region removes it from the list in the same
+  # commit, so its node going dark never fires this. A new region alerts from
+  # about 25 minutes after the apply that lists it until its node first reports.
+  #
+  # Recovery is a no-data event: once every listed appliance reports, every
+  # clause is empty, and no_data_state = OK turns that into Normal. An instant
+  # query, so no reduce stage: a range query reduced with `last` would keep the
+  # last point it fired on for the window's length after the node came back.
   #
   # Critical: a node that has gone dark may be serving nothing, and nothing
   # else would say so.
@@ -923,7 +1099,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Alerting"
 
     annotations = {
-      summary          = "{{ $labels.region }} ({{ $labels.node }}) has stopped reporting"
+      summary          = "{{ $labels.appliance }} has stopped reporting"
       description      = "Nothing from this node's host exporter has arrived for fifteen minutes. Either the node is down or unreachable, or its host exporter or Alloy has stopped, and the dashboards can no longer tell which."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=13"
@@ -956,15 +1132,7 @@ resource "grafana_rule_group" "appliance" {
         instant      = true
         range        = false
         legendFormat = "{{appliance}}"
-        expr         = <<-PROMQL
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[24h])
-          )
-          unless
-          max by (node, region, appliance) (
-            present_over_time(deploy_last_success_timestamp{project="reconcile", ${local.appliance_matcher}}[15m])
-          )
-        PROMQL
+        expr         = local.stopped_reporting_expr
       }))
     }
 
@@ -1678,9 +1846,8 @@ resource "grafana_rule_group" "appliance" {
   # where the failure is a proof set's. Filecoin epochs are thirty seconds,
   # which is where every 30 below comes from.
   #
-  # The four rules that watch Piri itself rather than a proof set (chain head
-  # is stale, no chain head, proof set is unrecoverable, Prove task has not run)
-  # also group by instance, and their summaries name the Piri by it. A node can
+  # They also group by instance, and their summaries name the Piri by it, so an
+  # alert says which Piri to open even when it names a proof set. A node can
   # run several Piris, each reporting instance <node>/piri-<n>, and grouping by
   # node alone would let one healthy Piri hide another's stall, or leave the
   # alert unable to say which Piri it means. A Piri that reports another
@@ -1953,7 +2120,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had its next proving period scheduled"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had its next proving period scheduled"
       description = "The proof set's challenge window has closed and Piri has not scheduled its next proving period, so proving for it has stopped. Usually the chain head has stopped moving or Piri's PDP task engine is not running. Check that the owner wallet has FIL, that the Lotus Piri reads the chain from is synced, run `piri status`, and read the proof set's state with `piri client pdp proofset state` in the Piri container; the PDPv0_ProvPeriod task logs say whether scheduling ran. Act within a day: each day costs that proving period's payment. If the wallet is empty, Piri's pending piece additions may already have stranded, about 3.5 hours after they began failing; the runbook says how to free them."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-proving-period-has-not-advanced"
     }
@@ -1986,11 +2153,11 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
                 piri_pdp_proofset_next_challenge_epoch{${local.piri_metric_matcher}}
               + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
             )
@@ -2058,7 +2225,7 @@ resource "grafana_rule_group" "appliance" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Proof set {{ $labels.proof_set }} on {{ $labels.node }} ({{ $labels.region }}) has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has not had a proof accepted on chain for over a proving period, or Piri cannot read when it last did"
       description = "PDPVerifier has not accepted a proof for this proof set for longer than its proving period plus its challenge window, so the contract is recording faults against the provider for data it holds; or Piri has been unable to read the proof set's last proven epoch from PDPVerifier, so the stall cannot be ruled out (the Piri logs say \"reading proof set's last proven epoch\"). Check the Piri container's logs for the PDPv0_Prove and PDPv0_ProvPeriod tasks and their errors (a rejected proof, \"no subpiece found\", a stuck deletion drain), and check the proof set with `piri client pdp proofset state`. Act now: each further proving period records another fault."
       runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-proving-is-failing"
     }
@@ -2091,25 +2258,25 @@ resource "grafana_rule_group" "appliance" {
         expr       = <<-PROMQL
           (
             (
-                max by (appliance, region, node) (piri_chain_head_epoch{${local.piri_metric_matcher}})
-              + (time() - max by (appliance, region, node) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
             )
-            - on (appliance, region, node) group_right()
-            max by (appliance, region, node, proof_set) (
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
             )
           )
-          - on (appliance, region, node, proof_set)
-          max by (appliance, region, node, proof_set) (
+          - on (appliance, region, node, instance, proof_set)
+          max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             + piri_pdp_proofset_challenge_window_epochs{${local.piri_metric_matcher}}
           )
           or
           (
-            0 * max by (appliance, region, node, proof_set) (
+            0 * max by (appliance, region, node, instance, proof_set) (
               piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}
             )
-            unless on (appliance, region, node, proof_set)
+            unless on (appliance, region, node, instance, proof_set)
             piri_pdp_proofset_last_proven_epoch{${local.piri_metric_matcher}}
           ) + 1
         PROMQL
@@ -2736,6 +2903,640 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # Ingot drops revoked keys from its authorization caches by streaming Swarf's
+  # revocation firehose. Once connected, the Swarf client reconnects a dropped
+  # stream without reporting it, so a stalled feed leaves no error line, and a
+  # revoked key keeps working on the node until its cache entry expires
+  # (infra-nodes docs/observability.md, Ingot).
+  #
+  # The signal is Hilt publishing revocations while an Ingot processes none.
+  # Hilt logs "published revocation" for each one and Ingot logs "revocation:
+  # record processed" for each record it reads. The counts are not compared:
+  # the firehose is shared, so Ingot also reads records Hilt did not publish.
+  # The query returns, for each Ingot that processed nothing in the last 15
+  # minutes, its stage's Hilt count, and nothing when Hilt published none.
+  #
+  # Ingot is often silent for hours, so the set of nodes to judge comes from a
+  # day of its logs. An Ingot that logged nothing all day is out of sight here;
+  # "Appliance container is not running" covers one that has stopped. The stage
+  # is cut from the appliance label, <stage>-<region>, to join on Hilt's
+  # environment label.
+  #
+  # Both sides are counted by the time each line was written, not when it
+  # reached Loki, so Hilt's CloudWatch delay does not split one revocation
+  # across windows. `for` = 10m asks for two evaluations in a row.
+  #
+  # no_data_state is OK: an empty result is the healthy state. An instant
+  # query, so no reduce stage.
+  rule {
+    name           = "Ingot is not receiving revocations"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Ingot on {{ $labels.node }} ({{ $labels.region }}) processed no revocations while Hilt published {{ $values.A.Value }}"
+      description = "Hilt has published revocations in the last 15 minutes and this node's Ingot has processed none, so bucket policy changes and key deletions are not reaching its authorization caches and a revoked key keeps working until its cache entry expires. Check that Ingot's config has revocation_service_url and revocation_service_did set, that the node can reach its stage's Swarf (revoke.<stage>.fil-forge.com), and Ingot's log for \"revocation: stream error\". Restarting Ingot reconnects the stream and resumes it from its stored cursor."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/observability.md#ingot"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          label_replace(
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} [1d])
+            ) * 0
+              unless on (appliance, region, node)
+            sum by (appliance, region, node) (
+              count_over_time({${local.ingot_log_matcher}} |= "revocation: record processed" [15m])
+            ),
+            "environment", "$1", "appliance", "([^-]+)-.*"
+          )
+            + on (environment) group_left ()
+          sum by (environment) (
+            count_over_time({${local.hilt_log_matcher}} |= "published revocation" [15m])
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Ingot journals each commit's new catalog blocks in Postgres until the log
+  # segment holding them ships to Forge, so a copy of the database holds the
+  # catalog that exists nowhere but the host's disk (fil-forge/ingot's
+  # logstore/README.md). Segments seal within seconds and ship right after, so
+  # the oldest journaled block is normally seconds old. A ship that fails is
+  # retried, a few times at once and then by a sweep each minute until it
+  # lands, so half an hour means shipping is failing, not slow. Nothing is
+  # lost while a segment waits, since its blocks are on disk and in Postgres:
+  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # rides out a slow scrape.
+  #
+  # A restart is the wrong way to retry. Ingot signs a ship with authority it
+  # keeps in memory from the bucket's recent writes, and a restart clears it, so
+  # an idle bucket's segments then wait for its next write. After an outage
+  # longer than that authority's hour, every idle bucket with a backlog waits
+  # the same way, so the alert can outlast its cause by days with nothing to do.
+  # If that ever matters, the fix is in hilt, which holds the tenant's keys and
+  # could mint Ingot a narrow ship-only delegation when it has none; it has no
+  # endpoint for that yet. A restart is the remedy for two cases. One is a
+  # segment whose file is gone from disk: its blocks are safe in the journal,
+  # and at startup Ingot rebuilds the segment from them (FIL-1601) before it
+  # retires or deletes the lost row. The other is a ship that hangs (its HTTP
+  # clients set no timeout), which blocks the bucket's queue and sweep alike
+  # and logs nothing. Either way the bucket then waits for its next write, like
+  # any idle bucket after a restart, and a rebuilt segment keeps its blocks'
+  # journal age, so the alert stays until that write. One case needs Ingot's
+  # maintainers: a ship that fails on its own every time. An Ingot configured
+  # with catalog_plane.ship false never ships, so the rule never clears there;
+  # no deployed node sets it. A bucket whose DeleteBucket failed partway also
+  # stops shipping, until the client retries the delete or writes to it again,
+  # but the delete dropped its journal rows when it emptied the bucket's root,
+  # so it neither holds the gauge nor appears in the runbook's query.
+  #
+  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
+  # one pass while the queue waits, so a draining backlog and a hung ship both
+  # log nothing but 'flush queue full'. The runbook tells them apart by
+  # progress: whether the bucket's oldest seq moves on.
+  #
+  # The gauge is the oldest block across every bucket, and several buckets can
+  # be stuck at once for different reasons, so the runbook lists every bucket
+  # with unshipped segments from Postgres and works through each with that
+  # bucket's own log lines. The query reads only the journal, so it can't
+  # show a lost file, and an idle bucket's log shows only 'no ship
+  # authority', which the ship checks before it opens the file. So the
+  # runbook's first case looks for each unshipped segment's file on disk.
+  #
+  # no_data_state is OK, as for the multipart rule: an Ingot without the
+  # metric is the container rule's business.
+  rule {
+    name           = "Ingot catalog shipping has stalled"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'logstore: ship attempt failed' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "34"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node) (
+            ingot_catalog_journal_oldest_age_seconds{${local.ingot_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
+  # A proof set has had scheduled piece removals queued for draining for longer
+  # than its proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod while
+  # a set has removals queued, so Curio drains them first with
+  # processPieceDeletions (the PDPv0_ProcDel task); while a drain is stuck the
+  # set's proving periods stop advancing. The value is how far past one
+  # proving period the drain has waited, in seconds.
+  #
+  # Piri reports when the set was queued (pdpv0_deletion_drain.created_at) and
+  # drops the series once the drain finishes. A queued drain the task finds
+  # empty is dropped on its next run, so short-lived series after removals or
+  # an upgrade are normal; a full proving period is the grace. The period is
+  # the longest seen over a day, which bridges a missed collection.
+  #
+  # A warning, like "proving period has not advanced", which fires for the
+  # same set once a period is missed: this rule names the cause, and the loss
+  # is a delay that stops once the drain is cleared.
+  #
+  # `for` is 5m, the shortest non-zero pending period a five-minute group
+  # gives. no_data_state is OK: a node with no drain queued has no series.
+  rule {
+    name           = "Piri's deletion drain is stuck"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has had piece removals queued for draining longer than a proving period"
+      description = "Curio, inside Piri, has not finished draining this proof set's scheduled piece removals with processPieceDeletions within a proving period. PDPVerifier 3.5.0 rejects nextProvingPeriod until the drain finishes, so the proof set's proving periods have stopped advancing. Check the Piri container's logs for the PDPv0_ProcDel task and its processPieceDeletions transactions, and check that the owner wallet has FIL. Act within a day: each day costs that proving period's payment."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piris-deletion-drain-is-stuck"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 86400
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            time() - max by (appliance, region, node, instance, proof_set) (
+              piri_pdp_proofset_deletion_drain_queued_timestamp_seconds{${local.piri_metric_matcher}}
+            )
+          )
+          - on (appliance, region, node, instance, proof_set)
+          (
+            30 * max by (appliance, region, node, instance, proof_set) (
+              max_over_time(piri_pdp_proofset_proving_period_epochs{${local.piri_metric_matcher}}[1d])
+            )
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Curio, inside Piri, proves a sub-piece above 32 MiB padded only from a
+  # cached Merkle layer, one hash per 4 MiB, which its PDPv0_SaveCache task
+  # builds by reading the piece once after Piri parks it. Every Piri
+  # aggregate is at least 128 MiB, so a piece without its layer fails every
+  # proof once it is in a proof set and challenged. The value is how long the
+  # oldest parked piece above 32 MiB has waited for its layer, including a
+  # piece a SaveCache task has claimed: a task that hangs or keeps failing
+  # holds its claim, and the piece still cannot be proven. Piri returns a
+  # piece to the queue if its task is dropped.
+  #
+  # A layer is normally built within minutes of parking, and a piece is
+  # parked well before it is added to a proof set, so thirty minutes is a
+  # stalled task: the task engine down, or the blobstore reads failing. A
+  # warning: nothing is lost until the piece is challenged, and "Piri proving
+  # is failing" pages once proofs fail. Expect it after the Piri release that
+  # adds the cache, until every piece parked before it has its layer.
+  #
+  # Grouped by instance as well as node, like the other Piri-wide rules: each
+  # Piri has its own task engine. `for` is 10m on top of the threshold.
+  #
+  # no_data_state is OK: a Piri older than the release that adds the cache
+  # reports no series, and "Appliance has stopped reporting" covers a silent
+  # node.
+  rule {
+    name           = "Piri proof cache builds have stalled"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} has a piece that has waited over 30 minutes for its proof cache layer"
+      description = "A piece above 32 MiB padded has no proof cache layer, and Curio, inside Piri, proves such a piece only from its layer, so its proofs will fail once it is challenged. Check the Piri container's logs for the PDPv0_SaveCache task and its blobstore reads, and that Piri's harmonytask engine is running: `piri status` in the Piri container. After the Piri release that adds the cache, this fires until pieces parked before it all have their layers."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_proof_cache_pending_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [1800] }
+        }]
+      })
+    }
+  }
+
+  # The appliance's last OpenBao raft snapshot in the backup bucket is over a
+  # day old, or the appliance has stopped reporting when it was. It watches
+  # the live_appliances in the stages that push backups
+  # (appliance_backup_stages), two lists that scripts/check-appliance-regions.sh
+  # and scripts/check-backup-stages.sh hold in step with the platform roots.
+  # Every such appliance owes a snapshot: central mints a backup key for each
+  # region in its stage's appliance_regions. A retired appliance leaves the
+  # list in the commit that retires it, so it never fires this.
+  #
+  # openbao_snapshot_last_success_timestamp is a textfile-collector gauge, like
+  # the deploy stamp, written by infra-nodes scripts/host/snapshot-openbao.sh
+  # after each upload, so a job that fails or a timer that stops firing leaves
+  # the series present and its value ageing. The timer fires daily with up to
+  # 30 minutes of random delay, so 26 hours is a missed run rather than a late
+  # one: infra-nodes docs/observability.md documents the same threshold.
+  #
+  # The second half of the query catches an appliance that still reconciles
+  # but reports no stamp at all: one that never uploaded a snapshot, lost its
+  # stamp file, or runs code that stopped writing it. `or` keeps every series
+  # from the left and adds those right-hand series whose labels the left lacks,
+  # so such an appliance reads as 1e10 seconds stale. A finite number, because
+  # +Inf does not survive the trip through Grafana's expressions. A region
+  # still being brought up reports no reconcile stamp either, so it stays quiet
+  # until its node first reconciles.
+  #
+  # no_data_state is Alerting: no data means no live appliance in a backup
+  # stage reports even its reconcile stamp. That overlaps "Appliance has
+  # stopped reporting" on purpose, so that a broken stamp pipeline cannot
+  # silence this rule. The rule is not created while there is no live appliance
+  # in a backup stage, which includes a backup stage whose last region was
+  # retired: it would have nothing to match and would fire forever.
+  #
+  # A warning: the node keeps serving, and what is at risk is losing the
+  # secrets written since the last snapshot if the node is lost before the
+  # next one.
+  #
+  # Last in the group, so that adding it moved no other rule's uid.
+  dynamic "rule" {
+    for_each = length(local.backup_appliances) > 0 ? [1] : []
+
+    content {
+      name           = "Appliance OpenBao snapshot is stale"
+      condition      = "B"
+      for            = "10m"
+      no_data_state  = "Alerting"
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded an OpenBao snapshot for over 26 hours"
+        description = "The appliance's last OpenBao raft snapshot in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. A node lost now loses every secret written since that snapshot. An age of centuries means the appliance reconciles but reports no snapshot stamp: it never uploaded a snapshot, so run provision-backups.sh on it, or the code that writes the stamp is broken. With no data at all, no appliance in a backup stage is reporting. Otherwise, on the host, `journalctl -u filone-openbao-snapshot.service` says why the last run failed."
+        runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      }
+
+      labels = {
+        team_name = "forge"
+        component = "appliance"
+        stage     = local.appliance_stage_label
+        severity  = "warning"
+      }
+
+      notification_settings {
+        policy = local.forge_policy
+      }
+
+      data {
+        ref_id         = "A"
+        datasource_uid = var.prometheus_datasource_uid
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        model = jsonencode(merge(local.query_defaults, {
+          refId        = "A"
+          instant      = true
+          range        = false
+          legendFormat = "{{appliance}}"
+          expr         = <<-PROMQL
+              max by (node, region, appliance) (
+                time() - openbao_snapshot_last_success_timestamp{${local.backup_appliance_matcher}}
+              )
+              or
+              max by (node, region, appliance) (
+                deploy_last_success_timestamp{project="reconcile", ${local.backup_appliance_matcher}}
+              ) * 0 + 1e10
+            PROMQL
+        }))
+      }
+
+      data {
+        ref_id         = "B"
+        query_type     = "expression"
+        datasource_uid = "__expr__"
+
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+
+        model = jsonencode({
+          refId         = "B"
+          type          = "threshold"
+          expression    = "A"
+          datasource    = { type = "__expr__", uid = "__expr__" }
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            type      = "query"
+            operator  = { type = "and" }
+            query     = { params = ["B"] }
+            reducer   = { type = "last", params = [] }
+            evaluator = { type = "gt", params = [93600] }
+          }]
+        })
+      }
+    }
+  }
+
+  # Ingot's volume on the EC2 nodes, left out of "Appliance free disk space
+  # below 40%". Its cache stays near the byte budget by design, so 40% free
+  # would fire for as long as Ingot runs; the budget is sized to stay under this
+  # line instead (infra-nodes docs/RUNBOOK.md). Same query shape, data source
+  # and silence on absent data as that rule.
+  rule {
+    name           = "Ingot volume free space below 10%"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.appliance }} has less than 10% free on Ingot's volume"
+      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's spool, cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          min by (appliance, region, node, mountpoint) (
+            node_filesystem_avail_bytes{${local.ingot_volume_matcher}}
+            / node_filesystem_size_bytes{${local.ingot_volume_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [0.1] }
         }]
       })
     }

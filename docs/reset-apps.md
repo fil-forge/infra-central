@@ -149,6 +149,6 @@ again, each region needs a new unseal token, and hilt's AppRole is reissued.
 
 4. Force a new deployment of every service, because hilt still holds the old
    secret_id, then run `make reset-apps STAGE=dev` for the stores outside RDS.
-5. Mint each region's unseal token again with `make mint-appliance-token` (the
+5. Mint each region's unseal token again with `make mint-appliance-credentials` (the
    plan says `Action: mint`), rebuild the node, and continue from step 4 of the
    procedure above.

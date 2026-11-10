@@ -45,9 +45,21 @@ type config struct {
 	// internal/vaultinit about what this does and does not buy.
 	PrivateCIDRs []string
 
+	// BackupReplicaRegion is the region the seed phase replicates every key
+	// to, so a copy survives the loss of Region. Empty in a stage that keeps no
+	// replicas.
+	BackupReplicaRegion string
+
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
 	// phase. Not validated at startup, because every other phase runs without it.
 	AllowListTable string
+
+	// BackupBucket is the stage's appliance backup bucket, and BackupUserPrefix
+	// the name every region's writer user starts with. Both are empty in a stage
+	// that takes no appliance backups, and the appliance-backup-key phase then
+	// reports that it does not apply.
+	BackupBucket     string
+	BackupUserPrefix string
 }
 
 func loadConfig() (config, error) {
@@ -61,6 +73,9 @@ func loadConfig() (config, error) {
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		BackupReplicaRegion: os.Getenv("FORGE_BACKUP_REPLICA_REGION"),
+		BackupBucket:        os.Getenv("FORGE_BACKUP_BUCKET"),
+		BackupUserPrefix:    os.Getenv("FORGE_BACKUP_USER_PREFIX"),
 
 		ChainRPCURL:        os.Getenv("FORGE_CHAIN_RPC_URL"),
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
@@ -87,6 +102,15 @@ func loadConfig() (config, error) {
 		cfg.ChainID = chainID
 	}
 
+	// Terraform sets both or neither, so one without the other is a wiring
+	// mistake, and a phase that guessed the missing half would mint a key for
+	// the wrong user or point a node at the wrong bucket.
+	if (cfg.BackupBucket == "") != (cfg.BackupUserPrefix == "") {
+		return config{}, fmt.Errorf(
+			"FORGE_BACKUP_BUCKET and FORGE_BACKUP_USER_PREFIX must be set together or not at all; got bucket %q and user prefix %q",
+			cfg.BackupBucket, cfg.BackupUserPrefix)
+	}
+
 	if cidrs := os.Getenv("FORGE_PRIVATE_CIDRS"); cidrs != "" {
 		cfg.PrivateCIDRs = strings.Split(cidrs, ",")
 	}
@@ -106,6 +130,10 @@ func loadConfig() (config, error) {
 	}
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("missing required environment: %s", strings.Join(missing, ", "))
+	}
+
+	if cfg.BackupReplicaRegion != "" && cfg.BackupReplicaRegion == cfg.Region {
+		return config{}, fmt.Errorf("FORGE_BACKUP_REPLICA_REGION is %s, the function's own region; a backup replica must live in another region", cfg.Region)
 	}
 
 	return cfg, nil

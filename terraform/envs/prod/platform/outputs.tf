@@ -49,6 +49,11 @@ output "openbao_public_url" {
   value = module.platform.openbao_public_url
 }
 
+output "appliance_backup_bucket" {
+  description = "The bucket appliances push their backups to, or null in a stage that takes none."
+  value       = module.platform.appliance_backup_bucket
+}
+
 output "appliance_keys" {
   description = "Transit key names this stage holds, one per live appliance region. This is what confirms a committed region label reached OpenBao."
   value       = module.platform.appliance_keys
