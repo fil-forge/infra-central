@@ -316,6 +316,20 @@ resource "grafana_rule_group" "central" {
   # firing the hand-built rule had: this reads a CloudWatch metric published once
   # a minute with late and occasionally missing samples, so a single evaluation
   # is not evidence of anything.
+  #
+  # A service with no tasks at all has no registered targets, and CloudWatch then
+  # stops publishing HealthyHostCount for its target group instead of reporting
+  # 0. The series goes stale, its alert instance drops out, and no_data_state
+  # cannot help, because the other services' series keep the result non-empty.
+  # So the query's second half reads 0 for every stage and service seen in the
+  # last day but silent now. Found on 2026-11-10 by scaling fc-staging-swarf to
+  # 0 (FIL-1151): the rule stayed Normal with only the first half. With both,
+  # it fires about ten minutes after the last sample: five for the series to go
+  # stale and five for `for`. A service or stage removed or renamed on purpose
+  # alerts for up to a day, until it falls out of the lookback; silence it on
+  # its stage and service for that long. The second half also means
+  # no_data_state rarely applies now: if CloudWatch delivery stops everywhere,
+  # each stage and service alerts on its own rather than as one NoData alert.
   rule {
     name           = "Service has no healthy hosts"
     condition      = "B"
@@ -324,7 +338,7 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}, or its target group has stopped reporting"
       dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
@@ -358,6 +372,16 @@ resource "grafana_rule_group" "central" {
             label_replace(
               label_replace(
                 aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}},
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          or
+          0 * group by (stage, service) (
+            label_replace(
+              label_replace(
+                last_over_time(aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}}[1d]),
                 "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
               ),
               "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
