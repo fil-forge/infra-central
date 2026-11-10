@@ -263,6 +263,12 @@ variable "log_forwarding" {
   default = null
 }
 
+variable "log_non_blocking" {
+  description = "Buffer the container's output and drop lines when CloudWatch falls behind, rather than block the process on its own stdout. For a service that must keep answering even when its log cannot be written."
+  type        = bool
+  default     = false
+}
+
 variable "tmp_size_mib" {
   description = <<-EOT
     Size of the /tmp tmpfs, the container's only writable path. The default

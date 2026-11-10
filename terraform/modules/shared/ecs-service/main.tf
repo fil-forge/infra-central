@@ -134,11 +134,17 @@ resource "aws_ecs_task_definition" "this" {
 
         logConfiguration = {
           logDriver = "awslogs"
-          options = {
-            "awslogs-group"         = aws_cloudwatch_log_group.this.name
-            "awslogs-region"        = var.region
-            "awslogs-stream-prefix" = var.service
-          }
+          options = merge(
+            {
+              "awslogs-group"         = aws_cloudwatch_log_group.this.name
+              "awslogs-region"        = var.region
+              "awslogs-stream-prefix" = var.service
+            },
+            var.log_non_blocking ? {
+              "mode"            = "non-blocking"
+              "max-buffer-size" = "25m"
+            } : {},
+          )
         }
 
         # ECS restarts an unhealthy container without waiting for the ALB to

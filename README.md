@@ -1149,7 +1149,6 @@ See the following Linear tickets:
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
 - [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) Hilt authenticates to OpenBao with AWS IAM auth
 - [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
-- [FIL-1150](https://linear.app/filecoin-foundation/issue/FIL-1150) Enable the OpenBao audit log on Forge Central
 - [FIL-1157](https://linear.app/filecoin-foundation/issue/FIL-1157) Decide the OpenBao availability target for Forge Central
 - [FIL-1149](https://linear.app/filecoin-foundation/issue/FIL-1149) Write and rehearse the RDS restore procedure
 - [FIL-1151](https://linear.app/filecoin-foundation/issue/FIL-1151) Grafana alarms for Forge Central services

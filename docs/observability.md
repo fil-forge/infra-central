@@ -263,6 +263,20 @@ replica, the reason Secrets Manager gave:
 {aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
 ```
 
+OpenBao's audit log, one JSON entry per request and one per response, in the same group as its
+server log. Secret values and tokens are HMACed; paths, operations and the caller's address are
+not. The log driver drops entries rather than block OpenBao when CloudWatch falls behind:
+
+```logql
+{aws_log_group="/forge-central/dev/openbao"} | json | type=~"request|response"
+```
+
+Hilt's AppRole logins:
+
+```logql
+{aws_log_group="/forge-central/dev/openbao"} | json | type="response" | request_path="auth/approle/login"
+```
+
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |
