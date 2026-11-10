@@ -58,7 +58,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
-| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, which can be replicated to a DR region; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, replicated to the DR region where a stage sets `backup_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
@@ -373,6 +373,17 @@ aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
+# A secret with a DR replica cannot be deleted until the replica is removed.
+# list-secrets does not report replicas, so ask each secret.
+for name in $(aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text); do
+  regions=$(aws secretsmanager describe-secret --secret-id "$name" \
+    --query 'ReplicationStatus[].Region' --output text)
+  if [ -n "$regions" ] && [ "$regions" != None ]; then
+    aws secretsmanager remove-regions-from-replication --secret-id "$name" \
+      --remove-replica-regions $regions
+  fi
+done
 aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \
   | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
@@ -956,6 +967,22 @@ and wallets, Secrets Manager secrets.
 A key the seed phase moved out of SSM is reused, not minted, so moving the keys
 leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
+### Backup replicas of the keys
+
+A stage that sets `backup_replica_region` in its platform root, normally to
+`module.constants.dr_region`, keeps a replica of every identity and wallet key
+there. It must differ from the stage's own region, or the plan fails. No stage
+sets it yet. Pin a provision image built with replication before setting it: an
+older image ignores the setting, and the seed invocation then fails the apply.
+
+Each seed run adds any replica that is missing, so a key minted before
+replication existed gets one on the next run, and a run that finds every
+replica in place changes nothing. A seed returns only once every replica is in
+sync; a replica that fails or does not sync in time fails the apply. Secrets
+Manager fails a replica when the backup region already holds a secret of the
+same name, and the run reports that rather than overwriting it, since that
+secret may hold a key worth keeping.
+
 ### Smoke-testing a stage
 
 ```bash
@@ -998,10 +1025,19 @@ stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
-Delete the secret, skipping the recovery window:
+In a stage that keeps DR replicas, remove the replica first. Secrets Manager
+refuses to delete a secret that still has one, and the seed run that mints the
+new key replicates it again:
 
 ```bash
-aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+aws secretsmanager remove-regions-from-replication \
+  --secret-id forge-central/<stage>/swarf/identity --remove-replica-regions eu-central-1
+```
+
+Then delete the secret, skipping the recovery window:
+
+```bash
+aws secretsmanager delete-secret --secret-id forge-central/<stage>/swarf/identity \
   --force-delete-without-recovery
 ```
 
@@ -1088,8 +1124,14 @@ plans have passed. The push that lands applies both shared non-prod stages the
 same way any other merge to `main` does.
 
 A major bump stays open for someone to read. So does a group whose highest
-change is a major, and so does any Dependabot branch that carries a commit
+change is a major, and so does any Dependabot branch whose first commit
 Dependabot did not write.
+
+The workflow runs on `pull_request`, so a Dependabot run reads its secrets from
+the Dependabot store. `FORGE_BOT_PRIVATE_KEY` is a fil-forge organization secret
+in both the Actions and the Dependabot store, and rotating the key means
+updating both. Dependabot waits a week before proposing a new action release,
+because the workflow runs the releases a bump proposes while holding that key.
 
 Dependabot rebases its pull requests in place, and the workflow runs again on
 each new head, so a branch that stops qualifying also loses the auto-merge it
