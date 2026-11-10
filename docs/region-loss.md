@@ -30,21 +30,33 @@ OpenBao at once. A key scheduled for deletion is gone for good after 30 days.
 ## Using the break-glass role
 
 The people who may assume it are listed in `terraform/envs/bootstrap/prod/account/main.tf`. Each
-assumes it from their own `AdministratorAccess` SSO session in the prod account:
+assumes it from their own `AdministratorAccess` SSO session in the prod account, through a profile
+in `~/.aws/config` that names their prod SSO profile as its source:
 
-```bash
-aws sts assume-role \
-  --role-arn arn:aws:iam::811430801166:role/forge-kms-break-glass \
-  --role-session-name "$USER-<reason>"
+```ini
+[profile filone-prod-kms-break-glass]
+role_arn          = arn:aws:iam::811430801166:role/forge-kms-break-glass
+source_profile    = <your prod AdministratorAccess SSO profile>
+role_session_name = <your SSO username>
+duration_seconds  = 3600
 ```
 
-Sessions last at most an hour, and each assumption is recorded in CloudTrail.
+The AWS CLI and OpenTofu both assume the role from this profile, so no temporary credentials are
+copied into the shell. Log in to the source profile with `aws sso login`, then check that the
+profile reaches the role:
+
+```bash
+aws sts get-caller-identity --profile filone-prod-kms-break-glass
+```
+
+The ARN it prints ends in `assumed-role/forge-kms-break-glass/<your SSO username>`. Sessions last
+at most an hour, and each assumption is recorded in CloudTrail.
 
 Use it for:
 
 - applying `terraform/envs/bootstrap/prod/us-east-2` when a key's policy or replica changes, since
   the guard refuses `PutKeyPolicy` and `ReplicateKey` to anyone else. Pin the region:
-  `AWS_REGION=us-east-2 tofu apply`.
+  `AWS_PROFILE=filone-prod-kms-break-glass AWS_REGION=us-east-2 tofu apply`.
 - deliberately retiring a key.
 
 Leave `bypass_policy_lockout_safety_check` false. With it false, KMS refuses a policy that would
