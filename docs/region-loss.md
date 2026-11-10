@@ -29,35 +29,29 @@ OpenBao at once. A key scheduled for deletion is gone for good after 30 days.
 
 ## Using the break-glass role
 
-The people who may assume it are listed in `terraform/envs/bootstrap/prod/account/main.tf`. Each
-assumes it from their own `AdministratorAccess` SSO session in the prod account, through a profile
-in `~/.aws/config` that names their prod SSO profile as its source:
-
-```ini
-[profile filone-prod-kms-break-glass]
-role_arn          = arn:aws:iam::811430801166:role/forge-kms-break-glass
-source_profile    = <your prod AdministratorAccess SSO profile>
-role_session_name = <your SSO username>
-duration_seconds  = 3600
-```
-
-The AWS CLI and OpenTofu both assume the role from this profile, so no temporary credentials are
-copied into the shell. Log in to the source profile with `aws sso login`, then check that the
-profile reaches the role:
+The people who may assume it are listed in `terraform/envs/bootstrap/prod/account/main.tf`. They
+use it through `terraform/envs/bootstrap/prod/us-east-2`, which changes the keys: apply that root
+with `break_glass` set, from your own `AdministratorAccess` SSO login in the prod account.
 
 ```bash
-aws sts get-caller-identity --profile filone-prod-kms-break-glass
+aws sso login --profile <your prod SSO profile>
 ```
 
-The ARN it prints ends in `assumed-role/forge-kms-break-glass/<your SSO username>`. Sessions last
-at most an hour, and each assumption is recorded in CloudTrail.
+```bash
+AWS_PROFILE=<your prod SSO profile> AWS_REGION=us-east-2 tofu apply -var break_glass=true
+```
 
-Use it for:
+With the flag, both of the root's AWS providers assume the role from your SSO login before planning
+and keep its credentials in memory, so none reach the shell. The state backend keeps your SSO
+login. Each assumption is recorded in CloudTrail under your SSO username.
 
-- applying `terraform/envs/bootstrap/prod/us-east-2` when a key's policy or replica changes, since
-  the guard refuses `PutKeyPolicy` and `ReplicateKey` to anyone else. Pin the region:
-  `AWS_PROFILE=filone-prod-kms-break-glass AWS_REGION=us-east-2 tofu apply`.
-- deliberately retiring a key.
+Set it when a key's policy or replica changes, since the guard refuses `PutKeyPolicy` and
+`ReplicateKey` to anyone else; without it that apply fails with `AccessDeniedException` on one of
+them and changes nothing. Retiring a key goes through the same root and the same flag. Plans and
+applies that leave the keys alone need no flag.
+
+If the plan fails at `sts:AssumeRole`, you are not on the role's list, or your SSO login has
+expired.
 
 Leave `bypass_policy_lockout_safety_check` false. With it false, KMS refuses a policy that would
 stop its caller from editing it again.

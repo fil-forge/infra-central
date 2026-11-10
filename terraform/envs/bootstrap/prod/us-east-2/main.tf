@@ -3,8 +3,9 @@
 # that carry the stage's logs and metrics to Grafana Cloud, and the KMS keys of
 # its Aurora cluster and its OpenBao seal, with their replicas in the DR region.
 #
-# Apply it as the break-glass role from ../account/ whenever a key's policy or
-# replica changes; see docs/region-loss.md.
+# Apply it with -var break_glass=true whenever a key's policy or replica
+# changes, so both providers act as the break-glass role from ../account/; see
+# docs/region-loss.md.
 #
 # The non-prod copy of this directory carries the full explanation of why the
 # state bucket and the CI roles are not here but in ../account/, why this root is
@@ -15,10 +16,33 @@
 # It cannot be applied before ../account/, which creates the bucket this root's
 # backend names.
 
+# The key guard below refuses PutKeyPolicy and ReplicateKey to everyone but the
+# break-glass role, so an apply that changes a key's policy or replica must run
+# as that role. With this set, each provider assumes it from the operator's own
+# SSO credentials and keeps the role's credentials in memory. The state backend
+# keeps the SSO credentials.
+variable "break_glass" {
+  description = "Run both providers as the KMS break-glass role. Needed when a key's policy or replica changes; only the people the role trusts can use it."
+  type        = bool
+  default     = false
+}
+
+locals {
+  kms_break_glass_role_arn = "arn:aws:iam::${module.constants.prod_account_id}:role/${module.constants.prod_kms_break_glass_role_name}"
+}
+
 provider "aws" {
   region = "us-east-2"
 
   allowed_account_ids = [module.constants.prod_account_id]
+
+  dynamic "assume_role" {
+    for_each = var.break_glass ? [local.kms_break_glass_role_arn] : []
+    content {
+      role_arn     = assume_role.value
+      session_name = "kms-break-glass"
+    }
+  }
 }
 
 # The DR region, for the replicas of the two keys below.
@@ -27,6 +51,14 @@ provider "aws" {
   region = module.constants.dr_region
 
   allowed_account_ids = [module.constants.prod_account_id]
+
+  dynamic "assume_role" {
+    for_each = var.break_glass ? [local.kms_break_glass_role_arn] : []
+    content {
+      role_arn     = assume_role.value
+      session_name = "kms-break-glass"
+    }
+  }
 }
 
 module "constants" {
@@ -160,7 +192,7 @@ resource "aws_kms_alias" "openbao_seal_dr" {
 # below fails the plan if one is.
 locals {
   kms_break_glass_principals = [
-    "arn:aws:iam::${module.constants.prod_account_id}:role/${module.constants.prod_kms_break_glass_role_name}",
+    local.kms_break_glass_role_arn,
     "arn:aws:iam::${module.constants.prod_account_id}:root",
   ]
 
