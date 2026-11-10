@@ -189,6 +189,8 @@ check:
 	go vet ./...
 	go test ./...
 	tofu -chdir=terraform fmt -check -recursive
+	tofu -chdir=terraform/modules/hilt-resolver-policy init -backend=false
+	tofu -chdir=terraform/modules/hilt-resolver-policy test
 	set -euo pipefail; git ls-files -z '*.sh' | xargs -0 -r shellcheck
 # Committed dashboards must be in the form scripts/normalise-dashboard.sh writes,
 # so a raw UI export with its server-side metadata and whoever-last-saved variable

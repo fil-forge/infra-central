@@ -64,6 +64,9 @@ module "apps" {
   stage           = local.platform.stage
   hostname_suffix = local.platform.hostname_suffix
 
+  ingot_hostname_suffix = local.platform.ingot_hostname_suffix
+  appliance_key_names   = data.terraform_remote_state.platform.outputs.appliance_keys
+
   cluster_arn       = local.platform.cluster_arn
   vpc_id            = local.platform.vpc_id
   subnet_ids        = local.platform.private_subnet_ids

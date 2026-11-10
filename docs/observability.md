@@ -27,6 +27,26 @@ traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 r
 
 ## Where to look
 
+### Hilt inbound DID-resolution policy
+
+Hilt's startup log `configured UCAN did:web resolution allowlist` reports the
+number of exact configured identities. After a resolver-policy rollout, compare
+that count and the task's `HILT_SERVER_ALLOWED_WEB_DIDS` configuration with the
+stage's live appliance inventory. Zero is intentional for a stage with no
+appliances; it is not a request to allow all issuers.
+
+```logql
+{aws_log_group=~"/forge-central/(dev|staging|prod)/hilt"} |= "configured UCAN did:web resolution allowlist"
+```
+
+A denied request receives `did:web resolution not permitted`. In debug logs,
+`did:web resolution denied by allowlist` also carries the requested DID. Keep
+debug logging bounded during diagnosis; arbitrary unauthenticated callers can
+cause denials, so a denial alone does not warrant paging or automatic admission.
+If a registered Ingot caller fails, compare its exact complete DID with the
+task's configured list and fix the reviewed inventory/configuration. The
+[rollout guide](hilt-resolver-allowlist.md) explains source and ordering.
+
 | Signal  | Data source                            | Query language |
 | ------- | -------------------------------------- | -------------- |
 | Logs    | `grafanacloud-filecoinfoundation-logs` | LogQL          |

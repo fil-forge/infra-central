@@ -168,6 +168,16 @@ data "aws_iam_policy_document" "sprue" {
   }
 }
 
+# Hilt's public UCAN endpoint resolves issuers before signature verification.
+# Bound that lookup to the exact Ingot identities admitted by this stage's
+# appliance inventory. Outbound Sprue/Swarf clients use different resolvers.
+module "hilt_resolver_policy" {
+  source = "../hilt-resolver-policy"
+
+  ingot_hostname_suffix = var.ingot_hostname_suffix
+  appliance_key_names   = var.appliance_key_names
+}
+
 # --- hilt ----------------------------------------------------------------
 
 module "hilt" {
@@ -192,6 +202,8 @@ module "hilt" {
     # hilt binds 127.0.0.1 by default, which no health check can reach.
     HILT_SERVER_HOST = "0.0.0.0"
     HILT_SERVER_PORT = "8080"
+    # StringSlice input: exact complete DIDs, not hostname globs. Empty is deny.
+    HILT_SERVER_ALLOWED_WEB_DIDS = join(",", module.hilt_resolver_policy.allowed_web_dids)
 
     HILT_IDENTITY_KEY_FILE   = "${local.keys}/identity.pem"
     HILT_IDENTITY_SERVICE_ID = local.did.hilt

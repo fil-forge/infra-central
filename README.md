@@ -120,6 +120,15 @@ These each cost an afternoon to rediscover.
 - **did:web resolution goes over the public internet.** hilt resolves sprue at
   `https://upload.<hostname_suffix>/.well-known/did.json`, so a task in a private
   subnet reaches the public ALB back out through the NAT gateway.
+- **Hilt's inbound UCAN resolver admits exact appliance identities.** The apps
+  task sets `HILT_SERVER_ALLOWED_WEB_DIDS` from the platform's live
+  `appliance_keys` output and `ingot_hostname_suffix`, using the same
+  `did:web:s3.<REGION>.<suffix>` construction as onboarding. Retired regions are
+  excluded by platform reconciliation. An empty inventory gives an empty list, which denies every external
+  `did:web` lookup; Hilt's own identity resolves locally and `did:key` needs no
+  HTTP. This is the inbound resolver only: the separate Sprue/Swarf clients
+  retain their configured endpoints. See [Hilt resolver rollout](docs/hilt-resolver-allowlist.md)
+  for the coordinated service/config update and source-only perimeter evidence.
 - **Every plan warns that `failure_threshold` is deprecated.** Expected, and the
   alternatives are worse: AWS fixed the Cloud Map custom health check wait at
   one 30-second interval and deprecated the parameter, but leaving it out makes

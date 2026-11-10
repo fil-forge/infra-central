@@ -6,6 +6,16 @@ variable "hostname_suffix" {
   type = string
 }
 
+variable "ingot_hostname_suffix" {
+  description = "Content-domain suffix for exact region-qualified Ingot DIDs, from the platform workspace."
+  type        = string
+}
+
+variable "appliance_key_names" {
+  description = "Provisioned live appliance transit-key names, from the existing platform output; an empty list denies all external did:web callers to Hilt."
+  type        = list(string)
+}
+
 # --- from the platform workspace ---
 
 variable "cluster_arn" {
