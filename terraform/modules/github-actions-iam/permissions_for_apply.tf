@@ -95,13 +95,121 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
-  # Bucket-level administration of the stage's own buckets, and no object access
-  # to them at all: sprue writes those objects, and an apply has no business
-  # reading an upload shard or a delegation.
+  # Bucket-level administration of the stage's own buckets. Sprue writes the
+  # objects in them, and an apply has no business reading an agent message or a
+  # delegation, so no action here takes an object ARN.
+  #
+  # The list is enumerated because `*` in a resource ARN also matches `/`:
+  # `s3:*` on `arn:aws:s3:::fc-*` covers every key in every stage bucket. The
+  # reads are the plan role's, which is what refreshing a bucket needs. The
+  # writes are what the aws_s3_bucket_* resources in the terraform/ tree call.
+  # CreateBucket sends the bucket's tags inline, which AWS authorises as
+  # s3:TagResource.
+  #
+  # Two indirect paths to the objects remain. PutBucketPolicy, which the ALB
+  # log bucket's policy needs, could grant this role object access from the
+  # bucket's side. And WriteStageRoles lets it create an fc-* role with any
+  # policy and hand it to a Lambda it can invoke. Both belong to the wider
+  # narrowing of this role tracked in FIL-1156.
   statement {
     sid       = "ManageStageBuckets"
-    actions   = ["s3:*"]
     resources = ["arn:aws:s3:::fc-*"]
+
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:DeleteBucketPolicy",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucket*",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:ListBucket",
+      "s3:ListBucketVersions",
+      "s3:PutBucketPolicy",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutBucketTagging",
+      "s3:PutBucketVersioning",
+      "s3:PutEncryptionConfiguration",
+      "s3:PutLifecycleConfiguration",
+      "s3:TagResource",
+    ]
+  }
+
+  # Destroying a bucket with force_destroy set first empties it: the provider
+  # lists every object version (ListBucketVersions, above) and deletes them in
+  # bulk. Without these two actions a stage that is allowed to be destroyed
+  # fails on its first non-empty bucket. Listing versions returns keys and
+  # version IDs, and deleting needs no read, so the role can remove an object
+  # but never read or overwrite its contents.
+  dynamic "statement" {
+    for_each = var.allow_emptying_stage_buckets ? [1] : []
+
+    content {
+      sid       = "EmptyStageBuckets"
+      resources = ["arn:aws:s3:::fc-*/*"]
+
+      actions = [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+      ]
+    }
+  }
+
+  # The appliance backup bucket, one per stage. The wildcard matches the
+  # bucket's object ARNs too, so the action list is what withholds object
+  # access: every action here works on the bucket and none reads or writes an
+  # object. Adding s3:GetObject or s3:* would give every apply direct read
+  # access to every appliance's database backups. The role can still reach them
+  # indirectly, through the bucket policy or an fc-* role it writes, and review
+  # of the merged change is the control there. CreateBucket sends the bucket's
+  # tags inline, which AWS authorises as s3:TagResource.
+  statement {
+    sid       = "ManageApplianceBackupBucket"
+    resources = ["arn:aws:s3:::forge-nodes-backups-*"]
+
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:DeleteBucketPolicy",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucket*",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:ListBucket",
+      "s3:PutBucket*",
+      "s3:PutEncryptionConfiguration",
+      "s3:PutLifecycleConfiguration",
+      "s3:TagResource",
+    ]
+  }
+
+  # Each region's backup writer. CI creates and deletes the users and their
+  # inline policy, and never mints a key: the provision Lambda does that, so the
+  # secret stays out of state. The deletes are what the AWS provider's
+  # force_destroy calls when a retired region's user goes. DeleteLoginProfile
+  # runs on every delete, and the others run when the user holds that kind of
+  # credential, which in practice is the access key the Lambda minted.
+  statement {
+    sid       = "WriteApplianceBackupUsers"
+    resources = ["arn:aws:iam::${var.account_id}:user/forge-nodes-backup-*"]
+
+    actions = [
+      "iam:CreateUser",
+      "iam:DeactivateMFADevice",
+      "iam:DeleteAccessKey",
+      "iam:DeleteLoginProfile",
+      "iam:DeleteServiceSpecificCredential",
+      "iam:DeleteSigningCertificate",
+      "iam:DeleteSSHPublicKey",
+      "iam:DeleteUser",
+      "iam:DeleteUserPolicy",
+      "iam:DetachUserPolicy",
+      "iam:PutUserPolicy",
+      "iam:TagUser",
+      "iam:UntagUser",
+    ]
   }
 
   statement {

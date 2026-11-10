@@ -1,1 +1,1 @@
-provision_image_digest = "sha256:6c941f7aff66595162636f00f0480d692549e42bc2810dad5d8b67aecfbe930d"
+provision_image_digest = "sha256:3f89be93a9604ac3dc0dbf1911b534890f860e9f5f5c60d7de7f038104a9c62c"

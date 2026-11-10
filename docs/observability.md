@@ -110,6 +110,18 @@ The rules watch staging and prod, the stages listed in `alert_stages` in
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
 appliance label.
 
+The rules that read absence, "Appliance has stopped reporting" and "Appliance
+OpenBao snapshot is stale", watch only the live appliances listed in
+`live_appliances`: every `<stage>-<region>` in the alert stages'
+`appliance_regions`. A retired appliance and a dead one both stop reporting,
+and the list is what tells them apart. A listed appliance with no data alerts
+until it reports or leaves the list, including a new region whose node is not
+up yet. The snapshot rule further keeps to the
+stages in `appliance_backup_stages`, the alert stages whose platform root sets
+`appliance_backups`. `scripts/check-appliance-regions.sh` and
+`scripts/check-backup-stages.sh` fail `make check` when either list disagrees
+with the platform roots.
+
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
 | Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch               | FIL-1151 |
@@ -122,6 +134,7 @@ appliance label.
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
+| Ingot volume free space below 10%                    | Forge Regions            | node exporter                 | FIL-1616 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's proving period has not advanced               | Forge Regions            | Piri's metrics                | FIL-1383 |
@@ -130,11 +143,14 @@ appliance label.
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
+| Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
+| Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
 | Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
+| Appliance OpenBao snapshot is stale                  | Forge Regions            | snapshot stamp                | FIL-1745 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
@@ -150,6 +166,16 @@ appliance label.
 parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with "no subpiece found".
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
+
+"Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
+backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
+infra-nodes' snapshot job stamps after each upload. Every live appliance in a backup stage owes a
+snapshot, so the rule also fires for one that reconciles but reports no stamp at all, and alerts on
+no data when none of them reports anything. The Postgres backups get a freshness rule with the job
+that uploads them,
+[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
+checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
+[appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
 
 ## Adding an alert or panel
 

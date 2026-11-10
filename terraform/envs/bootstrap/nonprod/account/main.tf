@@ -53,6 +53,11 @@ module "github_actions_iam" {
   account_id                = module.constants.nonprod_account_id
   state_bucket_name         = module.tfstate.bucket_name
 
+  # Dev and staging can be destroyed by a CI apply, buckets included. Prod
+  # leaves this off, so its apply role cannot delete an object in a stage
+  # bucket.
+  allow_emptying_stage_buckets = true
+
   # Every non-prod stage the workflow deploys, from the one list the regional
   # root also reads. A stage added to .github/workflows/check-and-deploy.yml has
   # to be added to the constants module too, or its first run fails reading

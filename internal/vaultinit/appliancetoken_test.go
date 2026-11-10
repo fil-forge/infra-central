@@ -240,3 +240,52 @@ func TestRevokeTokenByAccessorToleratesALapsedToken(t *testing.T) {
 		t.Fatalf("RevokeTokenByAccessor() error = %v, want nil for an accessor already gone", err)
 	}
 }
+
+func TestWrapDataReturnsTheWrappingToken(t *testing.T) {
+	client := newClient(t, &fakeOpenBao{initialised: true})
+
+	got, err := WrapData(context.Background(), client, map[string]any{"bucket": "b"}, "24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "wrap-2" {
+		t.Errorf("WrapData() = %q, want %q", got, "wrap-2")
+	}
+}
+
+// The node unwraps exactly what was sent, so the payload and the TTL that
+// bounds the hand-off both have to reach OpenBao unchanged.
+func TestWrapDataSendsTheDataWithTheWrapTTL(t *testing.T) {
+	f := &fakeOpenBao{initialised: true}
+	client := newClient(t, f)
+
+	data := map[string]any{"access_key_id": "AKIA1", "bucket": "b"}
+	if _, err := WrapData(context.Background(), client, data, "24h"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]any{"data": f.wrappedData, "ttl": f.wrapTTLSeen}
+	want := map[string]any{"data": data, "ttl": "24h"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrap request = %v, want %v", got, want)
+	}
+}
+
+// Without a TTL there is no wrapping, and the data would come back in the
+// response it was meant to stay out of.
+func TestWrapDataRefusesAnEmptyTTL(t *testing.T) {
+	client := newClient(t, &fakeOpenBao{initialised: true})
+
+	_, err := WrapData(context.Background(), client, map[string]any{"bucket": "b"}, "")
+	if err == nil || !strings.Contains(err.Error(), "in the clear") {
+		t.Fatalf("WrapData() error = %v, want a refusal naming the risk", err)
+	}
+}
+
+func TestWrapDataReturnsARefusedWrap(t *testing.T) {
+	client := newClient(t, &fakeOpenBao{initialised: true, refuseToWrap: true})
+
+	if _, err := WrapData(context.Background(), client, map[string]any{"bucket": "b"}, "24h"); err == nil {
+		t.Fatal("WrapData() error = nil, want OpenBao's refusal")
+	}
+}

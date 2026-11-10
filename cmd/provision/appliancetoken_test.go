@@ -13,8 +13,9 @@ import (
 	"github.com/openbao/openbao/api/v2"
 )
 
-// Minting is the only operation in this project that is not idempotent, so what
-// it does when a region already has an accessor on record is worth pinning.
+// A second live token for one node is the state minting must never reach, so
+// what it does when a region already has an accessor on record is worth
+// pinning.
 func TestDecideTokenAction(t *testing.T) {
 	cases := []struct {
 		desc      string
@@ -34,7 +35,7 @@ func TestDecideTokenAction(t *testing.T) {
 		{
 			desc:      "the recorded token is live",
 			tokenLive: true,
-			want:      tokenActionRefuse,
+			want:      tokenActionSkip,
 		},
 		{
 			desc:      "the recorded token is live and reissue was asked for",

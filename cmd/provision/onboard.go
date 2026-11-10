@@ -136,7 +136,7 @@ func (d *deps) requireProvisionedRegion(ctx context.Context, region string) erro
 	}
 	if !found {
 		return fmt.Errorf(
-			"no unseal token was ever minted for region %q, so either the label is a typo or the appliance is not provisioned; check the region against the stage's appliance_regions and run scripts/mint-appliance-token.sh first",
+			"no unseal token was ever minted for region %q, so either the label is a typo or the appliance is not provisioned; check the region against the stage's appliance_regions and run scripts/mint-appliance-credentials.sh first",
 			region)
 	}
 	return nil
