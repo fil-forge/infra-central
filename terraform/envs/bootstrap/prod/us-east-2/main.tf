@@ -280,18 +280,18 @@ module "telemetry" {
 # The pattern names the keys and aliases rather than matching every KMS call,
 # because the account holds other teams' keys. A call can name a key by id, ARN,
 # alias or alias ARN, and CloudTrail records the resolved key in `resources`, so
-# the pattern accepts any of them in either place. ReplicateKey is guarded but
-# left out: it adds a replica and takes nothing away.
+# the pattern accepts any of them in either place. It matches by suffix: a
+# replica shares its primary's id, which ends the key's ARN in either region,
+# and an alias ARN ends in the alias name. Listing every ARN instead would
+# overrun EventBridge's 2048-character pattern quota. ReplicateKey is guarded
+# but left out: it adds a replica and takes nothing away.
 locals {
-  kms_guarded_keys    = [aws_kms_key.aurora, aws_kms_key.openbao_seal, aws_kms_replica_key.aurora, aws_kms_replica_key.openbao_seal]
-  kms_guarded_aliases = [aws_kms_alias.aurora, aws_kms_alias.openbao_seal, aws_kms_alias.aurora_dr, aws_kms_alias.openbao_seal_dr]
-
-  kms_guarded_key_names = distinct(concat(
-    [for key in local.kms_guarded_keys : key.key_id],
-    [for key in local.kms_guarded_keys : key.arn],
-    [for alias in local.kms_guarded_aliases : alias.name],
-    [for alias in local.kms_guarded_aliases : alias.arn],
-  ))
+  kms_guarded_key_suffixes = [
+    for suffix in concat(
+      [aws_kms_key.aurora.key_id, aws_kms_key.openbao_seal.key_id],
+      [module.constants.prod_aurora_key_alias, module.constants.prod_openbao_seal_key_alias],
+    ) : { suffix = suffix }
+  ]
 
   kms_key_change_pattern = jsonencode({
     source      = ["aws.kms"]
@@ -300,9 +300,9 @@ locals {
       eventName = ["DisableKey", "ScheduleKeyDeletion", "PutKeyPolicy", "DeleteAlias", "UpdateAlias", "UpdatePrimaryRegion"]
     }
     "$or" = [
-      { detail = { resources = { ARN = local.kms_guarded_key_names } } },
-      { detail = { requestParameters = { keyId = local.kms_guarded_key_names } } },
-      { detail = { requestParameters = { aliasName = local.kms_guarded_key_names } } },
+      { detail = { resources = { ARN = local.kms_guarded_key_suffixes } } },
+      { detail = { requestParameters = { keyId = local.kms_guarded_key_suffixes } } },
+      { detail = { requestParameters = { aliasName = local.kms_guarded_key_suffixes } } },
     ]
   })
 
@@ -315,6 +315,13 @@ resource "aws_cloudwatch_event_rule" "kms_key_changes_dr" {
   name          = "fc-prod-kms-key-changes"
   description   = "Guarded calls on the prod Aurora and OpenBao seal keys, forwarded to us-east-2 for Grafana."
   event_pattern = local.kms_key_change_pattern
+
+  lifecycle {
+    precondition {
+      condition     = length(local.kms_key_change_pattern) <= 2048
+      error_message = "The KMS key change pattern is over EventBridge's 2048-character default quota, so the rule cannot be created."
+    }
+  }
 }
 
 resource "aws_cloudwatch_event_target" "kms_key_changes_dr" {
