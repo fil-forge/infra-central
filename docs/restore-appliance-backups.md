@@ -7,9 +7,14 @@ behind it. A put at a new key adds a backup that never existed, such as a newer 
 WAL-G's `backup-fetch LATEST` would choose. WAL-G and an OpenBao snapshot restore both read current
 versions, so after a leak neither may read `<region>/` directly.
 
-S3 sets each version's `LastModified` when it stores the object, so no writer can backdate one. The
-procedure picks a cutoff before the leak, copies the latest version of each key written before it to
-a prefix no writer key can reach, and restores from that copy.
+S3 sets each version's `LastModified` itself, so no writer can backdate one. The procedure picks a
+cutoff before the leak, copies the latest version of each key written before it to a prefix no
+writer key can reach, and restores from that copy.
+
+For an object uploaded in parts, `LastModified` is when the upload started, so an upload the node
+started before the cutoff and finished after it counts as written before the cutoff. Its parts are
+still the node's. Adding a part or finishing the upload takes its upload ID, and the writer key
+cannot list in-progress uploads or their parts.
 
 Every backup written at or after the cutoff is lost, genuine ones included. Postgres recovers to the
 last WAL segment archived before the cutoff, and OpenBao to the last snapshot taken before it.
@@ -72,7 +77,13 @@ For every key under `eu-central-3/` it takes the latest version written before t
 it to `restores/eu-central-3/20261105T140000Z/` in the same bucket, keeping the rest of the key. A
 key first written at or after the cutoff is left out. So is a key whose latest entry before the
 cutoff is a lifecycle delete marker, because it had expired by then. What lands under the target is
-the region's prefix as a listing at the cutoff would have shown it.
+the region's prefix as a listing at the cutoff would have shown it. The script refuses a cutoff in
+the future, which would take every current version, forged ones included.
+
+S3 lists times to the second, and lists delete markers apart from versions. When a key's latest
+version and a delete marker share the last second before the cutoff, nothing says which came first,
+so the script leaves the key out and warns, naming it in `ambiguous.txt`. Copy such a key by hand
+if the restore needs it.
 
 It reads everything first, prints how many keys it will copy and leave out, and copies after you
 type `copy`. It also lists the keys that have a version written at or after the cutoff in front of

@@ -17,6 +17,16 @@
 # expired by then. What lands under the target is the region's prefix as a
 # listing at the cutoff would have shown it.
 #
+# S3 lists one second of precision, so a key whose latest version and a delete
+# marker share the last second before the cutoff has no knowable order. Such a
+# key is left out and listed in the plan, for an engineer to decide.
+#
+# A multipart object's LastModified is when its upload started, so an upload the
+# node started before the cutoff and completed after it counts as written before
+# the cutoff. Its parts are still the node's: the writer key cannot list
+# in-progress uploads or their parts, so a leaked key cannot find the upload ID
+# it would need to add a part or complete the upload.
+#
 # It reads the region's prefix and writes only under the target. No writer key
 # can write there, because each writes only under its own <region>/. The
 # bucket's lock and lifecycle apply to the copies as to any backup: they are
@@ -76,6 +86,12 @@ command -v jq  >/dev/null || { echo "ERROR: jq not found in PATH" >&2; exit 1; }
 jq -e -n --arg cutoff "$CUTOFF" '$cutoff | fromdateiso8601 | todateiso8601 == $cutoff' >/dev/null \
   || { echo "ERROR: the cutoff '$CUTOFF' is not a valid time." >&2; exit 2; }
 
+# A cutoff in the future would take every current version, forged ones included.
+if [ "$(jq -n --arg cutoff "$CUTOFF" '$cutoff | fromdateiso8601')" -gt "$(date -u +%s)" ]; then
+  echo "ERROR: the cutoff '$CUTOFF' is in the future." >&2
+  exit 2
+fi
+
 # The bucket lives in the stage's home region, like everything else central runs.
 export AWS_REGION="${AWS_REGION:-us-east-2}"
 
@@ -106,12 +122,13 @@ aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$TARGET_PREFIX" \
 [ -s "$WORK/versions.json" ] || echo '{}' >"$WORK/versions.json"
 [ -s "$WORK/already-copied.json" ] || echo 'null' >"$WORK/already-copied.json"
 
-# plan.json holds one entry per key in three lists: copy, after_cutoff and
-# expired. A copy entry counts the versions written at or after the cutoff that
-# stand in front of the chosen one.
+# plan.json holds one entry per key in four lists: copy, after_cutoff, expired
+# and ambiguous. A copy entry counts the versions written at or after the cutoff
+# that stand in front of the chosen one.
 #
 # Versions of one key are listed newest first, so their position breaks a tie
-# between two versions written in the same second.
+# between two versions written in the same second. Delete markers come in a
+# list of their own, which says nothing about their order against versions.
 jq --arg cutoff "$CUTOFF" --arg source "$SOURCE_PREFIX" --arg target "$TARGET_PREFIX" \
   --slurpfile already "$WORK/already-copied.json" '
   def epoch:
@@ -121,16 +138,22 @@ jq --arg cutoff "$CUTOFF" --arg source "$SOURCE_PREFIX" --arg target "$TARGET_PR
   ($cutoff | fromdateiso8601) as $cutoff_epoch
   | (($already[0] // []) | map({key: ., value: true}) | from_entries) as $copied
   | [ (.Versions // [] | to_entries[] | .value + {marker: false, position: .key}),
-      (.DeleteMarkers // [] | to_entries[] | .value + {marker: true, position: (1e9 + .key)}) ]
+      (.DeleteMarkers // [] | to_entries[] | .value + {marker: true, position: .key}) ]
   | map(. + {epoch: (.LastModified | epoch)})
   | group_by(.Key)
-  | map({
-      key: .[0].Key,
-      chosen: (map(select(.epoch < $cutoff_epoch)) | sort_by([.epoch, -.position]) | last),
-      newer_versions: (map(select(.epoch >= $cutoff_epoch and (.marker | not))) | length)
-    })
+  | map(
+      map(select(.epoch < $cutoff_epoch)) as $before
+      | ($before | map(.epoch) | max) as $latest_epoch
+      | ($before | map(select(.epoch == $latest_epoch))) as $latest
+      | {
+          key: .[0].Key,
+          chosen: ($before | sort_by([.epoch, -.position]) | last),
+          ambiguous: (($latest | any(.marker)) and ($latest | any(.marker | not))),
+          newer_versions: (map(select(.epoch >= $cutoff_epoch and (.marker | not))) | length)
+        })
   | {
-      copy: [ .[] | select(.chosen != null and (.chosen.marker | not))
+      ambiguous: [ .[] | select(.ambiguous) | .key ],
+      copy: [ .[] | select(.chosen != null and (.ambiguous | not) and (.chosen.marker | not))
               | ($target + (.key | ltrimstr($source))) as $target_key
               | { key, version_id: .chosen.VersionId, last_modified: .chosen.LastModified,
                   etag: .chosen.ETag, size: .chosen.Size, newer_versions,
@@ -138,7 +161,7 @@ jq --arg cutoff "$CUTOFF" --arg source "$SOURCE_PREFIX" --arg target "$TARGET_PR
                   copy_source: (.key | encode_path) + "?versionId=" + (.chosen.VersionId | @uri),
                   already_copied: ($copied[$target_key] // false) } ],
       after_cutoff: [ .[] | select(.chosen == null) | .key ],
-      expired: [ .[] | select(.chosen != null and .chosen.marker) | .key ]
+      expired: [ .[] | select(.chosen != null and (.ambiguous | not) and .chosen.marker) | .key ]
     }
 ' "$WORK/versions.json" >"$WORK/plan.json"
 
@@ -146,6 +169,7 @@ jq -r '.copy[] | select(.newer_versions > 0) | "\(.key)\t\(.newer_versions)"' \
   "$WORK/plan.json" >"$WORK/shadowed.tsv"
 jq -r '.copy[] | select(.already_copied | not) | "\(.copy_source)\t\(.target)"' \
   "$WORK/plan.json" >"$WORK/manifest.tsv"
+jq -r '.ambiguous[]' "$WORK/plan.json" >"$WORK/ambiguous.txt"
 
 read -r to_copy total_gib already_copied too_big after_cutoff expired < <(jq -r --argjson max "$MAX_COPY_BYTES" '
   [ (.copy | length),
@@ -156,6 +180,7 @@ read -r to_copy total_gib already_copied too_big after_cutoff expired < <(jq -r 
     (.expired | length) ] | @tsv
 ' "$WORK/plan.json")
 shadowed="$(wc -l <"$WORK/shadowed.tsv" | tr -d ' ')"
+ambiguous="$(wc -l <"$WORK/ambiguous.txt" | tr -d ' ')"
 
 # --- 2. Show the plan --------------------------------------------------------
 
@@ -167,6 +192,13 @@ echo "  $shadowed of the keys to copy have a version written at or after the cut
 echo "  of the one copied. A leaked key leaves these, and so does WAL-G when it retries an"
 echo "  upload. They are listed in $WORK/shadowed.tsv."
 echo
+if [ "$ambiguous" -gt 0 ]; then
+  echo "  WARNING: $ambiguous keys are left out because their latest version and a delete"
+  echo "  marker were written in the same second before the cutoff, so whether the key"
+  echo "  existed at the cutoff is unknown. They are listed in $WORK/ambiguous.txt;"
+  echo "  copy any you need by hand."
+  echo
+fi
 
 if [ "$to_copy" -eq 0 ]; then
   echo "ERROR: no version under $SOURCE_PREFIX was written before $CUTOFF." >&2
