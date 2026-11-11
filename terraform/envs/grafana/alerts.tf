@@ -118,7 +118,7 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The EC2 nodes' volume that holds only Ingot's spool, cache and catalog log
+  # The EC2 nodes' volume that holds only Ingot's cache and catalog log
   # (infra-nodes terraform/modules/node, aws_ebs_volume.data). Ingot keeps it
   # near its byte budget by design, so it gets its own, lower threshold.
   ingot_volume_mountpoint = "/mnt/fil-one/data"
@@ -1491,13 +1491,13 @@ resource "grafana_rule_group" "appliance" {
   # Ingot's local blob storage stays over its own budget. The threshold is the
   # budget itself, local_blob_max_bytes, which each node sets; this rule chooses
   # no number. Ingot's sweeper evicts cached bodies every 30s to stay under it,
-  # so usage that stays over means what is left is bodies it may not evict:
-  # uploads in flight, or uploads that failed (fil-forge/ingot's README, "Local
-  # disk").
+  # so usage that stays over means what is left is what it may not evict:
+  # writes in progress, more of them than the budget holds (fil-forge/ingot's
+  # README, "Local disk").
   #
   # A node with no budget publishes 0, which `> 0` drops, so it produces no
   # series and no_data_state = OK keeps it quiet. for = 15m is chosen: a burst
-  # of uploads can hold the spool over budget for minutes without anything
+  # of writes can hold the cache over budget for minutes without anything
   # being wrong. An instant query, so no reduce stage.
   rule {
     name           = "Ingot local disk over budget"
@@ -1508,7 +1508,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
-      description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      description      = "Ingot's cache has held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: writes in progress, which together outgrow the budget."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=17"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "17"
@@ -1576,12 +1576,12 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
-  # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
-  # part's goes with its session), nor may they be deleted by hand (Ingot's
-  # README), so the figure rarely falls. Firing on any stalled byte would
-  # therefore fire for good after one failure. Growth is the signal instead:
-  # more stalled bytes now than an hour ago means uploads are still failing.
+  # upload has stalled -- intents still uploading an hour after their last state
+  # change. They hold no local disk, and the provider expires an allocation that
+  # is never concluded, but nothing clears the intent, so the figure rarely
+  # falls. Firing on any stalled byte would therefore fire for good after one
+  # failure. Growth is the signal instead: more stalled bytes now than an hour
+  # ago means uploads are still failing.
   #
   # The hour is Ingot's own cutoff, not a choice here; the window matches it so
   # one failure shows as growth for about an hour and then resolves. for = 0m
@@ -1597,7 +1597,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
+      description      = "Uploads that did not finish are piling up: the upload failed, or it reached the provider and recording that failed. They hold no local disk; Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
@@ -3497,7 +3497,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "{{ $labels.appliance }} has less than 10% free on Ingot's volume"
-      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's spool, cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
+      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
       __dashboardUid__ = "forge-regions"

@@ -2655,7 +2655,7 @@
         "spec": {
           "id": 17,
           "title": "Ingot local disk",
-          "description": "Bytes Ingot holds under its data_dir, stacked by directory, against local_blob_max_bytes (dashed; absent when no budget is set). spool is bodies being written or awaiting upload, which eviction cannot touch; cache is bodies the provider already holds, which the sweeper evicts oldest first to stay under the budget. Ingot's README, \"Local disk\", says what each holds.",
+          "description": "Bytes Ingot holds in its cache under data_dir, against local_blob_max_bytes (dashed; absent when no budget is set): bodies the provider already holds, which the sweeper evicts least recently used first to stay under the budget, and writes in progress, which it cannot evict. Ingot's README, \"Local disk\", says what it holds.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2823,7 +2823,7 @@
         "spec": {
           "id": 18,
           "title": "Ingot stalled uploads",
-          "description": "Bytes of bodies whose upload has stalled, one line per state: intents still spooled (the body never left the node) or uploading (it may have reached its provider) an hour after their last state change. Nothing reclaims a failed PUT's yet (a multipart part's goes with its session), and they count against the budget. Anything above zero is an upload that did not finish; a rising line means it keeps happening.",
+          "description": "Bytes of bodies whose upload has stalled: intents still uploading an hour after their last state change. They hold no local disk, and the provider expires an allocation that is never concluded, but nothing clears the intent, so the line rarely falls. Anything above zero is an upload that did not finish; a rising line means it keeps happening.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2937,7 +2937,7 @@
         "spec": {
           "id": 19,
           "title": "Ingot local removals",
-          "description": "Files removed from local disk per second, by reason: released (object deleted or overwritten), parked (multipart part handed to its provider), budget (evicted to stay under the budget), budget_forced (evicted inside the retention windows because the budget needed it), orphan (a leftover no upload names), accepted (dropped on accept, with cache_writes: false). Steady budget_forced means the budget is too small for the ingest rate and read working set.",
+          "description": "Files removed from local disk per second, by reason: released (object deleted or overwritten), expired (its cache_ttl ran out), budget (evicted to stay under the budget, however much of its cache_ttl was left), orphan (an unfinished write's temporary file). Steady budget evictions mean the budget is too small to keep bodies for their whole cache_ttl.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
