@@ -243,12 +243,67 @@ restore.
 
 ## Aurora (prod)
 
-- Restore with `restore-db-cluster-to-point-in-time`, naming the cluster key
-  `alias/fc-prod-aurora`, and create each member with `create-db-instance`.
-- Swap with `modify-db-cluster --new-db-cluster-identifier`.
-- Import `module.platform.module.aurora[0].aws_rds_cluster.this` and its instances.
+Prod's cluster is `fc-prod`, and its members are `fc-prod-1` and `fc-prod-2`. The module names
+each member `<cluster>-<n>`, so the swap renames the members as well as the clusters.
 
-This variant has not been rehearsed.
+In step 1, read the restore window from the cluster:
+
+```bash
+aws rds describe-db-clusters --db-cluster-identifier fc-prod \
+  --query 'DBClusters[0].[EarliestRestorableTime,LatestRestorableTime]'
+```
+
+In step 3, restore the cluster under a temporary name, give it members with temporary names, and
+give it a managed master secret once it is available:
+
+```bash
+aws rds restore-db-cluster-to-point-in-time \
+  --source-db-cluster-identifier fc-prod --db-cluster-identifier fc-prod-restore-$TS \
+  --restore-to-time $T --kms-key-id alias/fc-prod-aurora \
+  --db-subnet-group-name <group> --vpc-security-group-ids <fc-prod-database> \
+  --db-cluster-parameter-group-name <group> --copy-tags-to-snapshot
+for n in 1 2; do
+  aws rds create-db-instance --db-cluster-identifier fc-prod-restore-$TS \
+    --db-instance-identifier fc-prod-restore-$TS-$n --engine aurora-postgresql \
+    --db-instance-class db.r8g.large --availability-zone <zone of fc-prod-$n> \
+    --no-publicly-accessible
+done
+aws rds modify-db-cluster --db-cluster-identifier fc-prod-restore-$TS \
+  --manage-master-user-password --apply-immediately
+```
+
+In step 5, move the original out of the way, members first, then give the restored cluster and its
+members the canonical names. Wait for each instance or cluster to be available before the next
+rename:
+
+```bash
+for n in 1 2; do
+  aws rds modify-db-instance --db-instance-identifier fc-prod-$n \
+    --new-db-instance-identifier fc-prod-pre-restore-$TS-$n --apply-immediately
+done
+aws rds modify-db-cluster --db-cluster-identifier fc-prod \
+  --new-db-cluster-identifier fc-prod-pre-restore-$TS --apply-immediately
+aws rds modify-db-cluster --db-cluster-identifier fc-prod-restore-$TS \
+  --new-db-cluster-identifier fc-prod --apply-immediately
+for n in 1 2; do
+  aws rds modify-db-instance --db-instance-identifier fc-prod-restore-$TS-$n \
+    --new-db-instance-identifier fc-prod-$n --apply-immediately
+done
+```
+
+The cluster endpoint follows the cluster identifier, so the stored DSNs reach the restored cluster.
+
+In step 7, replace the cluster and every member in state:
+
+```bash
+tofu state rm 'module.platform.module.aurora[0].aws_rds_cluster.this' \
+  'module.platform.module.aurora[0].aws_rds_cluster_instance.this'
+tofu import 'module.platform.module.aurora[0].aws_rds_cluster.this' fc-prod
+tofu import 'module.platform.module.aurora[0].aws_rds_cluster_instance.this[0]' fc-prod-1
+tofu import 'module.platform.module.aurora[0].aws_rds_cluster_instance.this[1]' fc-prod-2
+```
+
+A rollback renames in the reverse order. This variant has not been rehearsed.
 
 ## Times measured on dev, 2026-11-11
 
