@@ -124,9 +124,9 @@ the service fixed as well; restarting the tasks only buys time.
 The database instance has been above 80% CPU for fifteen minutes. Every service that uses it slows
 down.
 
-Check first: which queries are using it. Performance Insights in the RDS console shows the top SQL
-by load. If it is load rather than one bad query, size up `db_instance_class` in the stage's
-platform root.
+Check first: which queries are using it. CloudWatch Database Insights, which replaced the
+Performance Insights console, shows the top SQL by load. If it is load rather than one bad query,
+size up `db_instance_class` in the stage's platform root.
 
 ## Central database failed over
 
@@ -179,15 +179,17 @@ aws rds describe-db-instances --db-instance-identifier fc-<stage> \
   --query 'DBInstances[0].{allocated:AllocatedStorage,max:MaxAllocatedStorage,status:DBInstanceStatus}'
 ```
 
-Then what is using it. WAL held by a replication slot that has stopped advancing fills an instance
-without any table growing, and shows in Grafana:
+Then whether a replication slot is holding WAL, which fills an instance without any table growing.
+Normally this is about zero:
 
 ```promql
-aws_rds_transaction_logs_disk_usage_maximum{dimension_DBInstanceIdentifier="fc-<stage>"}
+aws_rds_replication_slot_disk_usage_maximum{dimension_DBInstanceIdentifier="fc-<stage>"}
 ```
 
 A slot on Central's instance is unexpected, since nothing here replicates from it, so raise one with
-whoever created it rather than dropping it.
+whoever created it rather than dropping it. The series for all WAL together,
+`aws_rds_transaction_logs_disk_usage_maximum`, sits at about 2 GiB on a healthy staging instance, so
+it does not point to a slot on its own.
 
 RDS refuses any storage change, autoscaling's included, for six hours after the last one or until
 the instance leaves `storage-optimization`, whichever is longer. The query above shows the status,
@@ -219,7 +221,6 @@ An Aurora instance has had less than 3 GiB of local storage free for fifteen min
 holds temporary files and logs, not the data, and its size is fixed by the instance class. Queries
 that spill to disk fail once it is full.
 
-Check first: which queries are writing temporary files. Performance Insights, in the RDS console,
-shows the top SQL by load. A query that sorts or hashes more than fits in `work_mem` is the usual
-cause. If the load is legitimate, size up `db_instance_class`, which brings
-more local storage with it.
+Check first: which queries are writing temporary files. CloudWatch Database Insights shows the top
+SQL by load. A query that sorts or hashes more than fits in `work_mem` is the usual cause. If the
+load is legitimate, size up `db_instance_class`, which brings more local storage with it.
