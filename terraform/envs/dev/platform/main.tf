@@ -118,6 +118,6 @@ module "platform" {
   # reset-apps run keeps the instance and needs neither. seed_trigger was
   # bumped alone once, to move the identity and wallet keys from SSM to
   # Secrets Manager.
-  seed_trigger  = "6"
-  vault_trigger = "5"
+  seed_trigger  = "7"
+  vault_trigger = "6"
 }
