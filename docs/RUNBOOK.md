@@ -175,9 +175,23 @@ aws rds describe-db-instances --db-instance-identifier fc-<stage> \
   --query 'DBInstances[0].{allocated:AllocatedStorage,max:MaxAllocatedStorage,status:DBInstanceStatus}'
 ```
 
-At the ceiling, raise `max_allocated_storage` in `modules/platform/database` and apply the stage's
-platform root. Otherwise grow it now with `aws rds modify-db-instance --allocated-storage <GiB>
---apply-immediately`, then bring the platform root's `db_allocated_storage` up to match.
+RDS refuses any storage change for six hours after the last one, autoscaling's included. If
+storage changed within that time, nothing can grow the instance yet, so free space instead: find
+what is filling it, with `pg_database_size` per database and `pg_total_relation_size` per table, and
+clear what can go.
+
+Otherwise:
+
+- **At the ceiling:** raise `max_allocated_storage` in `modules/platform/database` and apply the
+  stage's platform root. The platform root does not pass it through, so the default changes for dev
+  too.
+- **Below the ceiling:** grow it now, then bring the platform root's `db_allocated_storage` up to
+  match.
+
+  ```bash
+  aws rds modify-db-instance --db-instance-identifier fc-<stage> \
+    --allocated-storage <GiB> --apply-immediately
+  ```
 
 ## Central database local storage low
 

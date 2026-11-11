@@ -21,9 +21,11 @@ locals {
       # fires, and if the services had not reconnected "Service has no healthy
       # hosts" and the 5xx rules would say so. What is left is finding out why,
       # and checking the old writer came back as a reader, because until it
-      # does the cluster has nothing to fail over to. It fires for about half
-      # an hour, then resolves on its own. A single-instance cluster has no
-      # reader, so it never fires there.
+      # does the cluster has nothing to fail over to. It fires about ten
+      # minutes after the failover, five for the lag series to go quiet and
+      # five of `for`, and resolves on its own about twenty minutes later, once
+      # the old lag samples leave the half-hour window. A single-instance
+      # cluster has no reader, so it never fires there.
       name      = "Central database failed over"
       for       = "5m"
       operator  = "gt"

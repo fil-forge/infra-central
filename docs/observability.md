@@ -196,8 +196,9 @@ What a change needs so that on-call hears when it breaks. Appliance services (Pi
 rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
 live here.
 
-- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
-  and no-data handling fit; the appliance has three. Each rule needs:
+- **Alerts** go in the rule group whose evaluation interval and no-data handling fit; the
+  appliance has three. The groups are in `terraform/envs/grafana/`: most in `alerts.tf`, the
+  capacity and database groups in `alerts_capacity.tf` and `alerts_database.tf`. Each rule needs:
   - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
   - a `severity` chosen by the severity definitions above;
   - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
@@ -289,8 +290,9 @@ and `node` and `region` labels instead.
 
 Metric names follow `aws_<namespace>_<metric>_<statistic>`, with the CloudWatch name in snake case
 and one series per statistic: `_sum`, `_average`, `_minimum`, `_maximum`, `_sample_count`.
-The load balancer's `TargetResponseTime` also ships its p99, which a stream sends only for the
-metrics its `statistics_configuration` names (`terraform/modules/telemetry`).
+A stream sends a percentile only for the metrics its `statistics_configuration` names.
+`terraform/modules/telemetry` names the load balancer's `TargetResponseTime` with its p99, which
+reaches Grafana once the bootstrap roots that use the module are applied.
 CloudWatch dimensions arrive as labels prefixed `dimension_`, and every series carries
 `account_id`, `region` and `namespace`.
 

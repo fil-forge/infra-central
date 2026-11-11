@@ -356,7 +356,8 @@ resource "aws_cloudwatch_metric_stream" "this" {
   # get one into Grafana. It applies to every dimension combination of the
   # metric, and each data point then bills as one further metric update for up
   # to five additional statistics (AWS's "Statistics that can be streamed"
-  # page), which is why this names one metric rather than the namespace.
+  # page), so add a metric here only when a rule or panel reads its
+  # percentile.
   statistics_configuration {
     additional_statistics = ["p99"]
 
