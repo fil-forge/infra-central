@@ -241,7 +241,8 @@ if mints "$token_action"; then
       "",
       "It can be exchanged once, within \(.token_result.wrap_ttl), and only for this",
       "node'"'"'s credential. On the node, scripts/host/provision-platform.sh asks for it,",
-      "exchanges it at central and stores what comes back 0400 root.",
+      "or scripts/host/restore-openbao.sh when the node restores OpenBao from a",
+      "snapshot. Either exchanges it at central and stores what comes back 0400 root.",
       ""
     ' <<<"$token_result"
     unset token_result

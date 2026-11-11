@@ -161,8 +161,9 @@ is abandoned or decommissioned fails closed within days. 24 hours would strand a
 than a day and buys little, since revocation is immediate at any period. A month would keep a
 forgotten node's credential renewable long past the point anyone was watching it.
 
-The node's renewal timer runs hourly regardless, so the period is a tolerance for outages rather
-than a schedule.
+OpenBao on the node renews the token itself while it runs. The node's renewal timer covers the time
+OpenBao is not running: it renews daily, two minutes after boot and two minutes after the timer is
+enabled. So the period is a tolerance for outages rather than a schedule.
 
 ## Only the accessor is stored
 
