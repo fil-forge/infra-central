@@ -180,7 +180,7 @@ aws rds describe-db-instances --db-instance-identifier fc-<stage> \
 ```
 
 Then whether a replication slot is holding WAL, which fills an instance without any table growing.
-Normally this is about zero:
+Normally it is a few KiB at most:
 
 ```promql
 aws_rds_replication_slot_disk_usage_maximum{dimension_DBInstanceIdentifier="fc-<stage>"}
