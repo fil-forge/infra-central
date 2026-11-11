@@ -349,6 +349,23 @@ resource "aws_cloudwatch_metric_stream" "this" {
     }
   }
 
+  # The p99 of each target group's response time, for the "Service p99
+  # response time is high" rule in terraform/envs/grafana. A stream ships only
+  # minimum, maximum, sum and sample count unless it names a statistic here,
+  # and a percentile cannot be rebuilt from those, so this is the only way to
+  # get one into Grafana. It applies to every dimension combination of the
+  # metric, and each data point then bills as one further metric update for up
+  # to five additional statistics (AWS's "Statistics that can be streamed"
+  # page), which is why this names one metric rather than the namespace.
+  statistics_configuration {
+    additional_statistics = ["p99"]
+
+    include_metric {
+      namespace   = "AWS/ApplicationELB"
+      metric_name = "TargetResponseTime"
+    }
+  }
+
   # The stream needs the policy in place before it can write, and it validates
   # that on creation.
   depends_on = [aws_iam_role_policy.metric_stream]

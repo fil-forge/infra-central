@@ -166,6 +166,10 @@ on `stage` and `service` for that long.
 | Central service CPU high                             | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central service memory high                          | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central database CPU high                            | Forge capacity           | RDS, CloudWatch               | FIL-1214 |
+| Central database failed over                         | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database reader lag is high                  | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database free storage low                    | Forge Central database   | RDS, CloudWatch, staging      | FIL-1291 |
+| Central database local storage low                   | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
 | Appliance container memory high                      | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance container CPU high                         | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance host memory low                            | Forge capacity           | node exporter                 | FIL-1214 |
@@ -201,6 +205,9 @@ live here.
     `local.appliance_stage_label`;
   - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
     tree described above.
+  - a `runbook_url`. A Central rule links to its own section of [RUNBOOK.md](RUNBOOK.md),
+    headed by the rule's name, through `local.central_runbook`; an appliance rule links to
+    fil-forge/infra-nodes' runbook.
 
   CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
   rules at the end of their group, because the provider keeps each rule's uid by its position. Add
@@ -282,6 +289,8 @@ and `node` and `region` labels instead.
 
 Metric names follow `aws_<namespace>_<metric>_<statistic>`, with the CloudWatch name in snake case
 and one series per statistic: `_sum`, `_average`, `_minimum`, `_maximum`, `_sample_count`.
+The load balancer's `TargetResponseTime` also ships its p99, which a stream sends only for the
+metrics its `statistics_configuration` names (`terraform/modules/telemetry`).
 CloudWatch dimensions arrive as labels prefixed `dimension_`, and every series carries
 `account_id`, `region` and `namespace`.
 

@@ -294,6 +294,10 @@ locals {
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
   regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage=${local.appliance_stage_label}&var-region={{ $labels.region }}"
 
+  # Every Central rule links to its entry in infra-central's runbook, which is
+  # headed by the rule's name. Appliance rules link to infra-nodes' instead.
+  central_runbook = "https://github.com/fil-forge/infra-central/blob/main/docs/RUNBOOK.md"
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -339,6 +343,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}, or its target group has stopped reporting"
+      runbook_url      = "${local.central_runbook}#service-has-no-healthy-hosts"
       dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
@@ -448,6 +453,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning more than 1 server error a minute"
       description      = "More than one 5xx per minute, averaged over five, for ten minutes."
+      runbook_url      = "${local.central_runbook}#service-5xx-errors"
       dashboard_url    = "${local.central_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-central"
       __panelId__      = "3"
@@ -578,6 +584,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
       description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana. The link opens the dashboard on this service alone, Overview included; drop var-service from its URL to see every service."
+      runbook_url      = "${local.central_runbook}#service-is-failing-most-requests"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
       __dashboardUid__ = "forge-central"
       __panelId__      = "13"
@@ -696,6 +703,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "{{ $labels.dimension_FunctionName }} returned errors in the last five minutes"
       description = "The provision Lambda is erroring. Its log group is /aws/lambda/{{ $labels.dimension_FunctionName }}; docs/observability.md says how to read it in Grafana."
+      runbook_url = "${local.central_runbook}#provision-lambda-errors"
     }
 
     labels = {
@@ -810,6 +818,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
       description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for about 20. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-tunnel-down"
     }
 
     labels = {
@@ -900,6 +909,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
       description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for about ten. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-both-tunnels-down"
     }
 
     labels = {
@@ -981,9 +991,11 @@ resource "grafana_rule_group" "central_latency" {
   # reading as a request hours long. Central serves no S3 object operations, so
   # there is nothing size-dependent to exclude.
   #
-  # The stream carries no percentiles, so this is a mean: the sum of response
-  # times over their count, which weighs each request equally where averaging
-  # the per-minute averages would weigh each minute equally. CloudWatch
+  # This is a mean: the sum of response times over their count, which weighs
+  # each request equally where averaging the per-minute averages would weigh
+  # each minute equally. A mean hides a slow tail, which is why
+  # modules/telemetry also streams the p99; its rule follows once that series
+  # is in Grafana and its name is known (FIL-1291). CloudWatch
   # publishes the metric only in minutes with requests, so an idle service has
   # no series and no_data_state is OK.
   rule {
@@ -996,6 +1008,7 @@ resource "grafana_rule_group" "central_latency" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
       description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      runbook_url      = "${local.central_runbook}#service-response-time-is-high"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
       __dashboardUid__ = "forge-central"
       __panelId__      = "8"
