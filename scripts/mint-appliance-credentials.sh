@@ -170,6 +170,10 @@ backup_plan="$(invoke appliance-backup-key false)"
 echo "Unseal token:"
 jq -r '
   "  Transit key:  appliance-unseal-\(.token_plan.region)",
+  "  Key versions: latest \(.token_plan.key_latest_version), decrypts from \(.token_plan.key_min_decryption_version)",
+  (if .token_plan.key_min_decryption_version > 1 then
+    "  WARNING:      the key no longer decrypts versions below \(.token_plan.key_min_decryption_version), so appliance OpenBao snapshots wrapped by those versions do not restore"
+  else empty end),
   "  Period:       \(.token_plan.period)",
   "  Wrap TTL:     \(.token_plan.wrap_ttl)",
   "  Action:       \(.token_plan.action)",

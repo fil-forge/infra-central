@@ -160,6 +160,18 @@ No flag is needed when the recorded unseal token has simply lapsed, which is the
 node that has been offline longer than the 72-hour renewal period. The script reports that and
 mints.
 
+A node that restores its OpenBao from a raft snapshot keeps its registration here: its Piri DIDs,
+its Ingot delegation and its backup key all come back with the snapshot. It needs a new unseal token
+only when the old one has lapsed, was lost with the host, or is bound to an IP the node no longer
+has. Any live unseal token for the region unseals any of the region's snapshots, because the
+snapshot's root key is wrapped by `appliance-unseal-<region>`. Never raise that key's
+`min_decryption_version` while the backup bucket still holds a snapshot wrapped by an older
+version, which is 35 days on staging, or those snapshots stop restoring. The first, read-only round
+of `make mint-appliance-credentials` prints the key's latest version and the oldest version it still
+decrypts, and warns when that is above 1. Run it and answer anything but `mint` at its prompt to
+check the key without minting anything. The node side is in infra-nodes'
+[restore runbook](https://github.com/fil-forge/infra-nodes/blob/main/docs/runbook/restore-openbao-from-snapshot.md).
+
 ## What the node does with the backup key
 
 Staging and prod keep each appliance's backups in `forge-nodes-backups-<stage>-<account id>`, under
