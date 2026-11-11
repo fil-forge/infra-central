@@ -85,7 +85,8 @@ locals {
       # An RDS instance, so staging's: Aurora publishes no FreeStorageSpace,
       # because its cluster volume grows by itself. Storage autoscaling grows
       # an RDS instance once less than 10% is free, up to max_allocated_storage
-      # in modules/platform/database, and waits six hours between steps. On
+      # in modules/platform/database, and RDS allows no storage change for six
+      # hours after the last one, or longer while it optimises storage. On
       # staging's 20 GiB that step starts at 2 GiB free, so 1 GiB for fifteen
       # minutes means autoscaling is not keeping up or has reached its ceiling.
       # Critical: a full instance stops taking writes.

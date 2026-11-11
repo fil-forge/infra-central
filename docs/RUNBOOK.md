@@ -165,8 +165,12 @@ under heavy writes.
 ## Central database free storage low
 
 Staging's RDS instance has had less than 1 GiB free for fifteen minutes. Storage autoscaling grows
-it once less than 10% is free, so either it has reached `max_allocated_storage` or it is waiting out
-the six hours autoscaling leaves between steps. A full instance stops taking writes.
+it once less than 10% is free, so either it has reached `max_allocated_storage` or a recent storage
+change is stopping it from growing again. A full instance stops taking writes.
+
+There is no route from a laptop to Central's databases, which have no public address, so these steps
+use the AWS CLI and Grafana only. Freeing space inside the database needs a SQL session, which is
+not an on-call step.
 
 Check first: the instance's allocated storage against its ceiling.
 
@@ -174,6 +178,16 @@ Check first: the instance's allocated storage against its ceiling.
 aws rds describe-db-instances --db-instance-identifier fc-<stage> \
   --query 'DBInstances[0].{allocated:AllocatedStorage,max:MaxAllocatedStorage,status:DBInstanceStatus}'
 ```
+
+Then what is using it. WAL held by a replication slot that has stopped advancing fills an instance
+without any table growing, and shows in Grafana:
+
+```promql
+aws_rds_transaction_logs_disk_usage_maximum{dimension_DBInstanceIdentifier="fc-<stage>"}
+```
+
+A slot on Central's instance is unexpected, since nothing here replicates from it, so raise one with
+whoever created it rather than dropping it.
 
 RDS refuses any storage change, autoscaling's included, for six hours after the last one or until
 the instance leaves `storage-optimization`, whichever is longer. The query above shows the status,
@@ -183,12 +197,8 @@ and the instance's events show when storage last changed:
 aws rds describe-events --source-type db-instance --source-identifier fc-<stage> --duration 360
 ```
 
-Inside that window nothing can grow the instance, so free space instead. Find what is filling it:
-`pg_database_size` per database, `pg_total_relation_size` per table, and `pg_replication_slots` for
-a slot that has stopped advancing and is holding WAL. Only `DROP` or `TRUNCATE` gives space back at
-once. `DELETE` and a plain `VACUUM` only make it reusable inside the table, and `VACUUM FULL` needs
-about the table's size free while it runs, which a nearly full instance may not have. A stale
-replication slot is freed by dropping it with `pg_drop_replication_slot`.
+Inside that window nothing can grow the instance. Grow it as soon as the window ends; until then
+staging's writes may fail.
 
 Outside that window:
 
@@ -209,7 +219,7 @@ An Aurora instance has had less than 3 GiB of local storage free for fifteen min
 holds temporary files and logs, not the data, and its size is fixed by the instance class. Queries
 that spill to disk fail once it is full.
 
-Check first: which queries are writing temporary files. Performance Insights shows the top SQL, and
-`pg_stat_database.temp_bytes` shows the volume. A query that sorts or hashes more than fits in
-`work_mem` is the usual cause. If the load is legitimate, size up `db_instance_class`, which brings
+Check first: which queries are writing temporary files. Performance Insights, in the RDS console,
+shows the top SQL by load. A query that sorts or hashes more than fits in `work_mem` is the usual
+cause. If the load is legitimate, size up `db_instance_class`, which brings
 more local storage with it.
