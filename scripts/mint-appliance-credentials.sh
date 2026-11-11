@@ -170,6 +170,10 @@ backup_plan="$(invoke appliance-backup-key false)"
 echo "Unseal token:"
 jq -r '
   "  Transit key:  appliance-unseal-\(.token_plan.region)",
+  "  Key versions: latest \(.token_plan.key_latest_version), decrypts from \(.token_plan.key_min_decryption_version)",
+  (if .token_plan.key_min_decryption_version > 1 then
+    "  WARNING:      the key no longer decrypts versions below \(.token_plan.key_min_decryption_version), so appliance OpenBao snapshots wrapped by those versions do not restore"
+  else empty end),
   "  Period:       \(.token_plan.period)",
   "  Wrap TTL:     \(.token_plan.wrap_ttl)",
   "  Action:       \(.token_plan.action)",
@@ -237,7 +241,8 @@ if mints "$token_action"; then
       "",
       "It can be exchanged once, within \(.token_result.wrap_ttl), and only for this",
       "node'"'"'s credential. On the node, scripts/host/provision-platform.sh asks for it,",
-      "exchanges it at central and stores what comes back 0400 root.",
+      "or scripts/host/restore-openbao.sh when the node restores OpenBao from a",
+      "snapshot. Either exchanges it at central and stores what comes back 0400 root.",
       ""
     ' <<<"$token_result"
     unset token_result
