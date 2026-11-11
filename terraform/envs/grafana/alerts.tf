@@ -3565,6 +3565,107 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # A proof set has an addPieces transaction that succeeded on chain more than
+  # 20 epochs ago whose pieces Curio, inside Piri, has still not recorded from
+  # the receipt. The value is epochs past that grace; the current epoch is the
+  # last head plus the wall-clock time since it, as in "proving is failing".
+  #
+  # Curio records an add on the next chain head. When it cannot read the
+  # receipt, as when its parser did not know PDPVerifier 3.5.0's
+  # PiecesAddedV2 event (FIL-1222), it retries on every head without
+  # reporting a failure. A new proof set is not scheduled for proving until its
+  # first add is recorded, so "proving period has not advanced" and "proving
+  # is failing", which both need a schedule, never fire for it.
+  #
+  # A warning: nothing is lost on chain while it holds, since a set that is
+  # not scheduled records no faults, but its pieces are not being proven. The
+  # likely cause is a contract upgrade Piri's Curio does not support, which
+  # needs a Piri release.
+  #
+  # `for` is 5m. no_data_state is OK: Piri reports the series only while an
+  # add is untracked.
+  rule {
+    name           = "Piri has untracked add pieces"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has a piece addition that succeeded on chain over 10 minutes ago and is still untracked"
+      description = "An addPieces transaction for this proof set succeeded on chain, but Curio, inside Piri, has not recorded its pieces from the receipt, and retries on every chain head without reporting a failure. A new proof set is not scheduled for proving until its first addition is recorded, and the added pieces are not proven. Check the Piri container's logs for \"failed to extract pieces from receipt\". The usual cause is a PDPVerifier upgrade that emits an event Piri's Curio cannot parse, which needs a Piri release. Act within a day."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-has-untracked-add-pieces"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            (
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
+              piri_pdp_proofset_untracked_add_pieces_confirmed_epoch{${local.piri_metric_matcher}}
+            )
+          )
+          - 20
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
