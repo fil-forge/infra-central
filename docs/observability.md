@@ -166,6 +166,10 @@ on `stage` and `service` for that long.
 | Central service CPU high                             | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central service memory high                          | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central database CPU high                            | Forge capacity           | RDS, CloudWatch               | FIL-1214 |
+| Central database failed over                         | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database reader lag is high                  | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database free storage low                    | Forge Central database   | RDS, CloudWatch, staging      | FIL-1291 |
+| Central database local storage low                   | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
 | Appliance container memory high                      | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance container CPU high                         | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance host memory low                            | Forge capacity           | node exporter                 | FIL-1214 |
@@ -192,15 +196,19 @@ What a change needs so that on-call hears when it breaks. Appliance services (Pi
 rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
 live here.
 
-- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
-  and no-data handling fit; the appliance has three. Each rule needs:
+- **Alerts** go in the rule group whose evaluation interval and no-data handling fit; the
+  appliance has three. The groups are in `terraform/envs/grafana/`: most in `alerts.tf`, the
+  capacity and database groups in `alerts_capacity.tf` and `alerts_database.tf`. Each rule needs:
   - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
   - a `severity` chosen by the severity definitions above;
   - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
     template over them, or as a literal for a rule that watches one stage; an appliance rule uses
     `local.appliance_stage_label`;
   - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
-    tree described above.
+    tree described above;
+  - a `runbook_url`. A Central rule links to its own section of [RUNBOOK.md](RUNBOOK.md),
+    headed by the rule's name, through `local.central_runbook`; an appliance rule links to
+    fil-forge/infra-nodes' runbook.
 
   CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
   rules at the end of their group, because the provider keeps each rule's uid by its position. Add
@@ -282,6 +290,9 @@ and `node` and `region` labels instead.
 
 Metric names follow `aws_<namespace>_<metric>_<statistic>`, with the CloudWatch name in snake case
 and one series per statistic: `_sum`, `_average`, `_minimum`, `_maximum`, `_sample_count`.
+A stream sends a percentile only for the metrics its `statistics_configuration` names.
+`terraform/modules/telemetry` names the load balancer's `TargetResponseTime` with its p99, which
+reaches Grafana once the bootstrap roots that use the module are applied.
 CloudWatch dimensions arrive as labels prefixed `dimension_`, and every series carries
 `account_id`, `region` and `namespace`.
 
