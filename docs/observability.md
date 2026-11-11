@@ -205,7 +205,7 @@ live here.
     template over them, or as a literal for a rule that watches one stage; an appliance rule uses
     `local.appliance_stage_label`;
   - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
-    tree described above.
+    tree described above;
   - a `runbook_url`. A Central rule links to its own section of [RUNBOOK.md](RUNBOOK.md),
     headed by the rule's name, through `local.central_runbook`; an appliance rule links to
     fil-forge/infra-nodes' runbook.
