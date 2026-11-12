@@ -110,6 +110,26 @@ The rules watch staging and prod, the stages listed in `alert_stages` in
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
 appliance label.
 
+The rules that read absence, "Appliance has stopped reporting" and "Appliance
+OpenBao snapshot is stale", watch only the live appliances listed in
+`live_appliances`: every `<stage>-<region>` in the alert stages'
+`appliance_regions`. A retired appliance and a dead one both stop reporting,
+and the list is what tells them apart. A listed appliance with no data alerts
+until it reports or leaves the list, including a new region whose node is not
+up yet. The snapshot rule further keeps to the
+stages in `appliance_backup_stages`, the alert stages whose platform root sets
+`appliance_backups`. `scripts/check-appliance-regions.sh` and
+`scripts/check-backup-stages.sh` fail `make check` when either list disagrees
+with the platform roots.
+
+"Service has no healthy hosts" reads absence too, without a list. A Central
+service with no tasks has no registered targets, and CloudWatch then stops
+publishing `HealthyHostCount` for its target group instead of reporting 0. So
+the rule counts any stage and service seen in the last day but silent now as 0
+healthy hosts. It fires about ten minutes after the last sample. A service or
+stage removed or renamed on purpose alerts until a day has passed, so silence it
+on `stage` and `service` for that long.
+
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
 | Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch               | FIL-1151 |
@@ -122,6 +142,7 @@ appliance label.
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
+| Ingot volume free space below 10%                    | Forge Regions            | node exporter                 | FIL-1616 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's chain RPC is rejecting its credentials        | Forge Regions            | Piri's metrics                | FIL-1553 |
@@ -137,17 +158,23 @@ appliance label.
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
 | Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
+| Piri has untracked add pieces                        | Forge Regions            | Piri's metrics                | FIL-1624 |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
 | Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
+| Appliance OpenBao snapshot is stale                  | Forge Regions            | snapshot stamp                | FIL-1745 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
 | Central service CPU high                             | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central service memory high                          | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central database CPU high                            | Forge capacity           | RDS, CloudWatch               | FIL-1214 |
+| Central database failed over                         | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database reader lag is high                  | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database free storage low                    | Forge Central database   | RDS, CloudWatch, staging      | FIL-1291 |
+| Central database local storage low                   | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
 | Appliance container memory high                      | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance container CPU high                         | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance host memory low                            | Forge capacity           | node exporter                 | FIL-1214 |
@@ -158,21 +185,35 @@ parses `PiecesAddedV2` events (FIL-1222). Until then every Prove run fails with 
 The pull request that deploys the fix removes its `is_paused = true` in
 `terraform/envs/grafana/alerts.tf`.
 
+"Appliance OpenBao snapshot is stale" fires when an appliance's last OpenBao raft snapshot in the
+backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
+infra-nodes' snapshot job stamps after each upload. Every live appliance in a backup stage owes a
+snapshot, so the rule also fires for one that reconciles but reports no stamp at all, and alerts on
+no data when none of them reports anything. The Postgres backups get a freshness rule with the job
+that uploads them,
+[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
+checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
+[appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
+
 ## Adding an alert or panel
 
 What a change needs so that on-call hears when it breaks. Appliance services (Piri, Ingot and the
 rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
 live here.
 
-- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
-  and no-data handling fit; the appliance has three. Each rule needs:
+- **Alerts** go in the rule group whose evaluation interval and no-data handling fit; the
+  appliance has three. The groups are in `terraform/envs/grafana/`: most in `alerts.tf`, the
+  capacity and database groups in `alerts_capacity.tf` and `alerts_database.tf`. Each rule needs:
   - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
   - a `severity` chosen by the severity definitions above;
   - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
     template over them, or as a literal for a rule that watches one stage; an appliance rule uses
     `local.appliance_stage_label`;
   - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
-    tree described above.
+    tree described above;
+  - a `runbook_url`. A Central rule links to its own section of [RUNBOOK.md](RUNBOOK.md),
+    headed by the rule's name, through `local.central_runbook`; an appliance rule links to
+    fil-forge/infra-nodes' runbook.
 
   CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
   rules at the end of their group, because the provider keeps each rule's uid by its position. Add
@@ -218,6 +259,14 @@ The provision Lambda, which uses the AWS-defined log group format:
 {aws_log_group="/aws/lambda/fc-dev-provision"}
 ```
 
+A key the seed phase could not replicate to the DR region, or whose replica did not reach InSync
+within two minutes, fails the stage's platform apply. The error names the key and, for a failed
+replica, the reason Secrets Manager gave:
+
+```logql
+{aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
+```
+
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |
@@ -246,6 +295,9 @@ and `node` and `region` labels instead.
 
 Metric names follow `aws_<namespace>_<metric>_<statistic>`, with the CloudWatch name in snake case
 and one series per statistic: `_sum`, `_average`, `_minimum`, `_maximum`, `_sample_count`.
+A stream sends a percentile only for the metrics its `statistics_configuration` names.
+`terraform/modules/telemetry` names the load balancer's `TargetResponseTime` with its p99, which
+reaches Grafana once the bootstrap roots that use the module are applied.
 CloudWatch dimensions arrive as labels prefixed `dimension_`, and every series carries
 `account_id`, `region` and `namespace`.
 

@@ -161,8 +161,9 @@ is abandoned or decommissioned fails closed within days. 24 hours would strand a
 than a day and buys little, since revocation is immediate at any period. A month would keep a
 forgotten node's credential renewable long past the point anyone was watching it.
 
-The node's renewal timer runs hourly regardless, so the period is a tolerance for outages rather
-than a schedule.
+OpenBao on the node renews the token itself while it runs. The node's renewal timer covers the time
+OpenBao is not running: it renews daily, two minutes after boot and two minutes after the timer is
+enabled. So the period is a tolerance for outages rather than a schedule.
 
 ## Only the accessor is stored
 
@@ -170,12 +171,13 @@ than a schedule.
 plain String. An accessor cannot authenticate: it can look a token up and revoke it, which is
 exactly what retirement and reissue need. The token itself is stored nowhere in AWS.
 
-That makes minting the one operation in this repository that is deliberately not idempotent. A
-second run would leave two standing credentials for one node, so a region whose accessor is
-recorded and whose token still lives is refused unless the operator passes `--reissue`, which
-revokes the old token before minting the new one. A lookup that cannot answer at all stops the
-phase, because minting on an unanswered question is how a node ends up with the second credential
-the refusal exists to prevent.
+A second mint would leave two standing credentials for one node, so a region whose accessor is
+recorded and whose token still lives is skipped unless the operator passes
+`--reissue-unseal-token`, which mints a replacement and revokes the old token. Skipping keeps the mint script safe to re-run for
+an appliance that is already set up, which is how it hands over a backup key the region lacks
+([2026-11-appliance-backup-target.md](2026-11-appliance-backup-target.md#one-mint-for-both-credentials)).
+A lookup that cannot answer at all stops the phase, because minting on an unanswered question is
+how a node ends up with the second credential the skip exists to prevent.
 
 A mint writes the token first and the accessor second, so a Lambda that dies between the two leaves
 a token no parameter records, and the retry mints a second one. The window is accepted because the
@@ -224,7 +226,7 @@ loader.
 
 ## Operator scripts live here; the node's caller lives in infra-nodes
 
-`scripts/mint-appliance-token.sh` and `scripts/onboard-appliance.sh` both ship here, in
+`scripts/mint-appliance-credentials.sh` and `scripts/onboard-appliance.sh` both ship here, in
 `fund-payer.sh`'s shape: dry run, printed plan, typed confirmation, then the run that changes
 something. The steps an operator follows, and the delivery and compromise-handling rules around
 them, are in [docs/appliance-onboarding.md](../appliance-onboarding.md). Two scripts rather than one command with subcommands, because they take different inputs,

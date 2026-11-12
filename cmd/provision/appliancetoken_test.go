@@ -13,8 +13,9 @@ import (
 	"github.com/openbao/openbao/api/v2"
 )
 
-// Minting is the only operation in this project that is not idempotent, so what
-// it does when a region already has an accessor on record is worth pinning.
+// A second live token for one node is the state minting must never reach, so
+// what it does when a region already has an accessor on record is worth
+// pinning.
 func TestDecideTokenAction(t *testing.T) {
 	cases := []struct {
 		desc      string
@@ -34,7 +35,7 @@ func TestDecideTokenAction(t *testing.T) {
 		{
 			desc:      "the recorded token is live",
 			tokenLive: true,
-			want:      tokenActionRefuse,
+			want:      tokenActionSkip,
 		},
 		{
 			desc:      "the recorded token is live and reissue was asked for",
@@ -195,4 +196,52 @@ func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// the api client logs the URL on an error path.
 	resp.Request = req
 	return resp, nil
+}
+
+// The mint's dry run reports the transit key's versions so an operator can
+// confirm that every retained appliance snapshot still restores.
+func TestTransitKeyVersionsReadsBothVersions(t *testing.T) {
+	data := map[string]any{
+		"latest_version":         json.Number("3"),
+		"min_decryption_version": json.Number("2"),
+	}
+
+	latest, minDecryption, err := transitKeyVersions(data)
+	if err != nil || latest != 3 || minDecryption != 2 {
+		t.Errorf("transitKeyVersions = (%d, %d, %v), want (3, 2, nil)", latest, minDecryption, err)
+	}
+}
+
+func TestTransitKeyVersionsRejectsAnUnreadableField(t *testing.T) {
+	cases := []struct {
+		desc string
+		data map[string]any
+		want string
+	}{
+		{
+			desc: "latest_version is missing",
+			data: map[string]any{"min_decryption_version": json.Number("1")},
+			want: "latest_version is <nil>, not a number",
+		},
+		{
+			// A float64 is what a client without UseNumber would hand back.
+			desc: "min_decryption_version is not a json.Number",
+			data: map[string]any{"latest_version": json.Number("1"), "min_decryption_version": 1.0},
+			want: "min_decryption_version is 1, not a number",
+		},
+		{
+			desc: "min_decryption_version is not an integer",
+			data: map[string]any{"latest_version": json.Number("1"), "min_decryption_version": json.Number("1.5")},
+			want: "min_decryption_version is 1.5, not an integer",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.desc, func(t *testing.T) {
+			_, _, err := transitKeyVersions(c.data)
+			if err == nil || err.Error() != c.want {
+				t.Errorf("transitKeyVersions error = %v, want %q", err, c.want)
+			}
+		})
+	}
 }
