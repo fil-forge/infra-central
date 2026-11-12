@@ -150,6 +150,7 @@ on `stage` and `service` for that long.
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
+| Piri is not adding aggregates on chain               | Forge Regions            | Piri's metrics                | FIL-1578 |
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
 | Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
