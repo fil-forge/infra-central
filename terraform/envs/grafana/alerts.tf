@@ -118,11 +118,18 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The same filesystem filter the dashboards use. What wants watching is the
-  # control and data volumes, but their mountpoints differ between the EC2 nodes
-  # and the Servers.com host, so this covers every real filesystem instead --
-  # a superset, and one that needs no per-node edit.
-  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*\""
+  # The EC2 nodes' volume that holds only Ingot's cache and catalog log
+  # (infra-nodes terraform/modules/node, aws_ebs_volume.data). Ingot keeps it
+  # near its byte budget by design, so it gets its own, lower threshold.
+  ingot_volume_mountpoint = "/mnt/fil-one/data"
+
+  # The same filesystem filter the dashboards use, less Ingot's volume. What
+  # wants watching is the control and Piri volumes, but their mountpoints differ
+  # between the EC2 nodes and the Servers.com host, so this covers every real
+  # filesystem instead -- a superset, and one that needs no per-node edit.
+  filesystem_matcher = "${local.appliance_matcher}, fstype!~\"tmpfs|vfat|squashfs|overlay\", mountpoint!~\"/boot.*|${local.ingot_volume_mountpoint}\""
+
+  ingot_volume_matcher = "${local.appliance_matcher}, mountpoint=\"${local.ingot_volume_mountpoint}\""
 
   # Ingot's OTLP metrics. Alloy names them appliance-<stage>-<region>-ingot
   # from Ingot's service.name and stamps appliance, region and node on them,
@@ -287,6 +294,10 @@ locals {
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
   regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage=${local.appliance_stage_label}&var-region={{ $labels.region }}"
 
+  # Every Central rule links to its entry in infra-central's runbook, which is
+  # headed by the rule's name. Appliance rules link to infra-nodes' instead.
+  central_runbook = "https://github.com/fil-forge/infra-central/blob/main/docs/RUNBOOK.md"
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -309,6 +320,20 @@ resource "grafana_rule_group" "central" {
   # firing the hand-built rule had: this reads a CloudWatch metric published once
   # a minute with late and occasionally missing samples, so a single evaluation
   # is not evidence of anything.
+  #
+  # A service with no tasks at all has no registered targets, and CloudWatch then
+  # stops publishing HealthyHostCount for its target group instead of reporting
+  # 0. The series goes stale, its alert instance drops out, and no_data_state
+  # cannot help, because the other services' series keep the result non-empty.
+  # So the query's second half reads 0 for every stage and service seen in the
+  # last day but silent now. Found on 2026-11-10 by scaling fc-staging-swarf to
+  # 0 (FIL-1151): the rule stayed Normal with only the first half. With both,
+  # it fires about ten minutes after the last sample: five for the series to go
+  # stale and five for `for`. A service or stage removed or renamed on purpose
+  # alerts for up to a day, until it falls out of the lookback; silence it on
+  # its stage and service for that long. The second half also means
+  # no_data_state rarely applies now: if CloudWatch delivery stops everywhere,
+  # each stage and service alerts on its own rather than as one NoData alert.
   rule {
     name           = "Service has no healthy hosts"
     condition      = "B"
@@ -317,7 +342,8 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}, or its target group has stopped reporting"
+      runbook_url      = "${local.central_runbook}#service-has-no-healthy-hosts"
       dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
@@ -351,6 +377,16 @@ resource "grafana_rule_group" "central" {
             label_replace(
               label_replace(
                 aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}},
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          or
+          0 * group by (stage, service) (
+            label_replace(
+              label_replace(
+                last_over_time(aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}}[1d]),
                 "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
               ),
               "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
@@ -417,6 +453,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning more than 1 server error a minute"
       description      = "More than one 5xx per minute, averaged over five, for ten minutes."
+      runbook_url      = "${local.central_runbook}#service-5xx-errors"
       dashboard_url    = "${local.central_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-central"
       __panelId__      = "3"
@@ -547,6 +584,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
       description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana. The link opens the dashboard on this service alone, Overview included; drop var-service from its URL to see every service."
+      runbook_url      = "${local.central_runbook}#service-is-failing-most-requests"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
       __dashboardUid__ = "forge-central"
       __panelId__      = "13"
@@ -665,6 +703,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "{{ $labels.dimension_FunctionName }} returned errors in the last five minutes"
       description = "The provision Lambda is erroring. Its log group is /aws/lambda/{{ $labels.dimension_FunctionName }}; docs/observability.md says how to read it in Grafana."
+      runbook_url = "${local.central_runbook}#provision-lambda-errors"
     }
 
     labels = {
@@ -779,6 +818,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
       description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for about 20. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-tunnel-down"
     }
 
     labels = {
@@ -869,6 +909,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
       description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for about ten. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-both-tunnels-down"
     }
 
     labels = {
@@ -950,9 +991,11 @@ resource "grafana_rule_group" "central_latency" {
   # reading as a request hours long. Central serves no S3 object operations, so
   # there is nothing size-dependent to exclude.
   #
-  # The stream carries no percentiles, so this is a mean: the sum of response
-  # times over their count, which weighs each request equally where averaging
-  # the per-minute averages would weigh each minute equally. CloudWatch
+  # This is a mean: the sum of response times over their count, which weighs
+  # each request equally where averaging the per-minute averages would weigh
+  # each minute equally. A mean hides a slow tail, which is why
+  # modules/telemetry also streams the p99; its rule follows once that series
+  # is in Grafana and its name is known (FIL-1291). CloudWatch
   # publishes the metric only in minutes with requests, so an idle service has
   # no series and no_data_state is OK.
   rule {
@@ -965,6 +1008,7 @@ resource "grafana_rule_group" "central_latency" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
       description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      runbook_url      = "${local.central_runbook}#service-response-time-is-high"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
       __dashboardUid__ = "forge-central"
       __panelId__      = "8"
@@ -1460,13 +1504,13 @@ resource "grafana_rule_group" "appliance" {
   # Ingot's local blob storage stays over its own budget. The threshold is the
   # budget itself, local_blob_max_bytes, which each node sets; this rule chooses
   # no number. Ingot's sweeper evicts cached bodies every 30s to stay under it,
-  # so usage that stays over means what is left is bodies it may not evict:
-  # uploads in flight, or uploads that failed (fil-forge/ingot's README, "Local
-  # disk").
+  # so usage that stays over means what is left is what it may not evict:
+  # writes in progress, more of them than the budget holds (fil-forge/ingot's
+  # README, "Local disk").
   #
   # A node with no budget publishes 0, which `> 0` drops, so it produces no
   # series and no_data_state = OK keeps it quiet. for = 15m is chosen: a burst
-  # of uploads can hold the spool over budget for minutes without anything
+  # of writes can hold the cache over budget for minutes without anything
   # being wrong. An instant query, so no reduce stage.
   rule {
     name           = "Ingot local disk over budget"
@@ -1477,7 +1521,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
-      description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      description      = "Ingot's cache has held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: writes in progress, which together outgrow the budget."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=17"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "17"
@@ -1545,12 +1589,12 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
-  # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
-  # part's goes with its session), nor may they be deleted by hand (Ingot's
-  # README), so the figure rarely falls. Firing on any stalled byte would
-  # therefore fire for good after one failure. Growth is the signal instead:
-  # more stalled bytes now than an hour ago means uploads are still failing.
+  # upload has stalled -- intents still uploading an hour after their last state
+  # change. They hold no local disk, and the provider expires an allocation that
+  # is never concluded, but nothing clears the intent, so the figure rarely
+  # falls. Firing on any stalled byte would therefore fire for good after one
+  # failure. Growth is the signal instead: more stalled bytes now than an hour
+  # ago means uploads are still failing.
   #
   # The hour is Ingot's own cutoff, not a choice here; the window matches it so
   # one failure shows as growth for about an hour and then resolves. for = 0m
@@ -1566,7 +1610,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
+      description      = "Uploads that did not finish are piling up: the upload failed, or it reached the provider and recording that failed. They hold no local disk; Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
@@ -3449,6 +3493,190 @@ resource "grafana_rule_group" "appliance" {
           }]
         })
       }
+    }
+  }
+
+  # Ingot's volume on the EC2 nodes, left out of "Appliance free disk space
+  # below 40%". Its cache stays near the byte budget by design, so 40% free
+  # would fire for as long as Ingot runs; the budget is sized to stay under this
+  # line instead (infra-nodes docs/RUNBOOK.md). Same query shape, data source
+  # and silence on absent data as that rule.
+  rule {
+    name           = "Ingot volume free space below 10%"
+    condition      = "B"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "{{ $labels.appliance }} has less than 10% free on Ingot's volume"
+      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "8"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          min by (appliance, region, node, mountpoint) (
+            node_filesystem_avail_bytes{${local.ingot_volume_matcher}}
+            / node_filesystem_size_bytes{${local.ingot_volume_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # A proof set has an addPieces transaction that succeeded on chain more than
+  # 20 epochs ago whose pieces Curio, inside Piri, has still not recorded from
+  # the receipt. The value is epochs past that grace; the current epoch is the
+  # last head plus the wall-clock time since it, as in "proving is failing".
+  #
+  # Curio records an add on the next chain head. When it cannot read the
+  # receipt, as when its parser did not know PDPVerifier 3.5.0's
+  # PiecesAddedV2 event (FIL-1222), it retries on every head without
+  # reporting a failure. A new proof set is not scheduled for proving until its
+  # first add is recorded, so "proving period has not advanced" and "proving
+  # is failing", which both need a schedule, never fire for it.
+  #
+  # A warning: nothing is lost on chain while it holds, since a set that is
+  # not scheduled records no faults, but its pieces are not being proven. The
+  # likely cause is a contract upgrade Piri's Curio does not support, which
+  # needs a Piri release.
+  #
+  # `for` is 5m. no_data_state is OK: Piri reports the series only while an
+  # add is untracked.
+  rule {
+    name           = "Piri has untracked add pieces"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has a piece addition that succeeded on chain over 10 minutes ago and is still untracked"
+      description = "An addPieces transaction for this proof set succeeded on chain, but Curio, inside Piri, has not recorded its pieces from the receipt, and retries on every chain head without reporting a failure. A new proof set is not scheduled for proving until its first addition is recorded, and the added pieces are not proven. Check the Piri container's logs for \"failed to extract pieces from receipt\". The usual cause is a PDPVerifier upgrade that emits an event Piri's Curio cannot parse, which needs a Piri release. Act within a day."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-has-untracked-add-pieces"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            (
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
+              piri_pdp_proofset_untracked_add_pieces_confirmed_epoch{${local.piri_metric_matcher}}
+            )
+          )
+          - 20
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
     }
   }
 

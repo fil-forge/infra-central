@@ -53,6 +53,7 @@ locals {
       annotations = {
         summary          = "{{ $labels.service }} on {{ $labels.stage }} is above 80% of its CPU"
         description      = "Average CPU across the service's tasks has been above 80% of the task's reservation for fifteen minutes. Raise its cpu in the stage's apps sizes before requests start to slow."
+        runbook_url      = "${local.central_runbook}#central-service-cpu-high"
         dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=1"
         __dashboardUid__ = "forge-central"
         __panelId__      = "1"
@@ -80,6 +81,7 @@ locals {
       annotations = {
         summary          = "{{ $labels.service }} on {{ $labels.stage }} is above 85% of its memory"
         description      = "A task of this service has been above 85% of its memory reservation for fifteen minutes. A task that reaches 100% is killed. Raise its memory in the stage's apps sizes."
+        runbook_url      = "${local.central_runbook}#central-service-memory-high"
         dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=12"
         __dashboardUid__ = "forge-central"
         __panelId__      = "12"
@@ -106,6 +108,7 @@ locals {
       annotations = {
         summary     = "{{ $labels.instance }} on {{ $labels.stage }} is above 80% CPU"
         description = "The database instance has been above 80% CPU for fifteen minutes. Size up its instance class in the stage's platform root."
+        runbook_url = "${local.central_runbook}#central-database-cpu-high"
       }
       expr = <<-PROMQL
         max by (stage, instance) (

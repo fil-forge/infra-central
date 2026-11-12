@@ -197,3 +197,51 @@ func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp.Request = req
 	return resp, nil
 }
+
+// The mint's dry run reports the transit key's versions so an operator can
+// confirm that every retained appliance snapshot still restores.
+func TestTransitKeyVersionsReadsBothVersions(t *testing.T) {
+	data := map[string]any{
+		"latest_version":         json.Number("3"),
+		"min_decryption_version": json.Number("2"),
+	}
+
+	latest, minDecryption, err := transitKeyVersions(data)
+	if err != nil || latest != 3 || minDecryption != 2 {
+		t.Errorf("transitKeyVersions = (%d, %d, %v), want (3, 2, nil)", latest, minDecryption, err)
+	}
+}
+
+func TestTransitKeyVersionsRejectsAnUnreadableField(t *testing.T) {
+	cases := []struct {
+		desc string
+		data map[string]any
+		want string
+	}{
+		{
+			desc: "latest_version is missing",
+			data: map[string]any{"min_decryption_version": json.Number("1")},
+			want: "latest_version is <nil>, not a number",
+		},
+		{
+			// A float64 is what a client without UseNumber would hand back.
+			desc: "min_decryption_version is not a json.Number",
+			data: map[string]any{"latest_version": json.Number("1"), "min_decryption_version": 1.0},
+			want: "min_decryption_version is 1, not a number",
+		},
+		{
+			desc: "min_decryption_version is not an integer",
+			data: map[string]any{"latest_version": json.Number("1"), "min_decryption_version": json.Number("1.5")},
+			want: "min_decryption_version is 1.5, not an integer",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.desc, func(t *testing.T) {
+			_, _, err := transitKeyVersions(c.data)
+			if err == nil || err.Error() != c.want {
+				t.Errorf("transitKeyVersions error = %v, want %q", err, c.want)
+			}
+		})
+	}
+}
