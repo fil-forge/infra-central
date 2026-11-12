@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -93,6 +94,13 @@ type TokenPlan struct {
 	NodeCIDR  string `json:"node_cidr"`
 	Period    string `json:"period"`
 	WrapTTL   string `json:"wrap_ttl"`
+	// KeyLatestVersion and KeyMinDecryptionVersion are read off the region's
+	// transit key. The appliance's OpenBao snapshots carry a root key wrapped by
+	// whichever version was latest when the appliance was initialised, and a
+	// snapshot restores only while the key still decrypts that version. A
+	// minimum above 1 can leave every snapshot unrestorable.
+	KeyLatestVersion        int `json:"key_latest_version"`
+	KeyMinDecryptionVersion int `json:"key_min_decryption_version"`
 }
 
 // planApplianceToken reads the state a mint would change and decides what to do.
@@ -111,12 +119,19 @@ func (d *deps) planApplianceToken(ctx context.Context, client *api.Client, req R
 			name, req.Region)
 	}
 
+	latest, minDecryption, err := transitKeyVersions(key.Data)
+	if err != nil {
+		return nil, fmt.Errorf("transit key %s: %w", name, err)
+	}
+
 	plan := &TokenPlan{
-		Region:   req.Region,
-		Action:   tokenActionMint,
-		NodeCIDR: req.NodeCIDR,
-		Period:   valueOr(req.Period, defaultTokenPeriod),
-		WrapTTL:  valueOr(req.WrapTTL, defaultWrapTTL),
+		Region:                  req.Region,
+		Action:                  tokenActionMint,
+		NodeCIDR:                req.NodeCIDR,
+		Period:                  valueOr(req.Period, defaultTokenPeriod),
+		WrapTTL:                 valueOr(req.WrapTTL, defaultWrapTTL),
+		KeyLatestVersion:        latest,
+		KeyMinDecryptionVersion: minDecryption,
 	}
 
 	if err := validateTokenDurations(plan); err != nil {
@@ -141,6 +156,31 @@ func (d *deps) planApplianceToken(ctx context.Context, client *api.Client, req R
 	}
 	plan.Action = decideTokenAction(plan.TokenLive, req.Reissue)
 	return plan, nil
+}
+
+// transitKeyVersions reads latest_version and min_decryption_version from the
+// data of a transit key read. The OpenBao client decodes numbers as
+// json.Number, so that is the form accepted.
+func transitKeyVersions(data map[string]any) (latest, minDecryption int, err error) {
+	if latest, err = intField(data, "latest_version"); err != nil {
+		return 0, 0, err
+	}
+	if minDecryption, err = intField(data, "min_decryption_version"); err != nil {
+		return 0, 0, err
+	}
+	return latest, minDecryption, nil
+}
+
+func intField(data map[string]any, field string) (int, error) {
+	number, ok := data[field].(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("%s is %v, not a number", field, data[field])
+	}
+	value, err := number.Int64()
+	if err != nil {
+		return 0, fmt.Errorf("%s is %s, not an integer", field, number)
+	}
+	return int(value), nil
 }
 
 // validateTokenDurations refuses an unparseable period or wrap TTL while nothing
