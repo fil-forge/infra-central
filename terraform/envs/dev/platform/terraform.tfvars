@@ -43,7 +43,7 @@ chain = {
 # us-east-9 is the virtual S3 region label of the dev FilOne Appliance running
 # in us-east-2.
 appliance_regions         = ["us-east-9"]
-retired_appliance_regions = []
+retired_appliance_regions = ["drill-a", "drill-b", "drill-c"]
 
 # The appliances' egress addresses, the only sources the signing service admits,
 # since it signs with the payer key for whoever reaches it. Each key is a label
