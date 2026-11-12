@@ -3709,7 +3709,8 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Piri {{ $labels.instance }} has had aggregated blobs waiting over 10 minutes to be added on chain"
-      description      = "Blobs folded into an aggregate are not being added to the proof set, so they are not proven. Check the PDPAddRoots task's logs in the Piri container for the error it retries on, and Piri's chain RPC. If roots are still landing but this age keeps climbing, aggregates are folded faster than AddRoots sends them: raise pdp.aggregation.manager.batch_size."
+      description      = "Blobs folded into an aggregate are not being added to the proof set, so they are not proven. Check the PDPAddRoots task's logs in the Piri container for the error it retries on, and Piri's chain RPC. If roots are still landing but this age keeps climbing, aggregates are folded faster than AddRoots sends them. The runbook says how to tell the two apart and what to do."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-is-not-adding-aggregates-on-chain"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=37"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "37"
