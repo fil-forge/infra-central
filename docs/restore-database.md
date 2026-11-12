@@ -65,14 +65,26 @@ node, so choose a later T if one exists.
 An apply during the restore can start a service mid-swap or apply against stale state. Block merges
 to `main` with a temporary repository ruleset that restricts updates to the default branch and lets
 repository admins bypass it through a pull request. Then disable the workflows that apply, merge or
-push on their own, and wait until no run is in progress:
+push on their own:
 
 ```bash
 for wf in check-and-deploy promote auto-merge-dependabot bump-deployed-image refresh-bump-prs; do
   gh workflow disable $wf.yml --repo fil-forge/infra-central
 done
-gh run list --repo fil-forge/infra-central --status in_progress
 ```
+
+Disabling a workflow leaves the runs it has already created. `check-and-deploy.yml` queues a run
+behind the one in progress instead of cancelling it, so an apply can be waiting to start. List every
+run that has not completed, whatever its status:
+
+```bash
+gh run list --repo fil-forge/infra-central --limit 200 --json databaseId,workflowName,status \
+  --jq '.[] | select(.status != "completed") | "\(.databaseId) \(.workflowName) \(.status)"'
+```
+
+Cancel each run that has not started (`queued`, `requested`, `waiting`, `pending` or
+`action_required`) with `gh run cancel <id>`. Let a run that is `in_progress` finish, because
+cancelling an apply partway can leave resources and state disagreeing. Go on once the list is empty.
 
 One workflow applies all three stages, so the freeze holds dev and staging too.
 
