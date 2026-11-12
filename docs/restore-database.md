@@ -254,19 +254,23 @@ aws rds describe-db-clusters --db-cluster-identifier fc-prod \
 ```
 
 In step 3, restore the cluster under a temporary name, give it members with temporary names, and
-give it a managed master secret once it is available:
+give it a managed master secret once it is available. The member flags match what the `aurora`
+module sets; without them the apply in step 8 changes each member in place:
 
 ```bash
+key="$(aws kms describe-key --key-id alias/fc-prod-aurora --query KeyMetadata.Arn --output text)"
 aws rds restore-db-cluster-to-point-in-time \
   --source-db-cluster-identifier fc-prod --db-cluster-identifier fc-prod-restore-$TS \
-  --restore-to-time $T --kms-key-id alias/fc-prod-aurora \
-  --db-subnet-group-name <group> --vpc-security-group-ids <fc-prod-database> \
-  --db-cluster-parameter-group-name <group> --copy-tags-to-snapshot
+  --restore-to-time $T --kms-key-id "$key" \
+  --db-subnet-group-name fc-prod --vpc-security-group-ids <fc-prod-database> \
+  --db-cluster-parameter-group-name <group of fc-prod> --copy-tags-to-snapshot
 for n in 1 2; do
   aws rds create-db-instance --db-cluster-identifier fc-prod-restore-$TS \
     --db-instance-identifier fc-prod-restore-$TS-$n --engine aurora-postgresql \
     --db-instance-class db.r8g.large --availability-zone <zone of fc-prod-$n> \
-    --no-publicly-accessible
+    --no-publicly-accessible --no-auto-minor-version-upgrade --promotion-tier 0 \
+    --enable-performance-insights --performance-insights-retention-period 7 \
+    --tags Key=Name,Value=fc-prod-$n
 done
 aws rds modify-db-cluster --db-cluster-identifier fc-prod-restore-$TS \
   --manage-master-user-password --apply-immediately
@@ -293,7 +297,9 @@ done
 
 The cluster endpoint follows the cluster identifier, so the stored DSNs reach the restored cluster.
 
-In step 7, replace the cluster and every member in state:
+In step 7, Aurora differs from RDS: OpenTofu tracks the cluster and its members by name, so the
+state already points at the restored cluster after the swap and a plan against it changes the
+members in place. Replacing them in state as well keeps step 7 the same on every stage:
 
 ```bash
 tofu state rm 'module.platform.module.aurora[0].aws_rds_cluster.this' \
@@ -303,7 +309,15 @@ tofu import 'module.platform.module.aurora[0].aws_rds_cluster_instance.this[0]' 
 tofu import 'module.platform.module.aurora[0].aws_rds_cluster_instance.this[1]' fc-prod-2
 ```
 
-A rollback renames in the reverse order. This variant has not been rehearsed.
+A rollback renames in the reverse order, members first.
+
+This section was rehearsed on 2026-11-12 on a throwaway cluster built from the `aurora` module in
+dev's account, with two `db.r8g.large` members and no services or OpenBao on it. A row written
+before T was present on the restored cluster and a row written after T was absent, both endpoint
+hostnames were unchanged after the swap, and the plan after the import changed resources in place
+only. Restoring the cluster took 4 minutes, its members 9, and the managed secret 2. The six renames
+took 8 minutes and the apply 2. Renaming back took another 8 minutes and left a plan that changed
+the cluster in place only.
 
 ## Times measured on dev, 2026-11-11
 
