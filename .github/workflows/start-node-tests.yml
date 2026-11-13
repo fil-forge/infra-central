@@ -1,0 +1,72 @@
+# Asks infra-nodes to test the nodes of the stages this repository deployed,
+# by sending a central-deployed repository dispatch to it. infra-nodes'
+# test-nodes.yml then smoke-tests each node and runs an end-to-end test on it:
+# it creates a tenant through Hilt, stores two objects on the node and reads
+# them back, so it covers the write path through central that this
+# repository's smoke test does not.
+#
+# Check and deploy calls this once after a push to main, when its central
+# smoke tests (smoke-dev and smoke-staging) have finished, with every stage
+# whose central smoke test passed. The push therefore starts one run in
+# infra-nodes, and that run posts at most one alert, naming the commit passed
+# here. This job only fails when GitHub refuses the dispatch, and Check and
+# deploy's alert reports that.
+#
+# Promotion does not wait for the tests, which run in infra-nodes.
+name: Start node tests
+
+on:
+  workflow_call:
+    inputs:
+      stages:
+        description: Stages that were deployed, comma-separated, such as dev,staging
+        type: string
+        required: true
+    secrets:
+      FORGE_BOT_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start node tests on ${{ inputs.stages }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # GITHUB_TOKEN reaches only this repository. A repository_dispatch needs
+      # write access to the target's contents, and the fil-forge-bot app
+      # already has it on infra-nodes; the token is scoped to that alone.
+      - name: Mint fil-forge-bot token
+        id: bot
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          # GitHub accepts the numeric App ID wherever it asks for the client ID.
+          client-id: ${{ vars.FORGE_BOT_APP_ID }}
+          private-key: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+          owner: fil-forge
+          repositories: infra-nodes
+          permission-contents: write
+
+      # A repository_dispatch, rather than a workflow_dispatch, so the run in
+      # infra-nodes is labelled with the event that started it instead of as
+      # started by hand. It runs on infra-nodes' main, whose Environments hold
+      # the partner key. The change_* fields name this commit in its alert,
+      # and infra-nodes checks them and the sender before testing anything.
+      # Under workflow_call the event and the actor are the caller's push.
+      - name: Send central-deployed to infra-nodes
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          STAGES: ${{ inputs.stages }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          subject=${MESSAGE%%$'\n'*}
+          jq -n --arg stages "$STAGES" --arg sha "$COMMIT" --arg subject "$subject" --arg author "$ACTOR" '{
+            event_type: "central-deployed",
+            client_payload: {stages: $stages, change_sha: $sha, change_subject: $subject, change_author: $author}
+          }' | gh api --method POST repos/fil-forge/infra-nodes/dispatches --input -
+          echo "started the node tests of $STAGES in fil-forge/infra-nodes"

@@ -699,6 +699,32 @@ jobs:
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
+  # Ask infra-nodes to test the nodes of every stage whose central services
+  # passed smoke-<stage> on this commit. The node tests run in infra-nodes:
+  # a smoke test of each node, then an end-to-end test of the write path
+  # through Hilt, with an alert that names this commit. One dispatch for both
+  # stages, so a push starts one run there and gets at most one alert. It
+  # goes out once central's smoke-staging has finished too; central's deploys
+  # and smoke tests are quick, so dev's nodes wait only briefly. Prod stays
+  # out until FIL-1491 gives the test a credential that cannot reach customer
+  # tenants.
+  start-node-tests:
+    if: >-
+      !cancelled() && github.event_name == 'push'
+      && (needs.smoke-dev.result == 'success' || needs.smoke-staging.result == 'success')
+    needs: [smoke-dev, smoke-staging]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-node-tests.yml
+    with:
+      stages: >-
+        ${{ format('{0}{1}{2}',
+          needs.smoke-dev.result == 'success' && 'dev' || '',
+          needs.smoke-dev.result == 'success' && needs.smoke-staging.result == 'success' && ',' || '',
+          needs.smoke-staging.result == 'success' && 'staging' || '') }}
+    secrets:
+      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
@@ -797,6 +823,7 @@ jobs:
       - smoke-prod
       - promote-staging
       - promote-prod
+      - start-node-tests
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
@@ -810,8 +837,9 @@ jobs:
       # Names what failed, so the alert says whether prod is broken without a
       # click. The stage comes from the job name: apply-<stage>-<root> and
       # smoke-<stage> give the stage, apply-grafana gives grafana, and any other
-      # job stands for itself. Only "failure" counts; the jobs downstream of a
-      # failure are "skipped" and would bury the one that broke.
+      # job stands for itself. start-node-tests gives the stages it tested,
+      # which are those whose smoke job passed. Only "failure" counts; the jobs
+      # downstream of a failure are "skipped" and would bury the one that broke.
       #
       # Best-effort like the source lookup below: if this step breaks, the alert
       # still goes out without the stage and the job line.
@@ -827,8 +855,10 @@ jobs:
             exit 0
           fi
 
-          stages=$(jq -r '
-            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; ""))
+          stages=$(jq -r --argjson needs "$NEEDS" '
+            def node_test_stages: ["dev", "staging"][] | select($needs["smoke-" + .].result == "success");
+            map(if . == "start-node-tests" then node_test_stages
+                else sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; "") end)
             | unique | join(", ")' <<<"$failed")
           jobs=$(jq -r 'map("`\(.)`") | join(", ")' <<<"$failed")
           echo "stages=$stages" >> "$GITHUB_OUTPUT"
