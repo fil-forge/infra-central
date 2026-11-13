@@ -154,6 +154,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 
 # Documentation beyond this file
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
+docs/jump-host.md             the static-IP SSH jump host, and how to connect through it
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
 docs/decisions/               why a thing is the way it is, one file per subject
@@ -167,6 +168,7 @@ terraform/
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  applied on every push to main
+    jump-host/                                     static-IP SSH relay to appliances; applied by hand
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
