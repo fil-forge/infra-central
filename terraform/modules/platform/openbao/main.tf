@@ -63,6 +63,20 @@ locals {
       kms_key_id = "${var.kms_key_id}"
     }
 
+    # Who read or wrote which path, to the task's log group and on to Loki.
+    # OpenBao HMACs secret values in each entry. It takes audit devices only
+    # from this file and applies the stanza at every start, so an existing
+    # instance gains the device at its next deployment.
+    #
+    # OpenBao refuses every request while its only audit device cannot write,
+    # which is why the service's log driver below must never block.
+    audit "file" "stdout" {
+      description = "Every request and response, to the task log."
+      options {
+        file_path = "stdout"
+      }
+    }
+
     # Both the ALB and private DNS send requests to standbys as well as to the
     # active task, and a standby forwards each one to the active task's
     # cluster_addr. Left unset, OpenBao derives it from api_addr, which names
@@ -159,6 +173,10 @@ module "service" {
 
   log_forwarding = var.log_forwarding
 
+  # The audit device writes to stdout. A blocked stdout would stop OpenBao
+  # answering, so entries are dropped instead when CloudWatch falls behind.
+  log_non_blocking = true
+
   start_after = var.start_after
 
   task_policies = { "service-permissions" = data.aws_iam_policy_document.seal.json }
@@ -176,8 +194,8 @@ module "service" {
 
   # A target in a lost zone leaves the ALB's rotation after 20 seconds rather
   # than the default 90.
-  health_check_interval            = 10
-  health_check_unhealthy_threshold = 2
+  alb_health_check_interval            = 10
+  alb_health_check_unhealthy_threshold = 2
 
   cpu    = var.cpu
   memory = var.memory

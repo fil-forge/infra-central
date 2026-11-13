@@ -141,22 +141,44 @@ variable "health_check_path" {
   default     = "/health"
 }
 
-variable "health_check_interval" {
+variable "alb_health_check_interval" {
   description = "Seconds between ALB health checks."
   type        = number
   default     = 30
 }
 
-variable "health_check_unhealthy_threshold" {
+variable "alb_health_check_unhealthy_threshold" {
   description = "Consecutive failed ALB health checks before a target leaves rotation."
   type        = number
   default     = 3
 }
 
 variable "health_check_start_period" {
-  description = "Seconds before health checks count. The Postgres-backed services run goose migrations during this window."
+  description = "Seconds before health checks count. The Postgres-backed services run goose migrations during this window. The container health check uses at most 300, the ECS limit; raise health_check_retries and health_check_interval for a longer window."
   type        = number
   default     = 90
+}
+
+variable "health_check_interval" {
+  description = "Seconds between container health checks."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.health_check_interval >= 5 && var.health_check_interval <= 300
+    error_message = "ECS allows a health check interval of 5 to 300 seconds."
+  }
+}
+
+variable "health_check_retries" {
+  description = "Failed container health checks, health_check_interval apart, before ECS restarts the container. It sets how long a running container may fail its check, as well as how long a start may take beyond the 300-second start period."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.health_check_retries >= 1 && var.health_check_retries <= 10
+    error_message = "ECS allows 1 to 10 health check retries."
+  }
 }
 
 variable "hostname" {
@@ -279,6 +301,12 @@ variable "log_forwarding" {
     role_arn     = string
   })
   default = null
+}
+
+variable "log_non_blocking" {
+  description = "Buffer the container's output and drop lines when CloudWatch falls behind, rather than block the process on its own stdout. For a service that must keep answering even when its log cannot be written."
+  type        = bool
+  default     = false
 }
 
 variable "tmp_size_mib" {

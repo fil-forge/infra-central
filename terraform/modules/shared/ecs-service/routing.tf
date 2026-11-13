@@ -16,10 +16,10 @@ resource "aws_lb_target_group" "this" {
     # delegator and signing service, /_health for plc.
     path                = var.health_check_path
     matcher             = "200"
-    interval            = var.health_check_interval
+    interval            = var.alb_health_check_interval
     timeout             = 5
     healthy_threshold   = 2
-    unhealthy_threshold = var.health_check_unhealthy_threshold
+    unhealthy_threshold = var.alb_health_check_unhealthy_threshold
   }
 
   # Long enough to finish an in-flight request, short enough that a deploy does
