@@ -141,6 +141,18 @@ variable "health_check_path" {
   default     = "/health"
 }
 
+variable "alb_health_check_interval" {
+  description = "Seconds between ALB health checks."
+  type        = number
+  default     = 30
+}
+
+variable "alb_health_check_unhealthy_threshold" {
+  description = "Consecutive failed ALB health checks before a target leaves rotation."
+  type        = number
+  default     = 3
+}
+
 variable "health_check_start_period" {
   description = "Seconds before health checks count. The Postgres-backed services run goose migrations during this window. The container health check uses at most 300, the ECS limit; raise health_check_retries and health_check_interval for a longer window."
   type        = number
@@ -253,6 +265,12 @@ variable "desired_count" {
   description = "Above 1, concurrent starts race on the goose migration lock. Set the service's *_SKIP_MIGRATIONS before raising it."
   type        = number
   default     = 1
+}
+
+variable "availability_zone_rebalancing" {
+  description = "ENABLED moves tasks back across zones once a lost zone recovers. Null leaves the service's current setting, which is DISABLED for every service created before ECS made it the default."
+  type        = string
+  default     = null
 }
 
 variable "cpu" {

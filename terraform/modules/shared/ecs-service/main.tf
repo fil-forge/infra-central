@@ -174,6 +174,8 @@ resource "aws_ecs_service" "this" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
+  availability_zone_rebalancing = var.availability_zone_rebalancing
+
   # Migrations run in-process via goose for sprue, hilt, swarf and plc, and
   # concurrent starts race on the goose advisory lock. At desired_count 1 that
   # cannot happen; above it, set the service's *_SKIP_MIGRATIONS and run them
