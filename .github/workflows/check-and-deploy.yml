@@ -699,30 +699,27 @@ jobs:
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
-  # Start infra-nodes' end-to-end test once a stage has passed smoke on this
-  # commit: the test runs the write path through Hilt on that stage's nodes,
-  # and its alert names this commit. Two jobs for the same reason as the
-  # promotions above. Prod stays out until FIL-1491 gives the test a credential
-  # that cannot reach customer tenants.
-  start-e2e-dev:
-    if: github.event_name == 'push'
-    needs: smoke-dev
+  # Start infra-nodes' node tests on every stage that passed smoke on this
+  # commit: its end-to-end test runs the write path through Hilt on the
+  # stage's nodes, and its alert names this commit. One job for both stages,
+  # so a push starts one run there and gets at most one alert. It waits for
+  # smoke-staging, so dev's nodes are tested only once staging is done too.
+  # Prod stays out until FIL-1491 gives the test a credential that cannot
+  # reach customer tenants.
+  start-node-tests:
+    if: >-
+      !cancelled() && github.event_name == 'push'
+      && (needs.smoke-dev.result == 'success' || needs.smoke-staging.result == 'success')
+    needs: [smoke-dev, smoke-staging]
     permissions:
       contents: read
-    uses: ./.github/workflows/start-node-e2e.yml
+    uses: ./.github/workflows/start-node-tests.yml
     with:
-      stage: dev
-    secrets:
-      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
-
-  start-e2e-staging:
-    if: github.event_name == 'push'
-    needs: smoke-staging
-    permissions:
-      contents: read
-    uses: ./.github/workflows/start-node-e2e.yml
-    with:
-      stage: staging
+      stages: >-
+        ${{ format('{0}{1}{2}',
+          needs.smoke-dev.result == 'success' && 'dev' || '',
+          needs.smoke-dev.result == 'success' && needs.smoke-staging.result == 'success' && ',' || '',
+          needs.smoke-staging.result == 'success' && 'staging' || '') }}
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
@@ -824,8 +821,7 @@ jobs:
       - smoke-prod
       - promote-staging
       - promote-prod
-      - start-e2e-dev
-      - start-e2e-staging
+      - start-node-tests
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
@@ -837,10 +833,11 @@ jobs:
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
 
       # Names what failed, so the alert says whether prod is broken without a
-      # click. The stage comes from the job name: apply-<stage>-<root>,
-      # smoke-<stage> and start-e2e-<stage> give the stage, apply-grafana gives
-      # grafana, and any other job stands for itself. Only "failure" counts; the jobs downstream of a
-      # failure are "skipped" and would bury the one that broke.
+      # click. The stage comes from the job name: apply-<stage>-<root> and
+      # smoke-<stage> give the stage, apply-grafana gives grafana, and any other
+      # job stands for itself. start-node-tests gives the stages it tested,
+      # which are those whose smoke job passed. Only "failure" counts; the jobs
+      # downstream of a failure are "skipped" and would bury the one that broke.
       #
       # Best-effort like the source lookup below: if this step breaks, the alert
       # still goes out without the stage and the job line.
@@ -856,8 +853,10 @@ jobs:
             exit 0
           fi
 
-          stages=$(jq -r '
-            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; "") | sub("^start-e2e-"; ""))
+          stages=$(jq -r --argjson needs "$NEEDS" '
+            def node_test_stages: ["dev", "staging"][] | select($needs["smoke-" + .].result == "success");
+            map(if . == "start-node-tests" then node_test_stages
+                else sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; "") end)
             | unique | join(", ")' <<<"$failed")
           jobs=$(jq -r 'map("`\(.)`") | join(", ")' <<<"$failed")
           echo "stages=$stages" >> "$GITHUB_OUTPUT"
