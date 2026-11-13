@@ -699,6 +699,33 @@ jobs:
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
+  # Start infra-nodes' end-to-end test once a stage has passed smoke on this
+  # commit: the test runs the write path through Hilt on that stage's nodes,
+  # and its alert names this commit. Two jobs for the same reason as the
+  # promotions above. Prod stays out until FIL-1491 gives the test a credential
+  # that cannot reach customer tenants.
+  start-e2e-dev:
+    if: github.event_name == 'push'
+    needs: smoke-dev
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-node-e2e.yml
+    with:
+      stage: dev
+    secrets:
+      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
+  start-e2e-staging:
+    if: github.event_name == 'push'
+    needs: smoke-staging
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-node-e2e.yml
+    with:
+      stage: staging
+    secrets:
+      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
+
   # The stage's own logs, printed into the run when a deploy fails, so the
   # diagnosis is in the run the alert links to rather than in the console.
   # scripts/tail-logs.sh discovers the log groups from CloudWatch, so a service
@@ -797,6 +824,8 @@ jobs:
       - smoke-prod
       - promote-staging
       - promote-prod
+      - start-e2e-dev
+      - start-e2e-staging
       - apply-grafana
     runs-on: ubuntu-latest
     steps:
@@ -808,9 +837,9 @@ jobs:
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
 
       # Names what failed, so the alert says whether prod is broken without a
-      # click. The stage comes from the job name: apply-<stage>-<root> and
-      # smoke-<stage> give the stage, apply-grafana gives grafana, and any other
-      # job stands for itself. Only "failure" counts; the jobs downstream of a
+      # click. The stage comes from the job name: apply-<stage>-<root>,
+      # smoke-<stage> and start-e2e-<stage> give the stage, apply-grafana gives
+      # grafana, and any other job stands for itself. Only "failure" counts; the jobs downstream of a
       # failure are "skipped" and would bury the one that broke.
       #
       # Best-effort like the source lookup below: if this step breaks, the alert
@@ -828,7 +857,7 @@ jobs:
           fi
 
           stages=$(jq -r '
-            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; ""))
+            map(sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; "") | sub("^start-e2e-"; ""))
             | unique | join(", ")' <<<"$failed")
           jobs=$(jq -r 'map("`\(.)`") | join(", ")' <<<"$failed")
           echo "stages=$stages" >> "$GITHUB_OUTPUT"
