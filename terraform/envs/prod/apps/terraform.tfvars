@@ -9,15 +9,15 @@
 # conflicting. Each bump rewrites one line, and git conflicts on changes to
 # adjacent lines.
 image_digests = {
-  sprue = "sha256:79eb33d967f163fb7370ce4cacb757428f551466625e191ed774efa949327cb1"
+  sprue = "sha256:8e000ed3e7fb3a09d53c4ce35de943d454b0528678fcc6250679d5a1cc1f226c"
 
-  hilt = "sha256:5b6d022d3b0e9b3a1e1f9f4dca7e09d06e5a1eeefb5138c731ea1ea0682be366"
+  hilt = "sha256:88570ff1b9343a1a06967b0ee1161b01205446d0ad1d5c75f940914a6c2482f0"
 
-  swarf = "sha256:c3643127f22e47c9ea8f479287ffc1ef01e9d29d2fe9ebe5fc76488501803a74"
+  swarf = "sha256:65e5dec9dd669fde9018e23135c999882329031a8ac42f24c34350556d631f07"
 
-  delegator = "sha256:30b1757986ce213a8eecacbd7a463142a242b0f3932180796aad62c2f2ccc2fe"
+  delegator = "sha256:06ede396eb1ed1ab56ecafc4ae754443ddd6f259b161e22e20264dfca5c5d839"
 
-  signing_service = "sha256:b7ef5f0ea7e035c183d69ae90c98f30a4e04b944dfbf7ccbf27608e1b904e461"
+  signing_service = "sha256:4493534d96a4f7f202e58f8811b7258da7feda4d79e710473c903f99ace76a98"
 
   plc = "sha256:ebb12470f6fc50906c0ed867d009a056e131db1a994b45d7c3f1c8d2eb26dee9"
 }
