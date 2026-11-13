@@ -156,6 +156,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
+docs/restore-database.md      the runbook for restoring a stage's database to a point in time
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration
@@ -1149,7 +1150,6 @@ See the following Linear tickets:
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
 - [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) Hilt authenticates to OpenBao with AWS IAM auth
 - [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
-- [FIL-1149](https://linear.app/filecoin-foundation/issue/FIL-1149) Write and rehearse the RDS restore procedure
 - [FIL-1151](https://linear.app/filecoin-foundation/issue/FIL-1151) Grafana alarms for Forge Central services
 - [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Expose metrics from swarf, delegator and piri-signing-service
 - [FIL-1153](https://linear.app/filecoin-foundation/issue/FIL-1153) Write down the running cost of a Forge Central stage
