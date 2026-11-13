@@ -22,19 +22,7 @@ restore in step 3, and continue from there.
 ## What a restore takes back to T
 
 Everything inside the cluster returns to T. SSM, Secrets Manager, S3, DynamoDB, the chain, the
-appliances and FilOne stay as they are.
-
-| Component | After the restore | Repair |
-|---|---|---|
-| sprue, hilt, swarf and plc data | Providers, tenants, buckets, access keys, delegations, revocations and did:plc documents written after T are gone. Rows deleted after T are back. | Step 11 |
-| A transit key created after T | Gone. Transit keys cannot be exported, so its node can never unseal again once its OpenBao restarts. The next vault phase creates a new key under the same name without warning. | Stop at step 6 |
-| An unseal token minted after T | Gone, while SSM still records its accessor. A running node stays unsealed until its OpenBao restarts. | Re-mint in step 10 |
-| An unseal token revoked or reissued after T | Live again, and no record names it. | Revoke in step 10 |
-| An unseal token whose period ran out before the restore | Expired. | Re-mint in step 10 |
-| An unseal token minted before T and renewed since | Live. | None |
-| hilt's AppRole `secret_id`, if issued after T | Unknown to OpenBao, so hilt cannot log in. | Step 8 |
-| Postgres role passwords | As of T. | Step 8 |
-| The master password | As of T, with no managed secret. | Step 3 |
+appliances and FilOne stay as they are. Steps 6, 8, 10 and 11 repair the difference.
 
 Never restore to a time before OpenBao was initialised. The next vault phase would initialise it
 again and every transit key would be gone.
@@ -176,7 +164,9 @@ aws lambda invoke --function-name fc-prod-provision --cli-binary-format raw-in-b
   /dev/stdout
 ```
 
-`no transit key` for a live region means its node is lost at its next OpenBao restart. Run no vault
+`no transit key` for a live region means its key was created after T. Transit keys cannot be
+exported, and the next vault phase would create a new key under the same name without warning, so
+the node can never unseal again once its OpenBao restarts. Run no vault
 phase and no apply, and either [roll back](#rolling-back-the-restore) or restore again to a later T.
 `token_live: false` means the region needs a new token in step 10.
 
@@ -230,7 +220,8 @@ its new `secret_id`, when it starts.
 
 ## 10. Repair appliance tokens
 
-For a region whose token was issued after T (`token_live: false`), mint a new one and deliver it as
+A node whose token was minted after T, or whose token's period ran out, stays unsealed until its
+OpenBao restarts. For each such region (`token_live: false`), mint a new token and deliver it as
 [appliance-onboarding.md](appliance-onboarding.md) describes:
 
 ```bash
