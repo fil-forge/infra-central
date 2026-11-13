@@ -167,7 +167,7 @@ variable "openbao_image" {
 }
 
 variable "openbao_max_parallel" {
-  description = "Postgres connections OpenBao may open. Budget against the RDS instance's or the Aurora writer's max_connections alongside the application services."
+  description = "Postgres connections each of the three OpenBao tasks may open. Budget three times this against the RDS instance's or the Aurora writer's max_connections alongside the application services."
   type        = number
   default     = 16
 }
@@ -175,6 +175,12 @@ variable "openbao_max_parallel" {
 variable "container_insights" {
   type    = bool
   default = false
+}
+
+variable "backup_replica_region" {
+  description = "Region the seed phase replicates every identity and wallet secret to, normally module.constants.dr_region. Null keeps no replicas."
+  type        = string
+  default     = null
 }
 
 variable "seed_trigger" {
