@@ -150,10 +150,10 @@ resource "aws_ecs_task_definition" "this" {
         # ECS restarts an unhealthy container without waiting for the ALB to
         # drain it, which matters most for the services with no ALB route.
         # ECS caps startPeriod at 300 seconds; a longer start window comes
-        # from health_check_retries.
+        # from health_check_retries and health_check_interval.
         healthCheck = {
           command     = ["CMD-SHELL", "${var.health_check_command} || exit 1"]
-          interval    = 30
+          interval    = var.health_check_interval
           timeout     = 5
           retries     = var.health_check_retries
           startPeriod = min(var.health_check_start_period, 300)

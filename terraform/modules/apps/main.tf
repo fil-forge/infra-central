@@ -296,13 +296,14 @@ module "swarf" {
   health_check_path    = "/health"
 
   # Swarf runs its migrations before /health answers, and 00002_seq.sql
-  # rewrites the whole revocation table, which takes minutes on staging. A
-  # 10-minute start window: the ALB ignores the first 600 seconds, and the
-  # container check fails after a 300-second start period plus ten checks 30
-  # seconds apart. Swarf's own start timeout is 8 minutes, inside this window.
+  # rewrites the whole revocation table, which takes minutes on staging. Swarf
+  # gives its start 10 minutes; this is a 12.5-minute window around it. The
+  # ALB ignores the first 750 seconds, and the container check fails after a
+  # 300-second start period (the ECS maximum) plus ten checks 45 seconds apart.
   # The cost is a running container that fails its check is restarted after
-  # five minutes rather than 90 seconds, unless the ALB check replaces it first.
-  health_check_start_period = 600
+  # 7.5 minutes rather than 90 seconds, unless the ALB check replaces it first.
+  health_check_start_period = 750
+  health_check_interval     = 45
   health_check_retries      = 10
 
   hostname          = local.host.swarf
