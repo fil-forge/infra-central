@@ -141,9 +141,9 @@ func EnsureInitialised(ctx context.Context, client *api.Client) (InitResult, err
 // EnsureMounts brings up hilt's KV v2 engine and the transit engine. The client
 // must carry a root or equivalently privileged token.
 //
-// No audit device is enabled: OpenBao 2.x rejects audit devices created over
-// the API and takes them only from the server config file. See the audit
-// follow-up in README.md.
+// The audit device is not enabled here: OpenBao 2.x rejects audit devices
+// created over the API and takes them only from the server config file, which
+// terraform/modules/platform/openbao renders.
 func EnsureMounts(ctx context.Context, client *api.Client) error {
 	mounts, err := client.Sys().ListMountsWithContext(ctx)
 	if err != nil {
