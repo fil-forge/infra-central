@@ -1,11 +1,14 @@
-# Starts infra-nodes' node tests on the stages this repository deployed. Among
-# them, the end-to-end test creates a tenant through Hilt, stores two objects
-# on each node and reads them back, so it covers the write path through
-# central that the smoke test here does not.
+# Asks infra-nodes to test the nodes of the stages this repository deployed,
+# by sending a central-deployed repository dispatch to it. infra-nodes'
+# test-nodes.yml then smoke-tests each node and runs an end-to-end test on it:
+# it creates a tenant through Hilt, stores two objects on the node and reads
+# them back, so it covers the write path through central that this
+# repository's smoke test does not.
 #
-# Check and deploy calls this once after a push to main, with every stage that
-# passed its smoke test on the commit, so the push starts one run in
-# infra-nodes and that run posts at most one alert, naming the commit passed
+# Check and deploy calls this once after a push to main, when its central
+# smoke tests (smoke-dev and smoke-staging) have finished, with every stage
+# whose central smoke test passed. The push therefore starts one run in
+# infra-nodes, and that run posts at most one alert, naming the commit passed
 # here. This job only fails when GitHub refuses the dispatch, and Check and
 # deploy's alert reports that.
 #

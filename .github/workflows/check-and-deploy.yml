@@ -699,13 +699,15 @@ jobs:
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
-  # Start infra-nodes' node tests on every stage that passed smoke on this
-  # commit: its end-to-end test runs the write path through Hilt on the
-  # stage's nodes, and its alert names this commit. One job for both stages,
-  # so a push starts one run there and gets at most one alert. It waits for
-  # smoke-staging, so dev's nodes are tested only once staging is done too.
-  # Prod stays out until FIL-1491 gives the test a credential that cannot
-  # reach customer tenants.
+  # Ask infra-nodes to test the nodes of every stage whose central services
+  # passed smoke-<stage> on this commit. The node tests run in infra-nodes:
+  # a smoke test of each node, then an end-to-end test of the write path
+  # through Hilt, with an alert that names this commit. One dispatch for both
+  # stages, so a push starts one run there and gets at most one alert. It
+  # goes out once central's smoke-staging has finished too; central's deploys
+  # and smoke tests are quick, so dev's nodes wait only briefly. Prod stays
+  # out until FIL-1491 gives the test a credential that cannot reach customer
+  # tenants.
   start-node-tests:
     if: >-
       !cancelled() && github.event_name == 'push'

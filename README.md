@@ -464,10 +464,11 @@ or listener rule in front of it can take a moment longer. The smoke checks need
 no credentials because every request goes over public HTTPS. See
 [Smoke-testing a stage](#smoke-testing-a-stage).
 
-Once `smoke-dev` and `smoke-staging` have finished, `start-node-tests` starts
-infra-nodes' node tests (`test-nodes.yml` there) on every stage that passed,
-through `.github/workflows/start-node-tests.yml`. Their end-to-end test creates a
-tenant through Hilt and stores and reads back objects on each node, so it covers
+Once `smoke-dev` and `smoke-staging` have finished, `start-node-tests` asks
+infra-nodes to test the nodes of every stage whose central smoke test passed,
+through `.github/workflows/start-node-tests.yml`. The node tests run there, in
+`test-nodes.yml`: a smoke test of each node, then an end-to-end test that creates
+a tenant through Hilt and stores and reads back objects on the node, so it covers
 the write path through central that `make smoke` does not. One push starts one
 run there, which alerts from infra-nodes at most once, naming this repository's
 commit; nothing here waits for it. The job sends a `central-deployed`
