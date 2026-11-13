@@ -45,6 +45,10 @@ type Request struct {
 	// re-invocation by changing the input, which is how aws_lambda_invocation
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
+	// ImageDigest is ignored too. Terraform sends it with the vault phase so a
+	// new provision image re-invokes the phase, which is how a mount the new
+	// code adds reaches a stage that already exists.
+	ImageDigest string `json:"image_digest,omitempty"`
 
 	// --- vault phase only ---
 
@@ -108,13 +112,22 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token, appliance-backup-key, onboard, retire and
-	// reset-apps phases ---
+	// --- fund, appliance-token, appliance-backup-key, appliance-root-store,
+	// onboard, retire and reset-apps phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
 	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
+
+	// --- appliance-root-store phase only ---
+
+	// RootToken and RecoveryKey are what an appliance's OpenBao printed at
+	// init. They are secret: the phase stores them and never logs or returns
+	// them, and scripts/store-appliance-root-credentials.sh keeps them off
+	// every command line.
+	RootToken   string `json:"root_token,omitempty"`
+	RecoveryKey string `json:"recovery_key,omitempty"`
 
 	// --- fund phase only ---
 
@@ -180,6 +193,11 @@ type Response struct {
 	BackupKeyPlan   *BackupKeyPlan   `json:"backup_key_plan,omitempty"`
 	BackupKeyResult *BackupKeyResult `json:"backup_key_result,omitempty"`
 
+	// RootCredentialsPlan and RootCredentialsResult belong to the
+	// appliance-root-store phase, and carry only a region and version numbers.
+	RootCredentialsPlan   *RootCredentialsPlan   `json:"root_credentials_plan,omitempty"`
+	RootCredentialsResult *RootCredentialsResult `json:"root_credentials_result,omitempty"`
+
 	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
 	// public: the result's proof is a delegation, which is useless without the
 	// audience's own key.
@@ -241,6 +259,8 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.applianceToken(ctx, req)
 	case "appliance-backup-key":
 		return deps.applianceBackupKey(ctx, req)
+	case "appliance-root-store":
+		return deps.applianceRootStore(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
 	case "retire":
@@ -249,7 +269,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
 }
 
