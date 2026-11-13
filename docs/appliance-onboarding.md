@@ -156,6 +156,9 @@ That deletes the old key first, so the node's uploads fail until it stores the n
 `provision-backups.sh --replace`. The two flags are independent, so replacing one credential never
 rotates the other.
 
+A leaked backup key could have put forged objects in front of the region's backups. Before
+restoring any of them, follow [restore-appliance-backups.md](restore-appliance-backups.md).
+
 No flag is needed when the recorded unseal token has simply lapsed, which is the ordinary state of a
 node that has been offline longer than the 72-hour renewal period. The script reports that and
 mints.
