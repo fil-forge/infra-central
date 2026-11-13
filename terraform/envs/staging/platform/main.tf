@@ -70,6 +70,11 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
+variable "signer_allowed_sources" {
+  description = "The appliances' egress addresses the signing service admits, in terraform.tfvars beside appliance_regions. See docs/appliance-onboarding.md."
+  type        = map(string)
+}
+
 # Seeded from the digest already deployed to dev. Promote a Lambda build to
 # staging by copying dev's provision_image_digest after it is healthy there.
 variable "provision_image_digest" {
@@ -94,6 +99,7 @@ module "platform" {
 
   appliance_regions         = var.appliance_regions
   retired_appliance_regions = var.retired_appliance_regions
+  signer_allowed_sources    = var.signer_allowed_sources
 
   # Each backup is locked for 35 days in compliance mode, which is what RFC 37
   # asks of the appliance backup target.

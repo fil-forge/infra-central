@@ -21,6 +21,7 @@ and, in staging and prod, the wrapped backup key, then the S3 delegation that co
 | Commit the region label       | this repo   | nothing                                    |
 | Allocate the node's public IP | infra-nodes | nothing                                    |
 | Mint the credentials          | this repo   | that IP                                    |
+| Admit it at the signer        | this repo   | that IP                                    |
 | Deliver the wrapping tokens   | a person    | the node operator                          |
 | Boot the node, generate keys  | infra-nodes | the wrapping tokens                        |
 | Register the node             | this repo   | the node's Piri DID, its URL and its proof |
@@ -217,6 +218,26 @@ It creates a temporary second key on the region's user, tries every allowed and 
 reads back the lock and lifecycle configuration, and deletes the key. Each run leaves a few small
 locked objects under `<region>/check/` that expire after 36 days.
 
+## Admitting the node to the signing service
+
+The signing service signs with the stage's payer key for whoever reaches it, so its route at
+`signer.<hostname suffix>` admits only the addresses in `signer_allowed_sources`, in the same
+`terraform.tfvars` as `appliance_regions`. Add the node's egress address under its region label, the
+same address its unseal token is bound to, and merge:
+
+```hcl
+signer_allowed_sources = {
+  us-east-9 = "203.0.113.7"
+}
+```
+
+Any other address gets a `403` from the load balancer saying the host does not accept requests from
+it, so a Piri that fails to sign with that error is calling from an address not listed here. The map
+takes only labels in `appliance_regions`, and up to 27 distinct addresses, the most the service's
+listener priorities hold. `null` admits any source, which no stage uses, and an empty map gives the
+service no public route. Between committing the region label and adding its address, every plan of the
+stage's platform root warns that the signing service admits no address for that region.
+
 ## Registering the node
 
 Run this once the appliance has provisioned its keys, so its Piri DID exists. It needs the proof the
@@ -360,6 +381,9 @@ appliance_regions         = []
 retired_appliance_regions = ["us-east-9"]
 ```
 
+Remove the region's entry from `signer_allowed_sources` in the same commit; the apply refuses an
+address whose label is no longer in `appliance_regions`.
+
 In staging and prod, remove `<stage>-<region>` from `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
 Metrics cannot tell a retired appliance from a dead one, since both stop reporting, so that list is
@@ -389,6 +413,9 @@ node was retired.
 The apply takes effect at the node's next unseal. Transit unseal happens at boot, so an appliance
 that is already running holds its key in memory and keeps serving traffic until it restarts, which
 an operator you are retiring against has no reason to do.
+
+Its access to the signing service is the exception: removing its address from
+`signer_allowed_sources` takes effect when the apps root applies, without waiting for a restart.
 
 Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last. None of the
 three has tooling for it yet, so every step is manual:
