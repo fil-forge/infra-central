@@ -58,6 +58,20 @@ locals {
       kms_key_id = "${var.kms_key_id}"
     }
 
+    # Who read or wrote which path, to the task's log group and on to Loki.
+    # OpenBao HMACs secret values in each entry. It takes audit devices only
+    # from this file and applies the stanza at every start, so an existing
+    # instance gains the device at its next deployment.
+    #
+    # OpenBao refuses every request while its only audit device cannot write,
+    # which is why the service's log driver below must never block.
+    audit "file" "stdout" {
+      description = "Every request and response, to the task log."
+      options {
+        file_path = "stdout"
+      }
+    }
+
     api_addr      = "https://${var.hostname}"
     disable_mlock = true
     ui            = ${var.enable_ui}
@@ -131,6 +145,10 @@ module "service" {
   namespace_name    = var.namespace_name
 
   log_forwarding = var.log_forwarding
+
+  # The audit device writes to stdout. A blocked stdout would stop OpenBao
+  # answering, so entries are dropped instead when CloudWatch falls behind.
+  log_non_blocking = true
 
   start_after = var.start_after
 
