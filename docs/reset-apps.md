@@ -6,7 +6,9 @@ appliances: a node rebuilt from scratch, a node moving from one Piri to several,
 or test data that is no longer worth keeping. Production refuses it, in the
 script and again in the provision Lambda.
 
-Every app service in the stage is down while it runs.
+Every app service in the stage is down until the stores are wiped. The purge of
+sprue's `agent-message` bucket, which can take many minutes, runs last, with the
+services back up.
 
 ## What survives
 
@@ -31,8 +33,9 @@ Every app service in the stage is down while it runs.
   mount.
 - Every item in the delegator's allow list and provider-info tables. The tables
   stay, so staging's deletion protection does not get in the way.
-- Every object version in sprue's `agent-message` and `delegation` buckets.
-  This is not reversible, versioning included.
+- Every object version in sprue's `agent-message` and `delegation` buckets
+  written before the services were scaled to zero. This is not reversible,
+  versioning included.
 - Every Piri DID recorded under `appliance/<region>/piri/`, in any region.
 
 Each Piri whose data is wiped on the node leaves its data set on chain faulting,
@@ -67,11 +70,31 @@ make reset-apps STAGE=dev
 
 The script prints what the Lambda would wipe and asks for `reset-dev` before it
 changes anything. It then scales sprue, hilt, swarf, plc and the delegator to
-zero, runs the `reset-apps` phase, empties the tables, buckets and Piri records,
-and scales the services back up. signing-service and OpenBao keep running.
+zero, runs the `reset-apps` phase, empties the tables, the `delegation` bucket
+and the Piri records, and scales the services back up. signing-service and
+OpenBao keep running.
 
-A run that fails partway says so and can be repeated from the start. Until it
-completes, the app services may be at zero.
+Last, with the stage up, it purges the `agent-message` bucket. On staging that
+bucket held over 300,000 versions, and DeleteObjects takes 1,000 per call.
+sprue writes every UCAN request and response it handles to this bucket and
+reads them back only through the index in its database, which the reset
+dropped. The old versions are unreachable, so the next steps can start while
+the purge runs. It deletes only versions written before the services were
+scaled to zero and keeps everything sprue writes after it restarts.
+
+A run that fails before the purge says so and can be repeated from the start.
+Until then the app services may be at zero.
+
+A run interrupted during the purge, with Ctrl-C or by an error, leaves a working
+stage and prints the time it started from. Do not rerun the whole reset, which
+drops the databases again and loses any onboarding done since. Finish the purge
+with that time:
+
+```bash
+make reset-apps STAGE=dev RESET_ARGS='--purge-agent-messages-before 2026-11-13T09:41:07Z'
+```
+
+Leaving the old versions in place costs only storage.
 
 ### 3. Bring the node back
 
