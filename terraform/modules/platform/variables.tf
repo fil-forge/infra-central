@@ -215,7 +215,7 @@ variable "appliance_backups" {
 }
 
 variable "vault_trigger" {
-  description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole. A new provision image re-runs it without this."
+  description = "Change to force the vault phase to run again, for example after rotating hilt's AppRole."
   type        = string
   default     = "1"
 }

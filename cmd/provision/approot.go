@@ -33,6 +33,12 @@ func (d *deps) applianceRootStore(ctx context.Context, req Request) (*Response, 
 		return nil, err
 	}
 
+	// A stage set up before this mount existed has not run the vault phase
+	// since, so the phase that uses the mount creates it.
+	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
+		return nil, err
+	}
+
 	plan, err := planRootCredentials(ctx, client, req.Region)
 	if err != nil {
 		return nil, err
