@@ -263,7 +263,7 @@ grant added in the same apply takes a few seconds to propagate; each retry logs 
 `replication denied` warning, and a denial that outlasts the five minutes fails the apply as above:
 
 ```logql
-{aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
+{aws_log_group=~"/aws/lambda/fc-(staging|prod)-provision"} |= "replica"
 ```
 
 OpenBao's audit log, one JSON entry per request and one per response, in the same group as its
