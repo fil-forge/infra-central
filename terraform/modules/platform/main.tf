@@ -279,7 +279,9 @@ resource "aws_lambda_invocation" "seed" {
   #
   # module.provision is here for its role policy. function_name depends only on
   # the function, so without it an apply that adds a grant and a phase that
-  # needs it could invoke the phase first and fail with AccessDenied.
+  # needs it could invoke the phase first and fail with AccessDenied. Ordering
+  # alone does not cover IAM propagation, so the function also retries a denied
+  # replication for up to a minute.
   depends_on = [module.database, module.aurora, module.pandora_db, module.provision]
 
   # The function echoes the region it replicated to. An image built before
