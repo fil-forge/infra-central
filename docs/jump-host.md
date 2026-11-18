@@ -27,16 +27,9 @@ allowlisted again.
 ## Applying it
 
 No workflow plans or applies this root. Apply it from a laptop with credentials for the prod
-account. It needs two values, which are easiest to keep in a `jump-host.auto.tfvars` beside
-`main.tf`. The repository ignores that file name.
-
-```hcl
-ssh_public_keys = [
-  "ssh-ed25519 AAAA... alice@laptop",
-  "ssh-ed25519 AAAA... bob@laptop",
-]
-destination_cidrs = ["203.0.113.10/32"] # the appliance's public address
-```
+account. Its two values, the operators' public keys and the appliance addresses, are committed in
+`terraform/envs/jump-host/terraform.tfvars`. To add or remove a key, change that file in a pull
+request and apply once it merges.
 
 ```sh
 cd terraform/envs/jump-host
@@ -49,7 +42,7 @@ tofu output -raw known_hosts; echo   # give this line to every operator
 Give each key a comment naming its owner. sshd logs every login with the fingerprint of the key
 used and its line in the key file, and logs each refused connection to an address it was not
 given. It does not log the connections it allows. To match a fingerprint to an owner, run
-`ssh-keygen -lf` on the tfvars keys.
+`ssh-keygen -lf` on the keys in `terraform.tfvars`.
 
 ## Connecting
 
@@ -98,7 +91,7 @@ The keys, the destinations and the sshd settings are all written at first boot, 
 `ssh_public_keys`, `destination_cidrs` or `destination_port` replaces the instance. The new
 instance keeps the Elastic IP and the host key, so operators change nothing and see the jump host
 gone for a minute or two. The plan shows the instance's user data as a sensitive value, because it
-carries the host key; check the key list in the tfvars file rather than in the plan.
+carries the host key; check the key list in `terraform.tfvars` rather than in the plan.
 
 Replacing the instance also discards its sshd log. Before removing a key that may have leaked,
 save what it did with `sudo journalctl -t sshd -t sshd-session` through Session Manager.
