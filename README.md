@@ -464,6 +464,18 @@ or listener rule in front of it can take a moment longer. The smoke checks need
 no credentials because every request goes over public HTTPS. See
 [Smoke-testing a stage](#smoke-testing-a-stage).
 
+Once `smoke-dev` and `smoke-staging` have finished, `start-node-tests` asks
+infra-nodes to test the nodes of every stage whose central smoke test passed,
+through `.github/workflows/start-node-tests.yml`. The node tests run there, in
+`test-nodes.yml`: a smoke test of each node, then an end-to-end test that creates
+a tenant through Hilt and stores and reads back objects on the node, so it covers
+the write path through central that `make smoke` does not. One push starts one
+run there, which alerts from infra-nodes at most once, naming this repository's
+commit; nothing here waits for it. The job sends a `central-deployed`
+repository dispatch with a fil-forge-bot token scoped to infra-nodes with
+Contents write, a permission the App already has. Prod is not tested until the
+test has a credential that cannot reach customer tenants.
+
 When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
 tail of every log group the stage owns into the run, so the diagnosis is where
 the failure is. The groups are discovered from CloudWatch, so a service added to
@@ -473,7 +485,8 @@ needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
 A failed run on `main` posts to `#filone-alerts` in Slack with the stage that
 failed, the failed jobs, the commit subject, its author and a link to the run.
 The stage comes from the job name: `apply-<stage>-<root>` and `smoke-<stage>`
-name a stage, `apply-grafana` reports as `grafana`, and `check` as itself.
+name a stage, `start-node-tests` reports the stages it started tests on,
+`apply-grafana` reports as `grafana`, and `check` as itself.
 When the commit is an image bump, one more line names the service commit that
 produced the image and who wrote it, looked up from the source commit link Bump
 deployed image puts in the commit body. A lookup that fails drops the line and
@@ -1149,7 +1162,6 @@ See the following Linear tickets:
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
 - [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) Hilt authenticates to OpenBao with AWS IAM auth
 - [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
-- [FIL-1157](https://linear.app/filecoin-foundation/issue/FIL-1157) Decide the OpenBao availability target for Forge Central
 - [FIL-1149](https://linear.app/filecoin-foundation/issue/FIL-1149) Write and rehearse the RDS restore procedure
 - [FIL-1151](https://linear.app/filecoin-foundation/issue/FIL-1151) Grafana alarms for Forge Central services
 - [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Expose metrics from swarf, delegator and piri-signing-service
