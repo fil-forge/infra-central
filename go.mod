@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/iam v1.65.0
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.51.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.82.1
+	github.com/aws/smithy-go v1.28.9
 	github.com/ethereum/go-ethereum v1.17.10
 	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
 	github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595
@@ -41,7 +42,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.39.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.52.0 // indirect
-	github.com/aws/smithy-go v1.28.9 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

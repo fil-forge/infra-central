@@ -258,7 +258,9 @@ The provision Lambda, which uses the AWS-defined log group format:
 A key the seed phase could not replicate to the DR region, or whose replica did not reach InSync
 within two minutes, fails the stage's platform apply, and the workflow's `notify-failure` job
 reports the failed job in Slack. The error names the key and, for a failed replica, the reason
-Secrets Manager gave:
+Secrets Manager gave. A replication denied by IAM is retried for up to five minutes, shared by all the keys, because a
+grant added in the same apply takes a few seconds to propagate; each retry logs a
+`replication denied` warning, and a denial that outlasts the five minutes fails the apply as above:
 
 ```logql
 {aws_log_group="/aws/lambda/fc-staging-provision"} |= "replica"
