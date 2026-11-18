@@ -54,6 +54,10 @@ jobs:
       # started by hand. It runs on infra-nodes' main, whose Environments hold
       # the partner key. The change_* fields name this commit in its alert,
       # and infra-nodes checks them and the sender before testing anything.
+      # change_title is the run's title in infra-nodes: the subject with its
+      # pull request number qualified as infra-central#N, because a bare #N
+      # reads as an infra-nodes pull request there. A subject without one
+      # gets the short sha instead.
       # Under workflow_call the event and the actor are the caller's push.
       - name: Send central-deployed to infra-nodes
         env:
@@ -65,8 +69,13 @@ jobs:
         run: |
           set -euo pipefail
           subject=${MESSAGE%%$'\n'*}
-          jq -n --arg stages "$STAGES" --arg sha "$COMMIT" --arg subject "$subject" --arg author "$ACTOR" '{
+          if [[ "$subject" =~ ^(.*)\ \(#([0-9]+)\)$ ]]; then
+            title="${BASH_REMATCH[1]} (infra-central#${BASH_REMATCH[2]})"
+          else
+            title="$subject (infra-central@${COMMIT:0:7})"
+          fi
+          jq -n --arg stages "$STAGES" --arg sha "$COMMIT" --arg subject "$subject" --arg title "$title" --arg author "$ACTOR" '{
             event_type: "central-deployed",
-            client_payload: {stages: $stages, change_sha: $sha, change_subject: $subject, change_author: $author}
+            client_payload: {stages: $stages, change_sha: $sha, change_subject: $subject, change_title: $title, change_author: $author}
           }' | gh api --method POST repos/fil-forge/infra-nodes/dispatches --input -
           echo "started the node tests of $STAGES in fil-forge/infra-nodes"
