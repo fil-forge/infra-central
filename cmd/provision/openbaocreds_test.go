@@ -60,24 +60,22 @@ func TestEnsureOpenBaoCredentials(t *testing.T) {
 			secrets: map[string]string{},
 			ssm:     map[string]string{},
 			wantResult: credentialsOutcome{
-				RootToken:    fakeRootToken,
-				ARNs:         bothARNs,
-				DeleteLegacy: true,
-				Secrets:      map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
-				SSM:          map[string]string{},
+				RootToken: fakeRootToken,
+				ARNs:      bothARNs,
+				Secrets:   map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:       map[string]string{},
 			},
 		},
 		{
-			name:    "fresh initialisation overwrites stale secrets and marks stale SSM copies",
+			name:    "fresh initialisation overwrites stale secrets and deletes stale SSM copies at once",
 			init:    freshInit,
 			secrets: map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
 			ssm:     map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
 			wantResult: credentialsOutcome{
-				RootToken:    fakeRootToken,
-				ARNs:         bothARNs,
-				DeleteLegacy: true,
-				Secrets:      map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
-				SSM:          map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
+				RootToken: fakeRootToken,
+				ARNs:      bothARNs,
+				Secrets:   map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:       map[string]string{},
 			},
 		},
 		{
@@ -331,5 +329,25 @@ func TestOpenBaoRootToken(t *testing.T) {
 				t.Errorf("openBaoRootToken() = %+v, want %+v (err = %v)", got, want, err)
 			}
 		})
+	}
+}
+
+func TestEnsureOpenBaoCredentialsRerunAfterAFailedFreshInitialisationSucceeds(t *testing.T) {
+	keys := &fakeKeys{values: map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey}}
+	legacy := &fakeLegacy{
+		secrets: map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
+		public:  map[string]string{},
+	}
+	if _, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, freshInit); err != nil {
+		t.Fatalf("fresh initialisation error = %v", err)
+	}
+
+	// The phase failed after storing; OpenBao now reports itself initialised.
+	creds, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, vaultinit.InitResult{})
+
+	got := credentialsOutcome{Failed: err != nil, RootToken: creds.rootToken, ARNs: creds.arns, DeleteLegacy: creds.deleteLegacy}
+	want := credentialsOutcome{RootToken: fakeRootToken, ARNs: bothARNs}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rerun outcome = %+v, want %+v (err = %v)", got, want, err)
 	}
 }

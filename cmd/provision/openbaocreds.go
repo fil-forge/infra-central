@@ -45,10 +45,11 @@ type openBaoCredentials struct {
 // When this invocation initialised OpenBao, the new values overwrite whatever
 // Secrets Manager holds: secrets survive a stage destroy, and a stored value
 // from an OpenBao whose storage was rebuilt no longer opens anything. Any SSM
-// copy belongs to that dead OpenBao too, and is marked for deletion.
+// copy belongs to that dead OpenBao too, and is deleted straight away.
 //
 // When OpenBao was already initialised, each credential is moved out of SSM
-// on its own, so a run that stopped between the two finishes the move.
+// on its own, so a run that stopped between the two finishes the move. The
+// SSM copies are left for the caller to delete once the phase has succeeded.
 //
 // No value reaches a log line or an error message.
 func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy legacyStore, init vaultinit.InitResult) (openBaoCredentials, error) {
@@ -72,8 +73,14 @@ func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy 
 			}
 			creds.arns[name] = secret.ARN
 		}
+		// Any SSM copy opens nothing now. It goes at once rather than at the end
+		// of the phase: if a later step failed with it still there, the next
+		// run would find OpenBao initialised, see two copies that differ, and
+		// refuse to continue.
+		if _, err := legacy.Delete(ctx, openBaoService, openBaoCredentialNames...); err != nil {
+			return openBaoCredentials{}, err
+		}
 		creds.rootToken = init.RootToken
-		creds.deleteLegacy = true
 		return creds, nil
 	}
 

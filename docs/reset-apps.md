@@ -164,8 +164,9 @@ again, each region needs a new unseal token, and hilt's AppRole is reissued.
 
 3. Merge the trigger bump. `apply-dev-platform` recreates the instance, runs
    seed, waits for OpenBao and runs vault, which overwrites the root token and
-   recovery keys in Secrets Manager with the new OpenBao's. If it fails on "waiting for openbao to
-   serve", force a new OpenBao deployment and rerun the job:
+   recovery keys in Secrets Manager with the new OpenBao's. If it fails on
+   "waiting for openbao to serve", force a new OpenBao deployment and rerun the
+   job:
 
    ```bash
    aws ecs update-service --cluster fc-dev --service fc-dev-openbao --force-new-deployment
