@@ -36,8 +36,10 @@ data "aws_iam_policy_document" "execution_secrets" {
     resources = [local.ssm_prefix_arn]
   }
 
-  # Identity and wallet keys, which the provision Lambda keeps in Secrets
-  # Manager.
+  # Identity and wallet keys, and OpenBao's root token and recovery keys,
+  # which the provision Lambda keeps in Secrets Manager. The openbao
+  # service's own execution role can read the last two, as it could while
+  # they were SSM parameters under its prefix.
   statement {
     sid       = "ReadOwnKeys"
     actions   = ["secretsmanager:GetSecretValue"]

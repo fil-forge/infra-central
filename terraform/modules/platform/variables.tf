@@ -178,7 +178,7 @@ variable "container_insights" {
 }
 
 variable "backup_replica_region" {
-  description = "Region the seed phase replicates every identity and wallet secret to, normally module.constants.dr_region. Null keeps no replicas."
+  description = "Region the seed phase replicates every identity and wallet secret to, and the vault phase replicates OpenBao's root token and recovery keys to, normally module.constants.dr_region. Null keeps no replicas."
   type        = string
   default     = null
 }

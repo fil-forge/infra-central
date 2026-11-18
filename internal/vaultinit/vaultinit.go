@@ -11,8 +11,10 @@ package vaultinit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/openbao/openbao/api/v2"
@@ -46,7 +48,7 @@ func ApplianceKeyName(region string) string {
 }
 
 // InitResult reports what initialisation produced. Both fields are secret and
-// belong in SSM immediately; neither is returned to Terraform.
+// belong in Secrets Manager immediately; neither is returned to Terraform.
 type InitResult struct {
 	RootToken    string
 	RecoveryKeys []string
@@ -226,6 +228,29 @@ func SecretIDValid(ctx context.Context, client *api.Client, secretID string) boo
 	path := fmt.Sprintf("auth/%s/role/%s/secret-id/lookup", appRoleAuthMount, hiltAppRoleName)
 	resp, err := client.Logical().WriteWithContext(ctx, path, map[string]any{"secret_id": secretID})
 	return err == nil && resp != nil
+}
+
+// TokenValid reports whether OpenBao accepts a token. A token issued by an
+// OpenBao whose storage has since been rebuilt is refused with 403, which is
+// reported as false; any other failure is an error, so an unreachable server
+// is never mistaken for a dead token.
+func TokenValid(ctx context.Context, client *api.Client, token string) (bool, error) {
+	probe, err := client.Clone()
+	if err != nil {
+		return false, fmt.Errorf("clone openbao client: %w", err)
+	}
+	probe.SetToken(token)
+
+	_, err = probe.Auth().Token().LookupSelfWithContext(ctx)
+	var respErr *api.ResponseError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &respErr) && respErr.StatusCode == http.StatusForbidden:
+		return false, nil
+	default:
+		return false, fmt.Errorf("look up a token: %w", err)
+	}
 }
 
 // IssueSecretID mints a new secret_id for hilt's AppRole.

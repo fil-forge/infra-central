@@ -120,7 +120,7 @@ variable "allow_list_table_arn" {
 }
 
 variable "backup_replica_region" {
-  description = "Region the seed phase replicates the key secrets to. Null keeps no replicas, and the role gets no grant in any other region."
+  description = "Region the seed and vault phases replicate the key secrets and OpenBao's credentials to. Null keeps no replicas, and the role gets no grant in any other region."
   type        = string
   default     = null
 
