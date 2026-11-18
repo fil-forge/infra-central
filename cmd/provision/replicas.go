@@ -41,11 +41,9 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 	resp.BackupReplicaRegion = region
 
 	order := replicationOrder(resp.Secrets)
+	retry := grantRetry{interval: grantRetryInterval, deadline: time.Now().Add(grantRetryBudget)}
 	for _, key := range order {
-		added, err := ensureReplicaOnceGranted(ctx, keys, resp.Secrets[key.service][key.name], region, grantRetry{
-			interval: grantRetryInterval,
-			budget:   grantRetryBudget,
-		})
+		added, err := ensureReplicaOnceGranted(ctx, keys, resp.Secrets[key.service][key.name], region, retry)
 		if err != nil {
 			return fmt.Errorf("replicate %s/%s: %w", key.service, key.name, err)
 		}
@@ -67,9 +65,11 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 // The apply that sets a replica region adds the ReplicateStageKeys grant and
 // invokes the seed seconds later. IAM is eventually consistent, so the first
 // calls can still be denied: staging's first such apply was denied 7.6 s after
-// the grant was written, and a re-run passed. A denial is retried for up to
-// grantRetryBudget per key. A grant that is really missing still fails the
-// apply, about a minute later than it would without the retry.
+// the grant was written, and a re-run passed. Denials are retried until
+// grantRetryBudget after the first key, shared by all the keys so the retries
+// and replicaWait stay well inside the Lambda's ten minutes. A grant that is
+// really missing still fails the apply, about a minute later than it would
+// without the retry.
 const (
 	grantRetryInterval = 5 * time.Second
 	grantRetryBudget   = 60 * time.Second
@@ -77,22 +77,21 @@ const (
 
 type grantRetry struct {
 	interval time.Duration
-	budget   time.Duration
+	deadline time.Time
 }
 
 // ensureReplicaOnceGranted calls EnsureReplica and retries it while the call
-// is denied, until retry.budget runs out. Any other error is returned at once.
-// Every key is retried on its own: IAM propagates per host, so one call can
-// pass and the next be denied.
+// is denied, until retry.deadline. Any other error is returned at once. Every
+// key is retried on its own, because IAM propagates per host and one call can
+// pass while the next is denied, but all keys share the one deadline.
 func ensureReplicaOnceGranted(ctx context.Context, keys replicator, secretARN, region string, retry grantRetry) (bool, error) {
-	deadline := time.Now().Add(retry.budget)
 	for attempt := 1; ; attempt++ {
 		added, err := keys.EnsureReplica(ctx, secretARN, region)
 		if err == nil || !isAccessDenied(err) {
 			return added, err
 		}
-		if time.Now().Add(retry.interval).After(deadline) {
-			return false, fmt.Errorf("still denied after %d attempts over %s: %w", attempt, retry.budget, err)
+		if time.Now().Add(retry.interval).After(retry.deadline) {
+			return false, fmt.Errorf("still denied after %d attempts, and the %s retry budget for all keys is spent: %w", attempt, grantRetryBudget, err)
 		}
 
 		slog.Warn("replication denied, retrying while the grant propagates",
