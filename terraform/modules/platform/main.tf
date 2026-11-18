@@ -345,13 +345,28 @@ resource "aws_lambda_invocation" "vault" {
   function_name = module.provision.function_name
 
   # The region lists are part of the input, so committing a label is what
-  # re-invokes the phase to reconcile the keys against it.
-  input = jsonencode({
+  # re-invokes the phase to reconcile the keys against it. The replica region
+  # is here for the same reason as in seed: setting it re-invokes the phase,
+  # which replicates OpenBao's root token and recovery keys. It joins the input
+  # only when set, so a stage that keeps no replicas sees an unchanged input.
+  input = jsonencode(merge({
     phase                     = "vault"
     trigger                   = var.vault_trigger
     appliance_regions         = var.appliance_regions
     retired_appliance_regions = var.retired_appliance_regions
-  })
+    }, var.backup_replica_region == null ? {} : {
+    backup_replica_region = var.backup_replica_region
+  }))
 
   depends_on = [module.openbao]
+
+  # An image built before OpenBao's credentials moved to Secrets Manager
+  # ignores the setting and echoes nothing; without this the apply would
+  # succeed with the root token and recovery keys still only in this region.
+  lifecycle {
+    postcondition {
+      condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
+      error_message = "The vault phase did not replicate OpenBao's credentials to ${coalesce(var.backup_replica_region, "-")}. The provision image predates that: publish a newer one, then bump vault_trigger."
+    }
+  }
 }
