@@ -48,6 +48,11 @@ variable "sites" {
   }
 }
 
+variable "engine_version" {
+  description = "Aurora PostgreSQL minor release, such as 18.6. Independent of the stage's own cluster. The parameter group's name carries the major version, and the aurora module performs no major upgrade, so a new major means dropping this cluster and creating it again (docs/pandora-vpn.md)."
+  type        = string
+}
+
 variable "instance_count" {
   description = "1 is a writer alone; 2 adds a reader in another zone."
   type        = number

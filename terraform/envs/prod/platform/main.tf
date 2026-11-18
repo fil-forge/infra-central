@@ -128,6 +128,7 @@ module "platform" {
   # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
   # arithmetic and the costs.
   db_engine         = "aurora"
+  db_engine_version = "16.15"
   db_instance_class = "db.r8g.large"
   db_instance_count = 2
   pitr_window_days  = 35
@@ -143,10 +144,14 @@ module "platform" {
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
   # the VPN; docs/pandora-vpn.md has the steps.
   #
-  # Null for one apply: the cluster is dropped so that it can come back on
-  # PostgreSQL 18 as a new cluster, which the next change restores with the same
-  # settings. Its data is test data and is not kept.
-  pandora_db = null
+  # It holds the pack ledger for the import service, and runs PostgreSQL 18
+  # while the stage's own cluster stays on 16.
+  pandora_db = {
+    engine_version        = "18.6"
+    instance_count        = 1
+    backup_retention_days = 1
+    protect               = false
+  }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
   # about 140 of them with OpenBao's 24 per task, 72 across its three, included.

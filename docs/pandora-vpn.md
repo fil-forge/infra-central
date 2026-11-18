@@ -88,7 +88,7 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 | `pandora_admin` | the estate loader only; owns the database | `/forge-central/<stage>/pandora-admin/postgres-dsn` |
 | `pandora_storage_server` | the server's daemons | `/forge-central/<stage>/pandora-storage-server/postgres-dsn` |
 | `locker` | the server's stats lock tool | `/forge-central/<stage>/locker/postgres-dsn` |
-| `pandora_migration` | the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
+| `pandora_migration` | the import service, the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
 
 `pandora_storage_server` has a 15-second `statement_timeout` and a 30-second
 `idle_in_transaction_session_timeout`. `pandora_migration` has no statement
@@ -188,11 +188,38 @@ ssh root@23.83.66.244 rm -rf /run/pandora-vpn-check
 
 A reboot also clears the secrets.
 
+## The cluster's PostgreSQL version
+
+The cluster runs Aurora PostgreSQL 18, set by `pandora_db.engine_version` in the stage's platform
+root, apart from the stage's own cluster, which stays on 16. Today it holds the pack ledger that the
+import service on the appliance writes as `pandora_migration`.
+
+A new minor release is a one-line change to `engine_version`, applied in place. A new major version
+is not, because the cluster's parameter group is named for its major version and the `aurora` module
+performs no major upgrade. The cluster holds test data, so it is dropped and created again, in two
+pull requests that each get their own apply:
+
+1. Set `pandora_db = null` and merge. CI deletes the cluster as in
+   [Dropping the cluster](#dropping-the-cluster). The seed phase runs again with no pandora host and
+   leaves the stored passwords and DSNs in SSM.
+2. Restore `pandora_db` with the new `engine_version` and merge. CI creates the cluster. Its
+   endpoint name follows the cluster's identifier, so the host is expected to stay the same. The seed
+   phase runs again because its pandora host input changes, and creates the `pandora` database and
+   its roles with the passwords already in SSM, so `seed_trigger` stays as it is. If the seed phase
+   does not run, bump `seed_trigger`.
+
+Merging both in one apply fails: the cluster would need a major upgrade, and the old parameter
+group would be destroyed while the cluster still uses it. Once the cluster is back, compare each
+stored DSN's host with the one installed on the appliance, and reinstall any that differ. The
+ledger's schema and grants come back only when `pandora_admin` applies them again from the
+server's own files.
+
 ## Dropping the cluster
 
 To drop the Aurora cluster instead of performing a data reset, set `pandora_db = null` in the
 stage's platform root and merge. CI deletes the cluster, with no final snapshot when `protect` is
-off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
+off, along with its subnets, security group and parameter group. The VPN stays, with its tunnel
+addresses and keys.
 
 Removing the VPN as well means deleting the stage's sites from `pandora_sites`, in the same
 pull request or a later one. New tunnels later get new addresses and keys. Removing prod's last

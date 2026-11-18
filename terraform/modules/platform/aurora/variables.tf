@@ -33,9 +33,8 @@ variable "kms_key_arn" {
 }
 
 variable "engine_version" {
-  description = "Aurora PostgreSQL release, pinned to a minor version. 16 matches the RDS instances in dev and staging."
+  description = "Aurora PostgreSQL release, pinned to a minor version and set by each caller for its own cluster. The parameter group's name carries the major version. A major change on a live cluster is not supported here: it would need allow_major_version_upgrade and a parameter group created before the old one is destroyed, so a cluster whose data may go is dropped and created again instead."
   type        = string
-  default     = "16.15"
 
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+$", var.engine_version))

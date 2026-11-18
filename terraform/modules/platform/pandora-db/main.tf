@@ -89,6 +89,7 @@ module "aurora" {
   security_group_id = aws_security_group.this.id
   kms_key_arn       = var.kms_key_arn
 
+  engine_version        = var.engine_version
   instance_count        = var.instance_count
   backup_retention_days = var.backup_retention_days
   deletion_protection   = var.protect

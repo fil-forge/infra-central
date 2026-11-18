@@ -67,6 +67,7 @@ module "database" {
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.database_security_group_id
 
+  engine_version        = var.db_engine_version
   instance_class        = var.db_instance_class
   allocated_storage     = var.db_allocated_storage
   multi_az              = var.db_multi_az
@@ -91,6 +92,7 @@ module "aurora" {
   security_group_id = module.network.database_security_group_id
   kms_key_arn       = var.db_kms_key_arn
 
+  engine_version        = var.db_engine_version
   instance_class        = var.db_instance_class
   instance_count        = var.db_instance_count
   backup_retention_days = var.pitr_window_days
@@ -129,6 +131,7 @@ module "pandora_db" {
   kms_key_arn              = var.db_kms_key_arn
   sites                    = local.pandora_sites
 
+  engine_version        = var.pandora_db.engine_version
   instance_count        = var.pandora_db.instance_count
   backup_retention_days = var.pandora_db.backup_retention_days
   protect               = var.pandora_db.protect
