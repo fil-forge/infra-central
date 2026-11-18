@@ -116,6 +116,9 @@ module "platform" {
   # services' connection pools.
   openbao_max_parallel = 16
 
+  # Keep a replica of every identity and wallet key in the DR region.
+  backup_replica_region = module.constants.dr_region
+
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
   # hostname migration must explicitly replace them. Bumped again to move the

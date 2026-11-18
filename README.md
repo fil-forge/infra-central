@@ -982,9 +982,10 @@ leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
 A stage that sets `backup_replica_region` in its platform root, normally to
 `module.constants.dr_region`, keeps a replica of every identity and wallet key
-there. It must differ from the stage's own region, or the plan fails. No stage
-sets it yet. Pin a provision image built with replication before setting it: an
-older image ignores the setting, and the seed invocation then fails the apply.
+there. It must differ from the stage's own region, or the plan fails. Staging
+sets it; dev and prod keep no replicas. Pin a provision image built with
+replication before setting it: an older image ignores the setting, and the seed
+invocation then fails the apply.
 
 Each seed run adds any replica that is missing, so a key minted before
 replication existed gets one on the next run, and a run that finds every
