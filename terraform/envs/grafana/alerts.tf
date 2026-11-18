@@ -3788,6 +3788,206 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # A backup appliance's last Postgres base backup is over 26 hours old. Same
+  # shape as "Appliance OpenBao snapshot is stale", on the stamp infra-nodes
+  # scripts/host/backup-postgres.sh writes after each upload, with the same
+  # threshold for the same reason: the timer is daily with up to 30 minutes of
+  # random delay. The WAL archive restores only on top of a base backup, so a
+  # missing one leaves nothing a restore can start from.
+  #
+  # The second half of the query, as in the snapshot rule, makes an appliance
+  # that reconciles but reports no stamp read as 1e10 seconds stale. An
+  # appliance reports none until it runs the Debian Postgres image with
+  # archiving on, so this rule fires for each backup appliance until then:
+  # apply it after they all take base backups.
+  #
+  # A warning, for the reason the snapshot rule gives: the node keeps serving,
+  # and what is at risk is a restore if it is lost.
+  #
+  # Appended after the group's last rule, so that adding it moved no other
+  # rule's uid.
+  dynamic "rule" {
+    for_each = length(local.backup_appliances) > 0 ? [1] : []
+
+    content {
+      name           = "Appliance Postgres base backup is stale"
+      condition      = "B"
+      for            = "10m"
+      no_data_state  = "Alerting"
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded a Postgres base backup for over 26 hours"
+        description = "The appliance's last Postgres base backup in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. The WAL archive restores only on top of a base backup. An age of centuries means the appliance reconciles but reports no base backup stamp: it does not run the Debian Postgres image with archiving on yet, or the code that writes the stamp is broken. With no data at all, no appliance in a backup stage is reporting. Otherwise, on the host, `journalctl -u filone-postgres-backup.service` says why the last run failed."
+        runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      }
+
+      labels = {
+        team_name = "forge"
+        component = "appliance"
+        stage     = local.appliance_stage_label
+        severity  = "warning"
+      }
+
+      notification_settings {
+        policy = local.forge_policy
+      }
+
+      data {
+        ref_id         = "A"
+        datasource_uid = var.prometheus_datasource_uid
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        model = jsonencode(merge(local.query_defaults, {
+          refId        = "A"
+          instant      = true
+          range        = false
+          legendFormat = "{{appliance}}"
+          expr         = <<-PROMQL
+              max by (node, region, appliance) (
+                time() - postgres_basebackup_last_success_timestamp{${local.backup_appliance_matcher}}
+              )
+              or
+              max by (node, region, appliance) (
+                deploy_last_success_timestamp{project="reconcile", ${local.backup_appliance_matcher}}
+              ) * 0 + 1e10
+            PROMQL
+        }))
+      }
+
+      data {
+        ref_id         = "B"
+        query_type     = "expression"
+        datasource_uid = "__expr__"
+
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+
+        model = jsonencode({
+          refId         = "B"
+          type          = "threshold"
+          expression    = "A"
+          datasource    = { type = "__expr__", uid = "__expr__" }
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            type      = "query"
+            operator  = { type = "and" }
+            query     = { params = ["B"] }
+            reducer   = { type = "last", params = [] }
+            evaluator = { type = "gt", params = [93600] }
+          }]
+        })
+      }
+    }
+  }
+
+  # A backup appliance's Postgres has WAL segments waiting to be archived, and
+  # its last attempt to archive one failed within the last 15 minutes. Postgres
+  # keeps every segment it cannot archive and retries, so nothing is lost yet,
+  # but pg_wal grows on the control volume until archiving works again, and a
+  # restore from the archive would stop at the last segment that made it.
+  #
+  # Both series come from infra-nodes scripts/host/lib/walg.sh, which every
+  # reconcile pass writes from pg_stat_archiver. A backlog alone is normal for
+  # a moment between segments; a recent failure alone, once retried, is not
+  # worth a page. Both together, for 15 minutes, means retries are failing. A
+  # quiet database cuts no segments, so the age of the last archived one is no
+  # signal on its own, and is not used.
+  #
+  # no_data_state is OK: no data is no backlog with a recent failure, which
+  # includes an appliance that does not archive yet. The base backup rule above
+  # is the one that notices an appliance reporting nothing.
+  #
+  # A warning: the node keeps serving.
+  dynamic "rule" {
+    for_each = length(local.backup_appliances) > 0 ? [1] : []
+
+    content {
+      name           = "Appliance Postgres WAL archive is failing"
+      condition      = "B"
+      for            = "15m"
+      no_data_state  = "OK"
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has {{ $values.A.Value }} Postgres WAL segments waiting, and archiving them keeps failing"
+        description = "WAL-G cannot upload the appliance's WAL segments to the backup bucket. Postgres keeps them and retries, so nothing is lost yet, but pg_wal grows on the control volume until archiving works, and a restore would stop at the last segment that made it. `docker logs filone-platform-postgres-1` has WAL-G's error for each attempt."
+        runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+      }
+
+      labels = {
+        team_name = "forge"
+        component = "appliance"
+        stage     = local.appliance_stage_label
+        severity  = "warning"
+      }
+
+      notification_settings {
+        policy = local.forge_policy
+      }
+
+      data {
+        ref_id         = "A"
+        datasource_uid = var.prometheus_datasource_uid
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        model = jsonencode(merge(local.query_defaults, {
+          refId        = "A"
+          instant      = true
+          range        = false
+          legendFormat = "{{appliance}}"
+          expr         = <<-PROMQL
+              max by (node, region, appliance) (
+                postgres_wal_archive_pending{${local.backup_appliance_matcher}}
+              )
+              and on (node, region, appliance)
+              max by (node, region, appliance) (
+                time() - postgres_wal_last_failed_timestamp{${local.backup_appliance_matcher}}
+              ) < 900
+            PROMQL
+        }))
+      }
+
+      data {
+        ref_id         = "B"
+        query_type     = "expression"
+        datasource_uid = "__expr__"
+
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+
+        model = jsonencode({
+          refId         = "B"
+          type          = "threshold"
+          expression    = "A"
+          datasource    = { type = "__expr__", uid = "__expr__" }
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            type      = "query"
+            operator  = { type = "and" }
+            query     = { params = ["B"] }
+            reducer   = { type = "last", params = [] }
+            evaluator = { type = "gt", params = [0] }
+          }]
+        })
+      }
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
