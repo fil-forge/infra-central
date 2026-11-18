@@ -66,13 +66,13 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 // invokes the seed seconds later. IAM is eventually consistent, so the first
 // calls can still be denied: staging's first such apply was denied 7.6 s after
 // the grant was written, and a re-run passed. Denials are retried until
-// grantRetryBudget after the first key, shared by all the keys so the retries
-// and replicaWait stay well inside the Lambda's ten minutes. A grant that is
-// really missing still fails the apply, about a minute later than it would
-// without the retry.
+// grantRetryBudget after the first key, shared by all the keys. A seed without
+// denials takes seconds, so the budget plus replicaWait leaves about three
+// minutes of the Lambda's ten. A grant that is really missing still fails the
+// apply, five minutes later than it would without the retry.
 const (
 	grantRetryInterval = 5 * time.Second
-	grantRetryBudget   = 60 * time.Second
+	grantRetryBudget   = 5 * time.Minute
 )
 
 type grantRetry struct {

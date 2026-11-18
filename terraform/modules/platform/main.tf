@@ -281,7 +281,7 @@ resource "aws_lambda_invocation" "seed" {
   # the function, so without it an apply that adds a grant and a phase that
   # needs it could invoke the phase first and fail with AccessDenied. Ordering
   # alone does not cover IAM propagation, so the function also retries a denied
-  # replication for up to a minute in total.
+  # replication for up to five minutes in total.
   depends_on = [module.database, module.aurora, module.pandora_db, module.provision]
 
   # The function echoes the region it replicated to. An image built before
