@@ -162,6 +162,10 @@ module "platform" {
   # that takes a flood before the load balancer does. Dev has neither need.
   enable_global_accelerator = true
 
+  # Keep a replica of every identity and wallet key in the DR region. The
+  # pinned provision image must include replication, or the seed fails the apply.
+  backup_replica_region = module.constants.dr_region
+
   # Bumped to move the identity and wallet keys from SSM to Secrets Manager. The
   # seed phase re-runs only when its input changes, so the bump has to land with
   # the provision build that does the move.
