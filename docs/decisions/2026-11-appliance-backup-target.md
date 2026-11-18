@@ -19,8 +19,15 @@ label:
 
 | Prefix | Written by | Ticket |
 | --- | --- | --- |
-| `<region>/postgres/` | WAL-G, with `WALG_S3_PREFIX=s3://<bucket>/<region>/postgres` | FIL-1599 |
+| `<region>/postgres/` | WAL-G, with `WALG_S3_PREFIX=s3://<bucket>/<region>/postgres/<system identifier>` | FIL-1599 |
 | `<region>/openbao/` | the raft snapshot upload | FIL-1745 |
+
+The system identifier is the Postgres cluster's own, chosen when the cluster is initialised. A
+cluster initialised again on the same node, after it lost its control volume, starts its WAL at
+the segment names the earlier one used. Under a shared prefix its uploads would become the current
+versions of the earlier cluster's segments, and a restore of that cluster would read them. Each
+cluster archiving under its own identifier keeps the earlier archive whole. The writer's grants
+below cover it, since a `*` in an IAM resource matches `/` too.
 
 A bucket per region would separate the appliances by resource instead of by policy, which is easier
 to audit. It fails at retirement. S3 refuses to delete a bucket that holds a locked object, and

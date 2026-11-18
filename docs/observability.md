@@ -191,9 +191,8 @@ no data when none of them reports anything.
 
 "Appliance Postgres base backup is stale" has the same shape, on
 `postgres_basebackup_last_success_timestamp`, which infra-nodes' `backup-postgres.sh` stamps after
-each daily base backup. An appliance stamps nothing until it runs Postgres with WAL archiving on,
-so the rule fires for every backup appliance until then. Every push to main applies the rules, so
-merge it once they all take base backups.
+each daily base backup. An appliance stamps nothing until it runs Postgres with WAL archiving on
+and has taken its first base backup, so the rule fires for every backup appliance that has not.
 "Appliance Postgres WAL archive is failing" fires when a WAL segment has waited over 15 minutes to
 be archived, from `postgres_wal_archive_oldest_pending_timestamp`, which each reconcile pass
 writes; infra-nodes' `docs/observability.md` says why it reads that and not the failure count.

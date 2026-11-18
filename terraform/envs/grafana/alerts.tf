@@ -3799,9 +3799,8 @@ resource "grafana_rule_group" "appliance" {
   # The second half of the query, as in the snapshot rule, makes an appliance
   # that reconciles but reports no stamp read as 1e10 seconds stale. An
   # appliance reports none until it runs the Debian Postgres image with
-  # archiving on, so this rule fires for each backup appliance until then.
-  # Every push to main applies the rules, so merge it once they all take base
-  # backups.
+  # archiving on and has taken its first base backup, so this rule fires for
+  # each backup appliance that has not.
   #
   # A warning, for the reason the snapshot rule gives: the node keeps serving,
   # and what is at risk is a restore if it is lost.
