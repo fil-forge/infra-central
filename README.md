@@ -58,7 +58,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
-| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, replicated to the DR region where a stage sets `backup_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys and OpenBao's root token and recovery keys are Secrets Manager secrets, replicated to the DR region where a stage sets `backup_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
@@ -325,7 +325,8 @@ The provision Lambda creates them, so Terraform has no record of them and never
 removes them. An accidental destroy therefore cannot burn a funded wallet or
 invalidate a DID that storage providers have already registered against.
 
-The service identities and the two wallets are Secrets Manager secrets under
+The service identities, the two wallets, and central OpenBao's root token and
+recovery keys are Secrets Manager secrets under
 `forge-central/<stage>/<service>/`. Everything else is an SSM parameter under
 `/forge-central/<stage>/<service>/`.
 
@@ -337,6 +338,16 @@ A mismatch fails the run and leaves SSM untouched. The apps root reads the keys
 only from the seed result, so a stage whose seed result does not list a key's
 secret fails its apps plan, naming the key, instead of pointing ECS at SSM.
 
+OpenBao's root token and recovery keys move the same way in the vault phase.
+Each one is copied from SSM, read back and compared; a credential whose two
+copies differ, or that is in neither store, fails the phase and deletes
+nothing. The SecureStrings go last, after the root token has configured the
+mounts, hilt's AppRole and the appliance keys. Until a stage's vault phase
+runs with a provision image that knows about the move, the `appliance-token`
+and `reset-apps` phases read the root token from SSM. Once the SSM copies are
+gone, a provision image older than the move cannot find the root token, so
+roll forward rather than back.
+
 They also stay readable, which takes deliberate arrangement. SecureStrings and
 secrets are encrypted under the account's AWS-managed SSM and Secrets Manager
 keys rather than the stage's own customer-managed key. The stage's key is destroyed with the stage, and a key in
@@ -345,6 +356,10 @@ would leave every secret unreadable the moment the stage came down and would
 fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
 nothing else, and what it protects is meant to die with the stage: OpenBao's
 storage sits in the stage's database and goes at the same time.
+
+OpenBao's credentials outlive the OpenBao they open, since its storage goes
+with the stage. When the vault phase initialises a new OpenBao, it overwrites
+both secrets with the new values and deletes any SSM copies.
 
 So **a destroyed and recreated stage silently comes back with its previous
 identities and wallets.** An appliance's stored delegation is one of them: a
@@ -994,6 +1009,21 @@ sync; a replica that fails or does not sync in time fails the apply. Secrets
 Manager fails a replica when the backup region already holds a secret of the
 same name, and the run reports that rather than overwriting it, since that
 secret may hold a key worth keeping.
+
+The vault phase does the same for OpenBao's root token and recovery keys,
+right after storing them and before anything else in the phase can fail. The
+recovery keys cannot be regenerated, and without them and the root token a
+restored OpenBao admits nobody. Setting `backup_replica_region` re-runs the
+vault phase too, and an image that predates the move fails that apply as it
+does the seed one: publish a newer image, then bump `vault_trigger`.
+
+The apply is the only check. A replica removed between applies goes unnoticed
+until the next seed or vault run. To check one by hand:
+
+```bash
+aws secretsmanager describe-secret --secret-id forge-central/prod/openbao/recovery-keys \
+  --query 'ReplicationStatus[].[Region,Status]' --output text
+```
 
 ### Smoke-testing a stage
 

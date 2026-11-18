@@ -257,14 +257,18 @@ The provision Lambda, which uses the AWS-defined log group format:
 
 A key the seed phase could not replicate to the DR region, or whose replica did not reach InSync
 within two minutes, fails the stage's platform apply, and the workflow's `notify-failure` job
-reports the failed job in Slack. The error names the key and, for a failed replica, the reason
-Secrets Manager gave. A replication denied by IAM is retried for up to five minutes, shared by all the keys, because a
+reports the failed job in Slack. The vault phase does the same for OpenBao's root token and recovery
+keys. The error names the key and, for a failed replica, the reason Secrets Manager gave. A
+replication denied by IAM is retried for up to five minutes, shared by all the keys, because a
 grant added in the same apply takes a few seconds to propagate; each retry logs a
 `replication denied` warning, and a denial that outlasts the five minutes fails the apply as above:
 
 ```logql
 {aws_log_group=~"/aws/lambda/fc-(staging|prod)-provision"} |= "replica"
 ```
+
+Nothing checks between applies, so a replica removed by hand is noticed only on the next seed or
+vault run. The README's "Backup replicas of the keys" section has the command to check one.
 
 OpenBao's audit log, one JSON entry per request and one per response, in the same group as its
 server log. Secret values and tokens are HMACed; paths, operations and the caller's address are

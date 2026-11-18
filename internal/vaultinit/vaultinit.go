@@ -46,7 +46,7 @@ func ApplianceKeyName(region string) string {
 }
 
 // InitResult reports what initialisation produced. Both fields are secret and
-// belong in SSM immediately; neither is returned to Terraform.
+// belong in Secrets Manager immediately; neither is returned to Terraform.
 type InitResult struct {
 	RootToken    string
 	RecoveryKeys []string

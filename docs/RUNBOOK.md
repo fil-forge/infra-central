@@ -77,6 +77,12 @@ Check first: its log, in Grafana or CloudWatch.
 Then the platform apply that invoked it, which shows the error the Lambda returned. Fix the cause
 and re-run the apply.
 
+An error naming a replica means a key or one of OpenBao's credentials has no in-sync copy in the
+DR region. A failed replica usually means a secret of the same name already exists there; the
+function never overwrites it, so decide by hand which copy to keep. An error saying an OpenBao
+credential differs between Secrets Manager and SSM, or is in neither, means the vault phase could
+not tell which value opens this OpenBao, and deleted nothing.
+
 ## Pandora VPN tunnel down
 
 One tunnel of the compatibility server's site-to-site VPN has been down for fifteen minutes, or no
