@@ -3922,7 +3922,7 @@ resource "grafana_rule_group" "appliance" {
 
       annotations = {
         summary     = "{{ $labels.region }} ({{ $labels.node }}) has had a Postgres WAL segment waiting {{ humanizeDuration $values.A.Value }} to be archived"
-        description = "WAL-G has not uploaded the appliance's oldest waiting WAL segment to the backup bucket. Postgres keeps every segment and retries, so nothing is lost yet, but pg_wal grows on the control volume until archiving works, and a restore would stop at the last segment that made it. `docker logs filone-platform-postgres-1` has WAL-G's error for each attempt."
+        description = "WAL-G has not uploaded the appliance's oldest waiting WAL segment to the backup bucket. Postgres keeps every segment and retries, so nothing is lost yet, but pg_wal grows on the control volume until archiving works, and a restore would stop at the last segment that made it. `docker logs filone-platform-postgres-1` has the error from WAL-G or filone-wal-push for each attempt."
         runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       }
 
