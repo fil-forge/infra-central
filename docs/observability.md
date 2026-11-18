@@ -151,6 +151,9 @@ on `stage` and `service` for that long.
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
 | Piri is not adding aggregates on chain               | Forge Regions            | Piri's metrics                | FIL-1578 |
+| Appliance ZFS pool is not online                     | Forge Regions            | node exporter                 |          |
+| Appliance ZFS pool has data errors                   | Forge Regions            | node textfile report          |          |
+| Appliance ZFS pool health is not reporting           | Forge Regions            | node exporter, textfile       |          |
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
 | Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
