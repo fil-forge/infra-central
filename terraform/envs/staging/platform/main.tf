@@ -124,4 +124,10 @@ module "platform" {
   # hostname migration must explicitly replace them. Bumped again to move the
   # identity and wallet keys from SSM to Secrets Manager.
   seed_trigger = "4"
+
+  # Bumped to move OpenBao's root token and recovery keys from SSM to Secrets
+  # Manager and replicate them. The vault phase re-runs only when its input
+  # changes, so the bump has to land with the provision build that does the
+  # move.
+  vault_trigger = "2"
 }

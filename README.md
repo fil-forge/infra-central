@@ -1013,9 +1013,9 @@ secret may hold a key worth keeping.
 The vault phase does the same for OpenBao's root token and recovery keys,
 right after storing them and before anything else in the phase can fail. The
 recovery keys cannot be regenerated, and without them and the root token a
-restored OpenBao admits nobody. Setting `backup_replica_region` re-runs the
-vault phase too, and an image that predates the move fails that apply as it
-does the seed one: publish a newer image, then bump `vault_trigger`.
+restored OpenBao admits nobody. The vault phase re-runs only when its input
+changes, so a stage moves and replicates its credentials on the first
+`vault_trigger` bump applied with a provision image built with the move.
 
 The apply is the only check. A replica removed between applies goes unnoticed
 until the next seed or vault run. To check one by hand:
