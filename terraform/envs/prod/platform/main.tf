@@ -142,11 +142,11 @@ module "platform" {
   # backup retention, and no deletion protection or final snapshot, so dropping
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
   # the VPN; docs/pandora-vpn.md has the steps.
-  pandora_db = {
-    instance_count        = 1
-    backup_retention_days = 1
-    protect               = false
-  }
+  #
+  # Null for one apply: the cluster is dropped so that it can come back on
+  # PostgreSQL 18 as a new cluster, which the next change restores with the same
+  # settings. Its data is test data and is not kept.
+  pandora_db = null
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
   # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
