@@ -220,7 +220,10 @@ func (d *deps) ensureRootToken(ctx context.Context, client *api.Client, resp *Re
 		slog.Info("openbao was already initialised; reading the stored root token")
 	}
 
-	creds, err := ensureOpenBaoCredentials(ctx, d.keys, d.store, result)
+	tokenValid := func(ctx context.Context, token string) (bool, error) {
+		return vaultinit.TokenValid(ctx, client, token)
+	}
+	creds, err := ensureOpenBaoCredentials(ctx, d.keys, d.store, tokenValid, result)
 	if err != nil {
 		return "", false, err
 	}

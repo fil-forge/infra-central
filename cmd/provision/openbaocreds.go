@@ -30,6 +30,10 @@ type credentialStore interface {
 	PutIfChanged(ctx context.Context, service, name, value string) (secretstore.Secret, error)
 }
 
+// tokenChecker reports whether OpenBao accepts a token; see
+// vaultinit.TokenValid.
+type tokenChecker func(ctx context.Context, token string) (bool, error)
+
 // openBaoCredentials is what ensureOpenBaoCredentials leaves behind: the root
 // token to configure OpenBao with, the ARN of each stored credential, and
 // whether SSM may still hold copies to delete once the vault phase succeeds.
@@ -50,9 +54,10 @@ type openBaoCredentials struct {
 // When OpenBao was already initialised, each credential is moved out of SSM
 // on its own, so a run that stopped between the two finishes the move. The
 // SSM copies are left for the caller to delete once the phase has succeeded.
+// tokenValid asks OpenBao whether it accepts a root token.
 //
 // No value reaches a log line or an error message.
-func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy legacyStore, init vaultinit.InitResult) (openBaoCredentials, error) {
+func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy legacyStore, tokenValid tokenChecker, init vaultinit.InitResult) (openBaoCredentials, error) {
 	creds := openBaoCredentials{arns: map[string]string{}}
 
 	if init.Initialised {
@@ -73,10 +78,9 @@ func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy 
 			}
 			creds.arns[name] = secret.ARN
 		}
-		// Any SSM copy opens nothing now. It goes at once rather than at the end
-		// of the phase: if a later step failed with it still there, the next
-		// run would find OpenBao initialised, see two copies that differ, and
-		// refuse to continue.
+		// Any SSM copy opens nothing now, so it goes at once rather than at the
+		// end of the phase. If this fails, or the run ends first, the next run
+		// finds it with discardDeadLegacyCredentials.
 		if _, err := legacy.Delete(ctx, openBaoService, openBaoCredentialNames...); err != nil {
 			return openBaoCredentials{}, err
 		}
@@ -84,6 +88,9 @@ func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy 
 		return creds, nil
 	}
 
+	if err := discardDeadLegacyCredentials(ctx, keys, legacy, tokenValid); err != nil {
+		return openBaoCredentials{}, err
+	}
 	for _, name := range openBaoCredentialNames {
 		secret, moved, err := moveOpenBaoCredential(ctx, keys, legacy, name)
 		if err != nil {
@@ -96,6 +103,47 @@ func ensureOpenBaoCredentials(ctx context.Context, keys credentialStore, legacy 
 		}
 	}
 	return creds, nil
+}
+
+// discardDeadLegacyCredentials deletes SSM copies of the credentials that a
+// previous OpenBao left behind.
+//
+// A fresh initialisation deletes them right after storing the new values. If
+// that delete failed, or the run ended before it, the next run finds OpenBao
+// initialised and a root token in SSM that differs from the one in Secrets
+// Manager, and moving the credentials would refuse on every retry. OpenBao
+// settles which token is current: when it accepts the Secrets Manager token
+// and refuses the SSM one, the SSM pair came from storage that no longer
+// exists, so both SSM copies go. Any other outcome is left for
+// moveOpenBaoCredential to refuse.
+func discardDeadLegacyCredentials(ctx context.Context, keys keyStore, legacy legacyStore, tokenValid tokenChecker) error {
+	secret, found, err := keys.Lookup(ctx, openBaoService, openBaoRootTokenName)
+	if err != nil {
+		return err
+	}
+	legacyToken, legacyFound, err := legacy.LookupSecret(ctx, openBaoService, openBaoRootTokenName)
+	if err != nil {
+		return err
+	}
+	if !found || !legacyFound || secret.Value == legacyToken {
+		return nil
+	}
+
+	current, err := tokenValid(ctx, secret.Value)
+	if err != nil {
+		return err
+	}
+	legacyCurrent, err := tokenValid(ctx, legacyToken)
+	if err != nil {
+		return err
+	}
+	if !current || legacyCurrent {
+		return nil
+	}
+
+	slog.Warn("deleting openbao credentials in SSM left by a previous OpenBao; their root token no longer authenticates")
+	_, err = legacy.Delete(ctx, openBaoService, openBaoCredentialNames...)
+	return err
 }
 
 // moveOpenBaoCredential returns one credential of an already initialised

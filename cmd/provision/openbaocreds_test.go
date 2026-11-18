@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,6 +54,7 @@ func TestEnsureOpenBaoCredentials(t *testing.T) {
 		init       vaultinit.InitResult
 		secrets    map[string]string
 		ssm        map[string]string
+		tokenValid tokenChecker
 		wantResult credentialsOutcome
 	}{
 		{
@@ -126,7 +129,7 @@ func TestEnsureOpenBaoCredentials(t *testing.T) {
 			},
 		},
 		{
-			name:    "a root token that differs between the stores fails",
+			name:    "root tokens that differ fail when OpenBao accepts neither",
 			secrets: map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
 			ssm:     map[string]string{"openbao/root-token": staleRootToken},
 			wantResult: credentialsOutcome{
@@ -143,6 +146,51 @@ func TestEnsureOpenBaoCredentials(t *testing.T) {
 				Failed:  true,
 				Secrets: map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
 				SSM:     map[string]string{"openbao/recovery-keys": staleRecoveryKey},
+			},
+		},
+		{
+			name:       "SSM copies whose root token OpenBao refuses are deleted when it accepts the Secrets Manager one",
+			secrets:    map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+			ssm:        map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
+			tokenValid: liveTokens(fakeRootToken),
+			wantResult: credentialsOutcome{
+				RootToken: fakeRootToken,
+				ARNs:      bothARNs,
+				Secrets:   map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:       map[string]string{},
+			},
+		},
+		{
+			name:       "root tokens that differ fail when OpenBao accepts only the SSM one",
+			secrets:    map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+			ssm:        map[string]string{"openbao/root-token": staleRootToken},
+			tokenValid: liveTokens(staleRootToken),
+			wantResult: credentialsOutcome{
+				Failed:  true,
+				Secrets: map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:     map[string]string{"openbao/root-token": staleRootToken},
+			},
+		},
+		{
+			name:       "root tokens that differ fail when OpenBao accepts both",
+			secrets:    map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+			ssm:        map[string]string{"openbao/root-token": staleRootToken},
+			tokenValid: liveTokens(fakeRootToken, staleRootToken),
+			wantResult: credentialsOutcome{
+				Failed:  true,
+				Secrets: map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:     map[string]string{"openbao/root-token": staleRootToken},
+			},
+		},
+		{
+			name:       "root tokens that differ fail when OpenBao cannot be asked",
+			secrets:    map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+			ssm:        map[string]string{"openbao/root-token": staleRootToken},
+			tokenValid: unreachableOpenBao,
+			wantResult: credentialsOutcome{
+				Failed:  true,
+				Secrets: map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+				SSM:     map[string]string{"openbao/root-token": staleRootToken},
 			},
 		},
 		{
@@ -172,7 +220,12 @@ func TestEnsureOpenBaoCredentials(t *testing.T) {
 			keys := &fakeKeys{values: tc.secrets}
 			legacy := &fakeLegacy{secrets: tc.ssm, public: map[string]string{}}
 
-			creds, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, tc.init)
+			tokenValid := tc.tokenValid
+			if tokenValid == nil {
+				tokenValid = liveTokens()
+			}
+
+			creds, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, tokenValid, tc.init)
 
 			got := credentialsOutcome{
 				Failed:       err != nil,
@@ -216,7 +269,7 @@ func TestEnsureOpenBaoCredentialsNeverPutsACredentialInAnError(t *testing.T) {
 			keys := &fakeKeys{values: tc.secrets}
 			legacy := &fakeLegacy{secrets: tc.ssm, public: map[string]string{}}
 
-			_, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, vaultinit.InitResult{})
+			_, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, liveTokens(), vaultinit.InitResult{})
 			if err == nil || strings.Contains(err.Error(), "fake-") {
 				t.Errorf("ensureOpenBaoCredentials() error = %v, want an error naming no credential", err)
 			}
@@ -332,22 +385,47 @@ func TestOpenBaoRootToken(t *testing.T) {
 	}
 }
 
-func TestEnsureOpenBaoCredentialsRerunAfterAFailedFreshInitialisationSucceeds(t *testing.T) {
+func TestEnsureOpenBaoCredentialsRerunAfterAFailedSSMDeleteSucceeds(t *testing.T) {
 	keys := &fakeKeys{values: map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey}}
 	legacy := &fakeLegacy{
-		secrets: map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
-		public:  map[string]string{},
+		secrets:   map[string]string{"openbao/root-token": staleRootToken, "openbao/recovery-keys": staleRecoveryKey},
+		public:    map[string]string{},
+		deleteErr: errors.New("fake transient SSM failure"),
 	}
-	if _, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, freshInit); err != nil {
-		t.Fatalf("fresh initialisation error = %v", err)
+	if _, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, liveTokens(), freshInit); err == nil {
+		t.Fatal("fresh initialisation succeeded although deleting the SSM copies failed")
 	}
 
-	// The phase failed after storing; OpenBao now reports itself initialised.
-	creds, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, vaultinit.InitResult{})
+	// OpenBao now reports itself initialised and accepts only the new token.
+	legacy.deleteErr = nil
+	creds, err := ensureOpenBaoCredentials(context.Background(), keys, legacy, liveTokens(fakeRootToken), vaultinit.InitResult{})
 
-	got := credentialsOutcome{Failed: err != nil, RootToken: creds.rootToken, ARNs: creds.arns, DeleteLegacy: creds.deleteLegacy}
-	want := credentialsOutcome{RootToken: fakeRootToken, ARNs: bothARNs}
+	got := credentialsOutcome{
+		Failed:       err != nil,
+		RootToken:    creds.rootToken,
+		ARNs:         creds.arns,
+		DeleteLegacy: creds.deleteLegacy,
+		Secrets:      keys.values,
+		SSM:          legacy.secrets,
+	}
+	want := credentialsOutcome{
+		RootToken: fakeRootToken,
+		ARNs:      bothARNs,
+		Secrets:   map[string]string{"openbao/root-token": fakeRootToken, "openbao/recovery-keys": fakeRecoveryKeys},
+		SSM:       map[string]string{},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rerun outcome = %+v, want %+v (err = %v)", got, want, err)
 	}
+}
+
+// liveTokens stands in for OpenBao accepting exactly the given tokens.
+func liveTokens(tokens ...string) tokenChecker {
+	return func(ctx context.Context, token string) (bool, error) {
+		return slices.Contains(tokens, token), nil
+	}
+}
+
+func unreachableOpenBao(ctx context.Context, token string) (bool, error) {
+	return false, errors.New("fake: openbao unreachable")
 }

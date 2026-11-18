@@ -341,7 +341,10 @@ secret fails its apps plan, naming the key, instead of pointing ECS at SSM.
 OpenBao's root token and recovery keys move the same way in the vault phase.
 Each one is copied from SSM, read back and compared; a credential whose two
 copies differ, or that is in neither store, fails the phase and deletes
-nothing. The SecureStrings go last, after the root token has configured the
+nothing. One case is settled by asking OpenBao: when it accepts the root token
+in Secrets Manager and refuses the one in SSM, the SSM pair is left over from
+an earlier OpenBao, so both SSM copies are deleted and the phase continues.
+The SecureStrings go last, after the root token has configured the
 mounts, hilt's AppRole and the appliance keys. Until a stage's vault phase
 runs with a provision image that knows about the move, the `appliance-token`
 and `reset-apps` phases read the root token from SSM. Once the SSM copies are
