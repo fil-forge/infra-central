@@ -161,6 +161,8 @@ on `stage` and `service` for that long.
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
 | Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
 | Appliance OpenBao snapshot is stale                  | Forge Regions            | snapshot stamp                | FIL-1745 |
+| Appliance Postgres base backup is stale              | Forge Regions            | base backup stamp             | FIL-1599 |
+| Appliance Postgres WAL archive is failing            | Forge Regions            | archiver stamp                | FIL-1599 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
 | Appliance site is failing most requests              | Forge Regions outages    | Caddy                         | FIL-1164 |
@@ -185,9 +187,17 @@ The pull request that deploys the fix removes its `is_paused = true` in
 backup bucket is over 26 hours old. It reads `openbao_snapshot_last_success_timestamp`, which
 infra-nodes' snapshot job stamps after each upload. Every live appliance in a backup stage owes a
 snapshot, so the rule also fires for one that reconciles but reports no stamp at all, and alerts on
-no data when none of them reports anything. The Postgres backups get a freshness rule with the job
-that uploads them,
-[FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599). Whether the backup bucket and a region's writer are set up correctly is
+no data when none of them reports anything.
+
+"Appliance Postgres base backup is stale" has the same shape, on
+`postgres_basebackup_last_success_timestamp`, which infra-nodes' `backup-postgres.sh` stamps after
+each daily base backup. An appliance stamps nothing until it runs Postgres with WAL archiving on,
+so the rule fires for every backup appliance until then. Every push to main applies the rules, so
+merge it once they all take base backups.
+"Appliance Postgres WAL archive is failing" fires when a WAL segment has waited over 15 minutes to
+be archived, from `postgres_wal_archive_oldest_pending_timestamp`, which each reconcile pass
+writes; infra-nodes' `docs/observability.md` says why it reads that and not the failure count.
+Both are [FIL-1599](https://linear.app/filecoin-foundation/issue/FIL-1599)'s. Whether the backup bucket and a region's writer are set up correctly is
 checked by `scripts/check-appliance-backup-access.sh <stage> <region>`, described in
 [appliance-onboarding.md](appliance-onboarding.md#what-the-node-does-with-the-backup-key).
 

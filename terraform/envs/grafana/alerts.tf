@@ -3799,8 +3799,9 @@ resource "grafana_rule_group" "appliance" {
   # The second half of the query, as in the snapshot rule, makes an appliance
   # that reconciles but reports no stamp read as 1e10 seconds stale. An
   # appliance reports none until it runs the Debian Postgres image with
-  # archiving on, so this rule fires for each backup appliance until then:
-  # apply it after they all take base backups.
+  # archiving on, so this rule fires for each backup appliance until then.
+  # Every push to main applies the rules, so merge it once they all take base
+  # backups.
   #
   # A warning, for the reason the snapshot rule gives: the node keeps serving,
   # and what is at risk is a restore if it is lost.
@@ -3889,22 +3890,25 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # A backup appliance's Postgres has WAL segments waiting to be archived, and
-  # its last attempt to archive one failed within the last 15 minutes. Postgres
-  # keeps every segment it cannot archive and retries, so nothing is lost yet,
-  # but pg_wal grows on the control volume until archiving works again, and a
-  # restore from the archive would stop at the last segment that made it.
+  # A backup appliance's Postgres has had a WAL segment waiting to be archived
+  # for over 15 minutes. Postgres keeps every segment it cannot archive and
+  # retries, so nothing is lost yet, but pg_wal grows on the control volume
+  # until archiving works again, and a restore from the archive would stop at
+  # the last segment that made it.
   #
-  # Both series come from infra-nodes scripts/host/lib/walg.sh, which every
-  # reconcile pass writes from pg_stat_archiver. A backlog alone is normal for
-  # a moment between segments; a recent failure alone, once retried, is not
-  # worth a page. Both together, for 15 minutes, means retries are failing. A
-  # quiet database cuts no segments, so the age of the last archived one is no
-  # signal on its own, and is not used.
+  # The series comes from infra-nodes scripts/host/lib/walg.sh, which every
+  # reconcile pass writes from pg_wal/archive_status, ahead of its deploys: when
+  # the oldest segment still waiting became ready. A segment waits seconds while
+  # uploads work. The age is computed here from that time, so it goes on
+  # growing if the passes stop refreshing it. The failure count is not used:
+  # Postgres counts only an archive_command that exits 1 to 125, and one that
+  # cannot find WAL-G or is killed takes the archiver down uncounted. A quiet
+  # database cuts no segments, so the age of the last archived one is no signal
+  # either.
   #
-  # no_data_state is OK: no data is no backlog with a recent failure, which
-  # includes an appliance that does not archive yet. The base backup rule above
-  # is the one that notices an appliance reporting nothing.
+  # no_data_state is OK: the series is absent while nothing waits, and on an
+  # appliance that does not archive yet. The base backup rule above is the one
+  # that notices an appliance reporting nothing.
   #
   # A warning: the node keeps serving.
   dynamic "rule" {
@@ -3913,13 +3917,13 @@ resource "grafana_rule_group" "appliance" {
     content {
       name           = "Appliance Postgres WAL archive is failing"
       condition      = "B"
-      for            = "15m"
+      for            = "10m"
       no_data_state  = "OK"
       exec_err_state = "Error"
 
       annotations = {
-        summary     = "{{ $labels.region }} ({{ $labels.node }}) has {{ $values.A.Value }} Postgres WAL segments waiting, and archiving them keeps failing"
-        description = "WAL-G cannot upload the appliance's WAL segments to the backup bucket. Postgres keeps them and retries, so nothing is lost yet, but pg_wal grows on the control volume until archiving works, and a restore would stop at the last segment that made it. `docker logs filone-platform-postgres-1` has WAL-G's error for each attempt."
+        summary     = "{{ $labels.region }} ({{ $labels.node }}) has had a Postgres WAL segment waiting {{ humanizeDuration $values.A.Value }} to be archived"
+        description = "WAL-G has not uploaded the appliance's oldest waiting WAL segment to the backup bucket. Postgres keeps every segment and retries, so nothing is lost yet, but pg_wal grows on the control volume until archiving works, and a restore would stop at the last segment that made it. `docker logs filone-platform-postgres-1` has WAL-G's error for each attempt."
         runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       }
 
@@ -3950,12 +3954,8 @@ resource "grafana_rule_group" "appliance" {
           legendFormat = "{{appliance}}"
           expr         = <<-PROMQL
               max by (node, region, appliance) (
-                postgres_wal_archive_pending{${local.backup_appliance_matcher}}
+                time() - postgres_wal_archive_oldest_pending_timestamp{${local.backup_appliance_matcher}}
               )
-              and on (node, region, appliance)
-              max by (node, region, appliance) (
-                time() - postgres_wal_last_failed_timestamp{${local.backup_appliance_matcher}}
-              ) < 900
             PROMQL
         }))
       }
@@ -3982,7 +3982,7 @@ resource "grafana_rule_group" "appliance" {
             operator  = { type = "and" }
             query     = { params = ["B"] }
             reducer   = { type = "last", params = [] }
-            evaluator = { type = "gt", params = [0] }
+            evaluator = { type = "gt", params = [900] }
           }]
         })
       }
