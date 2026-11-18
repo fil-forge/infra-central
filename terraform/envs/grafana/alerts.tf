@@ -91,10 +91,10 @@ locals {
   ])
 
   # The live appliances in the stages that push backups, each of which owes an
-  # OpenBao snapshot. Empty when no stage takes backups or none of their regions
-  # is live, and then the rule that uses it is not created: an empty
-  # alternation matches nothing, and a rule that alerts on no data would fire
-  # forever.
+  # OpenBao snapshot and a Postgres base backup. Empty when no stage takes
+  # backups or none of their regions is live, and then the rules that use it are
+  # not created: an empty alternation matches nothing, and a rule that alerts on
+  # no data would fire forever.
   backup_appliances = [
     for appliance in var.live_appliances : appliance
     if contains(var.appliance_backup_stages, split("-", appliance)[0])
@@ -3819,7 +3819,7 @@ resource "grafana_rule_group" "appliance" {
 
       annotations = {
         summary     = "{{ $labels.region }} ({{ $labels.node }}) has not uploaded a Postgres base backup for over 26 hours"
-        description = "The appliance's last Postgres base backup in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. The WAL archive restores only on top of a base backup. An age of centuries means the appliance reconciles but reports no base backup stamp: it does not run the Debian Postgres image with archiving on yet, or the code that writes the stamp is broken. With no data at all, no appliance in a backup stage is reporting. Otherwise, on the host, `journalctl -u filone-postgres-backup.service` says why the last run failed."
+        description = "The appliance's last Postgres base backup in the backup bucket is over 26 hours old, so its daily run failed or the timer stopped. The WAL archive restores only on top of a base backup. An age of centuries means the appliance reconciles but reports no base backup stamp: it does not run the Debian Postgres image with archiving on yet, or its first base backup has not succeeded, which each reconcile pass retries; `journalctl -u filone-postgres-backup.service` on the host says why each attempt failed, and an empty journal means the timer is disabled. With no data at all, no appliance in a backup stage is reporting. Otherwise the same journal says why the last daily run failed."
         runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       }
 

@@ -110,13 +110,14 @@ The rules watch staging and prod, the stages listed in `alert_stages` in
 `fc-<stage>` names, and an appliance rule matches the `<stage>-<region>`
 appliance label.
 
-The rules that read absence, "Appliance has stopped reporting" and "Appliance
-OpenBao snapshot is stale", watch only the live appliances listed in
+The rules that read absence, "Appliance has stopped reporting", "Appliance
+OpenBao snapshot is stale" and "Appliance Postgres base backup is stale", watch
+only the live appliances listed in
 `live_appliances`: every `<stage>-<region>` in the alert stages'
 `appliance_regions`. A retired appliance and a dead one both stop reporting,
 and the list is what tells them apart. A listed appliance with no data alerts
 until it reports or leaves the list, including a new region whose node is not
-up yet. The snapshot rule further keeps to the
+up yet. The two backup rules further keep to the
 stages in `appliance_backup_stages`, the alert stages whose platform root sets
 `appliance_backups`. `scripts/check-appliance-regions.sh` and
 `scripts/check-backup-stages.sh` fail `make check` when either list disagrees
