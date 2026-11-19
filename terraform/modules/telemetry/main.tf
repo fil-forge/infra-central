@@ -48,14 +48,22 @@ locals {
   # it stalls the signal is that series going stale; docs/observability.md says
   # where to read it then. AWS/VPN carries TunnelState for the compatibility
   # server's site-to-site VPN, which a Grafana rule alerts on.
-  metric_namespaces = [
-    "AWS/ECS",
-    "AWS/ApplicationELB",
-    "AWS/RDS",
-    "AWS/NATGateway",
-    "AWS/Firehose",
-    "AWS/VPN",
-  ]
+  #
+  # Each namespace maps to the metrics shipped from it, and an empty list ships
+  # all of them. AWS/EC2 ships StatusCheckFailed alone, for the jump host's
+  # alert (docs/jump-host.md): the namespace's CPU, network and disk metrics
+  # would add series per instance that nothing reads. EC2 publishes status checks
+  # once a minute for every running instance, so the stream carries one per
+  # instance in the account, and none from an account that runs no instances.
+  metric_namespaces = {
+    "AWS/ECS"            = []
+    "AWS/ApplicationELB" = []
+    "AWS/RDS"            = []
+    "AWS/NATGateway"     = []
+    "AWS/Firehose"       = []
+    "AWS/VPN"            = []
+    "AWS/EC2"            = ["StatusCheckFailed"]
+  }
 }
 
 # ── Failed-batch backup ──────────────────────────────────────────────────────
@@ -331,8 +339,8 @@ resource "aws_iam_role_policy" "metric_stream" {
   policy = data.aws_iam_policy_document.metric_stream.json
 }
 
-# opentelemetry1.0 is the format Grafana's aws-metrics endpoint accepts. Every
-# metric in each namespace is included: a metric stream cannot filter by
+# opentelemetry1.0 is the format Grafana's aws-metrics endpoint accepts. A
+# metric stream can narrow a namespace to named metrics but cannot filter by
 # resource or tag, so this is account-wide by construction, and there is no
 # per-stage variant to have.
 resource "aws_cloudwatch_metric_stream" "this" {
@@ -342,10 +350,13 @@ resource "aws_cloudwatch_metric_stream" "this" {
   output_format = "opentelemetry1.0"
 
   dynamic "include_filter" {
-    for_each = toset(local.metric_namespaces)
+    for_each = local.metric_namespaces
 
     content {
-      namespace = include_filter.value
+      namespace = include_filter.key
+      # null for a whole namespace, which is how the provider reads a filter
+      # with no metric_names, so those filters plan no change.
+      metric_names = length(include_filter.value) > 0 ? include_filter.value : null
     }
   }
 

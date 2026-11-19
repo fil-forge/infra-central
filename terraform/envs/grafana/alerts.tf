@@ -932,6 +932,105 @@ resource "grafana_rule_group" "central" {
       })
     }
   }
+
+  # The jump host (terraform/envs/jump-host) is failing its EC2 status checks,
+  # or has stopped reporting them. It is the only allowlisted SSH path to an
+  # appliance, so while it is down nobody can SSH to one.
+  #
+  # StatusCheckFailed is 1 in a minute when the system check (AWS's host and
+  # network) or the instance check (the OS answering on its network interface)
+  # failed, and 0 otherwise. EC2 publishes it once a minute for each running
+  # instance and stops when the instance stops or is terminated. The metric
+  # stream ships it account-wide (modules/telemetry), and its series carry the
+  # instance id but no tags, so the rule watches every instance in the prod
+  # account's us-east-2. The jump host is the only instance this repository runs there;
+  # the services run on Fargate, which publishes no EC2 metrics.
+  #
+  # no_data_state is Alerting: no series at all means the instance is stopped
+  # or gone, or the stream has stopped delivering AWS/EC2. The query keeps
+  # returning the last sample for Mimir's five-minute lookback, so no data
+  # fires about 15 minutes after the last sample. A replacement (a key added or
+  # removed) moves the series to a new instance id within a few minutes and
+  # stays under that. A second instance in the account would turn the jump
+  # host's vanishing series into a missing series, which Grafana resolves
+  # instead of firing; this rule then needs a narrower matcher.
+  #
+  # warning: operators lose SSH to the appliances, which costs time in an
+  # incident but loses nothing, and Session Manager is the repair path either
+  # way. for = 10m outlasts the nightly reboot dnf-automatic schedules.
+  rule {
+    name           = "Jump host is failing its status checks"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ if $labels.dimension_InstanceId }}EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }} is failing its status checks{{ else }}The jump host is sending no status check data: it is stopped or gone, or the metric stream is not delivering AWS/EC2{{ end }}"
+      description = "The jump host{{ if $labels.dimension_InstanceId }}, EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }},{{ end }} has failed its EC2 status checks for 10 minutes, or no status check data has arrived for about 15, which is what a stopped or terminated instance looks like. Operators cannot SSH to the appliances through it. docs/jump-host.md, \"When it is down\", says what to do."
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        intervalMs   = 1000
+        legendFormat = "{{account_id}} {{dimension_InstanceId}}"
+        expr         = <<-PROMQL
+          max by (account_id, dimension_InstanceId) (
+            aws_ec2_status_check_failed_maximum{account_id="${module.constants.prod_account_id}", dimension_InstanceId!=""}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # A group of its own, so the response time rule and its threshold can change
