@@ -59,7 +59,7 @@ Host forge-jump
   ForwardAgent no
 
 Host appliance
-  HostName 203.0.113.10
+  HostName 162.43.174.98
   User <appliance-user>
   ProxyJump forge-jump
 ```
