@@ -17,6 +17,8 @@ about a minute of being written. The CloudWatch groups stay as they are, thirty 
 NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and the DynamoDB tables'
 metrics arrive too, through the metric stream
 [fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
+From `AWS/EC2` only `StatusCheckFailed` ships, for every instance in the account; in the prod
+account that is the jump host ([jump-host.md](jump-host.md)).
 
 **Not shipped.** Application metrics, since not all services expose a `/metrics` endpoint yet;
 traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 respectively. Follow-up work:
@@ -130,6 +132,7 @@ with the platform roots.
 | Provision Lambda errors                              | Forge Central            | Lambda, CloudWatch            | FIL-1151 |
 | Pandora VPN tunnel down                              | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
 | Pandora VPN both tunnels down                        | Forge Central            | VPN, CloudWatch, prod account | FIL-1436 |
+| Jump host is failing its status checks               | Forge Central            | EC2, CloudWatch, prod account |          |
 | Service response time is high                        | Forge Central latency    | ALB, CloudWatch               | FIL-1213 |
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
@@ -321,6 +324,14 @@ aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 The warning rule reads that minimum, and the critical rule reads `aws_vpn_tunnel_state_maximum`,
 which is 0 only when no tunnel was up during the minute.
 
+The jump host's EC2 status checks, through this repo's stream, with the prod account id from the
+constants module. Each series is 1 in a minute when the system or the instance check failed, and
+stops when the instance stops:
+
+```promql
+aws_ec2_status_check_failed_maximum{account_id="<prod account id>", dimension_InstanceId!=""}
+```
+
 Reads against the delegator's tables, likewise:
 
 ```promql
@@ -338,6 +349,7 @@ list, `aws_ecs_.*` for example.
 | `AWS/ApplicationELB` | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
 | `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
+| `AWS/EC2`            | none; prod's only instance is the jump host, `dimension_InstanceId`   |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
 | `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
 | `AWS/Firehose`       | `dimension_DeliveryStreamName="fc-<stage>-logs"`                      |

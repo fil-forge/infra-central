@@ -18,6 +18,7 @@ appliance.
 | Outbound | SSH to `destination_cidrs` on `destination_port` (22 by default) only; HTTPS anywhere, for SSM and dnf |
 | Updates | dnf-automatic installs each new Amazon Linux release's updates; the host reboots at 04:00 UTC when one needs it |
 | Instance role | the five SSM agent actions Session Manager needs, and nothing else |
+| Alerting | the Grafana rule "Jump host is failing its status checks", on EC2's `StatusCheckFailed` ([When it is down](#when-it-is-down)) |
 | Cost | about $7.40 a month at on-demand list prices |
 
 The Elastic IP survives a replacement of the instance and has `prevent_destroy` set. A released
@@ -84,6 +85,32 @@ aws ssm start-session --profile <prod-profile> --region us-east-2 --target "$(to
 sudo journalctl -t sshd -t sshd-session
 sudo less /var/log/cloud-init-output.log
 ```
+
+## When it is down
+
+The Grafana rule "Jump host is failing its status checks" sends a `warning` for the prod stage when
+the instance has failed its EC2 status checks for 10 minutes, or when no status check data has
+arrived for about 15. EC2 stops publishing status checks for a stopped or terminated instance, so
+the second case usually means the instance is no longer running. The data comes from `AWS/EC2`'s
+`StatusCheckFailed` in the prod account's metric stream (`terraform/envs/bootstrap/prod/us-east-2`,
+applied by hand), and the rule watches every instance in that account, of which the jump host is the
+only one this repository runs. Until that root is applied with `AWS/EC2` in its stream, the rule
+warns that no data is arriving.
+
+To act on it:
+
+1. In the EC2 console (prod account, us-east-2), find the instance named `fc-jump-host` and check
+   its state and its Status checks tab. A failed system check is AWS's host or network; a failed
+   instance check is the OS.
+2. If the instance is stopped, start it. If a check has failed, reboot it, or stop and start it to
+   move it to another host when the system check failed. The Elastic IP and the host key stay.
+3. If it is running and passing its checks but SSH still fails, open a shell through Session
+   Manager as in [Connecting](#connecting) and read sshd's log.
+4. If the instance is gone, `tofu apply` this root to recreate it with the same Elastic IP.
+
+Nothing alerts when the SSM agent stops registering, since SSM publishes no metric for it; a
+Session Manager session that will not open is the first sign. Nothing alerts on sshd alone either:
+a host whose sshd check failed passes its status checks and answers "Connection refused".
 
 ## Changing it
 
