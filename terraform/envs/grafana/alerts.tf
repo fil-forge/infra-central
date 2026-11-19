@@ -3971,7 +3971,7 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # One of the pool's two sources has stopped. Three cases:
+  # One or both of the pool's two sources has stopped. Four cases:
   # - The report has stopped moving. The textfile collector re-exports the
   #   last file on every scrape, so its series stay present with stale
   #   values, and the file's modification time is the signal, as the
@@ -3982,11 +3982,16 @@ resource "grafana_rule_group" "appliance" {
   # - The node sends the report but no pool state: the zfs collector is
   #   failing, and the "not online" rule above has nothing to read, so a
   #   degraded pool would not page.
+  # - prod-us-east-2 reconciles but sends neither: the rollout that ships both
+  #   was missed or both collectors are off. That appliance is the one these
+  #   rules expect a pool on, so its reconcile stamp, which every reporting
+  #   node sends, stands in for the missing sources there. "Appliance has stopped reporting" covers a
+  #   node that sends no stamp either.
   # A warning: the pool itself is probably fine, and on-call can read its
   # state on the host with `zpool status -x`.
   #
-  # no_data_state is OK: a healthy node fails all three branches, and a node
-  # without ZFS has neither source.
+  # no_data_state is OK: a healthy node fails every branch, and a node
+  # without ZFS has neither source and is not prod-us-east-2.
   rule {
     name           = "Appliance ZFS pool health is not reporting"
     condition      = "B"
@@ -3997,7 +4002,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary     = "The ZFS pool's health on {{ $labels.node }} is not reaching Grafana"
-      description = "Either zfs_pool.prom is missing or 30 minutes old (filone-pool-health.timer stopped or was never enabled; `systemctl list-timers filone-pool-health.timer` and `journalctl -u filone-pool-health.service` say why), or the report arrives without node_zfs_zpool_state (Alloy's zfs collector is failing; `docker logs filone-platform-alloy-1`). Until fixed, `zpool status -x` on the host shows the pool's state."
+      description = "Either zfs_pool.prom is missing or 30 minutes old (filone-pool-health.timer stopped or was never enabled; `systemctl list-timers filone-pool-health.timer` and `journalctl -u filone-pool-health.service` say why), or the report arrives without node_zfs_zpool_state (Alloy's zfs collector is failing; `docker logs filone-platform-alloy-1`), or the node reconciles but sends neither (check both). Until fixed, `zpool status -x` on the host shows the pool's state."
       runbook_url = local.appliance_runbook
     }
 
@@ -4043,6 +4048,14 @@ resource "grafana_rule_group" "appliance" {
             count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
             unless on (node, region, appliance)
             count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+          )
+          or
+          (
+            count by (node, region, appliance) (deploy_last_success_timestamp{project="reconcile", appliance="prod-us-east-2", service_name=~"appliance-.*-host"})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
           )
         PROMQL
       }))
