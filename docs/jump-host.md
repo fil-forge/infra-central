@@ -52,7 +52,7 @@ so the first connection checks the host key instead of asking you to accept it. 
 
 ```
 Host forge-jump
-  HostName 198.51.100.7
+  HostName JUMP_HOST_ADDRESS
   User jump
   IdentityFile ~/.ssh/<the key you listed in ssh_public_keys>
   IdentitiesOnly yes
