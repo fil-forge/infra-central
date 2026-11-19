@@ -3065,11 +3065,14 @@ resource "grafana_rule_group" "appliance" {
   # segment holding them ships to Forge, so a copy of the database holds the
   # catalog that exists nowhere but the host's disk (fil-forge/ingot's
   # logstore/README.md). Segments seal within seconds and ship right after, so
-  # the oldest journaled block is normally seconds old. A ship that fails is
-  # retried, a few times at once and then by a sweep each minute until it
-  # lands, so half an hour means shipping is failing, not slow. Nothing is
-  # lost while a segment waits, since its blocks are on disk and in Postgres:
-  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # the oldest journaled block is normally seconds old. A ship is a
+  # queue-bucket.ship task. One that fails is retried with a backoff that
+  # doubles from a second to five minutes, until it lands, so half an hour
+  # means shipping is failing, not slow. A ship that finds no authority is
+  # the exception: Ingot fails that task for good, and the bucket's next
+  # write queues it again. Nothing is lost while a segment waits, since its
+  # blocks are on disk and in Postgres: a warning. The age is measured, not
+  # inferred from a rate, so for = 5m only
   # rides out a slow scrape.
   #
   # A restart is the wrong way to retry. Ingot signs a ship with authority it
@@ -3077,14 +3080,16 @@ resource "grafana_rule_group" "appliance" {
   # an idle bucket's segments then wait for its next write. After an outage
   # longer than that authority's hour, every idle bucket with a backlog waits
   # the same way, so the alert can outlast its cause by days with nothing to do.
+  # A bucket that gets no further write, such as one a test run left behind,
+  # holds the alert until it is deleted: DeleteBucket drops its journal rows.
   # If that ever matters, the fix is in hilt, which holds the tenant's keys and
   # could mint Ingot a narrow ship-only delegation when it has none; it has no
   # endpoint for that yet. A restart is the remedy for two cases. One is a
   # segment whose file is gone from disk: its blocks are safe in the journal,
   # and at startup Ingot rebuilds the segment from them (FIL-1601) before it
   # retires or deletes the lost row. The other is a ship that hangs (its HTTP
-  # clients set no timeout), which blocks the bucket's queue and sweep alike
-  # and logs nothing. Either way the bucket then waits for its next write, like
+  # clients set no timeout), which holds the bucket's ship task and logs
+  # nothing. Either way the bucket then waits for its next write, like
   # any idle bucket after a restart, and a rebuilt segment keeps its blocks'
   # journal age, so the alert stays until that write. One case needs Ingot's
   # maintainers: a ship that fails on its own every time. An Ingot configured
@@ -3094,10 +3099,17 @@ resource "grafana_rule_group" "appliance" {
   # but the delete dropped its journal rows when it emptied the bucket's root,
   # so it neither holds the gauge nor appears in the runbook's query.
   #
-  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
-  # one pass while the queue waits, so a draining backlog and a hung ship both
-  # log nothing but 'flush queue full'. The runbook tells them apart by
-  # progress: whether the bucket's oldest seq moves on.
+  # A ship that succeeds logs nothing, and one task ships a bucket's whole
+  # backlog, so a draining backlog and a hung ship both log nothing. The
+  # runbook tells them apart by progress: whether the bucket's oldest seq
+  # moves on.
+  #
+  # The task runner logs a ship's failures ('task will be retried', 'task
+  # failed') with the bucket's name only inside the error text, and the log's
+  # own lines ('logstore: tick seal') carry it as a `bucket` field, so the
+  # runbook's query filters on the name as text. A ship without authority
+  # logs one 'task failed' line when it gives up, which can be as old as the
+  # bucket's oldest block, so the runbook reads the log back that far.
   #
   # The gauge is the oldest block across every bucket, and several buckets can
   # be stuck at once for different reasons, so the runbook lists every bucket
@@ -3118,7 +3130,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'logstore: ship attempt failed' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost. Ingot retries a failed ship on its own, backing off to every five minutes, except in 2). Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" |= \"<bucket>\"` over a time range that goes back as far as the bucket's age: a failure can be logged once, when the oldest block was written. A ship's failures are the task runner's 'task will be retried' and 'task failed' lines, which name the bucket only in their error text. 'uploader: index publication failed' lines, and 'blob add failed' lines with `publishShardIndex` in their stack trace, come after a ship that succeeded and are unrelated to a stall. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'task will be retried' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. Ingot gives that ship up, logging one 'task failed' line, and the bucket's next write queues it again. It ships within a minute of that write, however long that takes. Nothing to do for a bucket still in use. A bucket nobody will write to again, such as a test's leftover, holds the alert for good: have its owner empty it and delete it with an S3 DeleteBucket, which drops its journal rows. 3) 'task will be retried' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within five minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark catalog segment <seq> shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) No line for the bucket, or 'task will be retried' lines that stopped over ten minutes ago with no 'task failed' after them, and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "34"
