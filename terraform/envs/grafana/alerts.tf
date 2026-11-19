@@ -3788,6 +3788,306 @@ resource "grafana_rule_group" "appliance" {
       })
     }
   }
+
+  # The appliance's ZFS pool. prod/us-east-2 keeps all its state on one pool,
+  # a mirror of two drives. One drive failing leaves the pool DEGRADED and
+  # every container serving, so nothing else says it happened, and a second
+  # failure loses the pool (infra-nodes docs/decisions/2026-11-ist1-appliance-
+  # storage.md, "Left to the node's deployment"). The state comes from the node
+  # exporter's zfs collector as node_zfs_zpool_state, 1 for the state the pool
+  # is in; what the last scrub found comes from the node's textfile report
+  # (infra-nodes docs/observability.md, "The ZFS pool").
+  #
+  # Critical: on-call has to get the drive replaced before the second one goes.
+  # `for` is 5m so a device that drops and returns within one evaluation does
+  # not page. FAULTED, SUSPENDED and UNAVAIL fire this too, though those
+  # usually take the node's telemetry down and "Appliance has stopped
+  # reporting" with it.
+  #
+  # no_data_state is OK: a healthy pool has every non-online series at 0, which
+  # the threshold drops, and a node without ZFS has none at all.
+  #
+  # Paused until prod-us-east-2 is a live appliance; the PR that lists it in
+  # live_appliances unpauses these three rules with no edit here.
+  rule {
+    name           = "Appliance ZFS pool is not online"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "ZFS pool {{ $labels.zpool }} on {{ $labels.node }} is {{ $labels.state }}"
+      description = "The pool is not ONLINE. On a mirror, DEGRADED means one drive has failed or gone missing and the node is running on the other; a second failure loses the pool. `zpool status -x {{ $labels.zpool }}` on the host names the drive. Get it replaced, then `zpool replace`; the alert clears when the resilver finishes."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, zpool, state) (
+            node_zfs_zpool_state{${local.appliance_matcher}, state!="online"}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # A scrub that found blocks neither drive could repair, or a pool that lists
+  # files with permanent errors. The data is already damaged, so paging at
+  # night recovers nothing: a warning. The two series are summed per pool so
+  # one instance covers both. Scan errors are blocks no copy could supply;
+  # only a scrub's are read here, and a resilver's land in the pool's data
+  # error count, so this still catches them. `for` is 5m: neither value
+  # moves until the next scrub or a `zpool clear`.
+  #
+  # no_data_state is OK: a pool with no errors fails the threshold, and a node
+  # without the report has no series.
+  rule {
+    name           = "Appliance ZFS pool has data errors"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "ZFS pool {{ $labels.zpool }} on {{ $labels.node }} has data errors"
+      description = "The last scrub found errors it could not repair, or the pool lists files with permanent errors. `zpool status -v {{ $labels.zpool }}` on the host lists the files; the dataset each is in says which service owns it. Restore them, then `zpool clear` and `zpool scrub` to confirm."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, zpool) (
+            zfs_pool_data_errors{${local.appliance_matcher}}
+            or
+            zfs_pool_scan_errors{${local.appliance_matcher}, function="scrub"}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # One or both of the pool's two sources has stopped. Four cases:
+  # - The report has stopped moving. The textfile collector re-exports the
+  #   last file on every scrape, so its series stay present with stale
+  #   values, and the file's modification time is the signal, as the
+  #   reconcile stamp's age is for "Appliance has stopped reconciling". The
+  #   timer runs every five minutes; thirty without a write is six missed runs.
+  # - The node sends the pool state but no report: the timer was never
+  #   enabled, so a stale-age check has nothing to read.
+  # - The node sends the report but no pool state: the zfs collector is
+  #   failing, and the "not online" rule above has nothing to read, so a
+  #   degraded pool would not page.
+  # - prod-us-east-2 reconciles but sends neither: the rollout that ships both
+  #   was missed or both collectors are off. That appliance is the one these
+  #   rules expect a pool on, so its reconcile stamp, which every reporting
+  #   node sends, stands in for the missing sources there. "Appliance has stopped reporting" covers a
+  #   node that sends no stamp either.
+  # A warning: the pool itself is probably fine, and on-call can read its
+  # state on the host with `zpool status -x`.
+  #
+  # no_data_state is OK: a healthy node fails every branch, and a node
+  # without ZFS has neither source and is not prod-us-east-2.
+  rule {
+    name           = "Appliance ZFS pool health is not reporting"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "The ZFS pool's health on {{ $labels.node }} is not reaching Grafana"
+      description = "Either zfs_pool.prom is missing or 30 minutes old (filone-pool-health.timer stopped or was never enabled; `systemctl list-timers filone-pool-health.timer` and `journalctl -u filone-pool-health.service` say why), or the report arrives without node_zfs_zpool_state (Alloy's zfs collector is failing; `docker logs filone-platform-alloy-1`), or the node reconciles but sends neither (check both). Until fixed, `zpool status -x` on the host shows the pool's state."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          (
+            max by (node, region, appliance) (
+              time() - node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"}
+            ) > 1800
+          )
+          or
+          (
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+          )
+          or
+          (
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+          )
+          or
+          (
+            count by (node, region, appliance) (deploy_last_success_timestamp{project="reconcile", appliance="prod-us-east-2", service_name=~"appliance-.*-host"})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
 }
 
 # Its own group at 60s. A stopped container should reach Slack within ten
