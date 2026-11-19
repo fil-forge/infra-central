@@ -196,8 +196,10 @@ import service on the appliance writes as `pandora_migration`.
 
 A new minor release is a one-line change to `engine_version`, applied in place. A new major version
 is not, because the cluster's parameter group is named for its major version and the `aurora` module
-performs no major upgrade. The cluster holds test data, so it is dropped and created again, in two
-pull requests that each get their own apply:
+performs no major upgrade. A cluster that holds production data needs an in-place major upgrade,
+and that procedure has to be designed before the next major version. Never drop such a cluster.
+While the cluster holds only test data it is dropped and created again, in two pull requests that
+each get their own apply:
 
 1. Set `pandora_db = null` and merge. CI deletes the cluster as in
    [Dropping the cluster](#dropping-the-cluster). The seed phase runs again with no pandora host and

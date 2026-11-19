@@ -92,8 +92,10 @@ variable "pandora_db" {
     reach it only over the stage's VPN. See docs/pandora-vpn.md.
 
     engine_version is the cluster's Aurora PostgreSQL minor release, set apart
-    from the stage's own database. A new major replaces nothing on its own:
-    drop the cluster first, as docs/pandora-vpn.md describes.
+    from the stage's own database. A new major on a cluster that holds data
+    needs an in-place major upgrade, which this module does not perform yet.
+    Dropping the cluster first, as docs/pandora-vpn.md describes, is only for
+    a cluster whose data can be lost.
   EOT
   type = object({
     engine_version        = string
