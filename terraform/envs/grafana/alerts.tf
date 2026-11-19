@@ -943,7 +943,7 @@ resource "grafana_rule_group" "central" {
   # instance and stops when the instance stops or is terminated. The metric
   # stream ships it account-wide (modules/telemetry), and its series carry the
   # instance id but no tags, so the rule watches every instance in the prod
-  # account. The jump host is the only instance this repository runs there;
+  # account's us-east-2. The jump host is the only instance this repository runs there;
   # the services run on Fargate, which publishes no EC2 metrics.
   #
   # no_data_state is Alerting: no series at all means the instance is stopped
@@ -966,8 +966,8 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }} is failing its status checks"
-      description = "EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }}, the jump host, has failed its EC2 status checks for 10 minutes, or no status check data has arrived for about 15, which is what a stopped or terminated instance looks like. Operators cannot SSH to the appliances through it. docs/jump-host.md, \"When it is down\", says what to do."
+      summary     = "{{ if $labels.dimension_InstanceId }}EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }} is failing its status checks{{ else }}The jump host is sending no status check data: it is stopped or gone, or the metric stream is not delivering AWS/EC2{{ end }}"
+      description = "The jump host{{ if $labels.dimension_InstanceId }}, EC2 instance {{ $labels.dimension_InstanceId }} in AWS account {{ $labels.account_id }},{{ end }} has failed its EC2 status checks for 10 minutes, or no status check data has arrived for about 15, which is what a stopped or terminated instance looks like. Operators cannot SSH to the appliances through it. docs/jump-host.md, \"When it is down\", says what to do."
     }
 
     labels = {

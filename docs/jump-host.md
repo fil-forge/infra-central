@@ -93,7 +93,7 @@ the instance has failed its EC2 status checks for 10 minutes, or when no status 
 arrived for about 15. EC2 stops publishing status checks for a stopped or terminated instance, so
 the second case usually means the instance is no longer running. The data comes from `AWS/EC2`'s
 `StatusCheckFailed` in the prod account's metric stream (`terraform/envs/bootstrap/prod/us-east-2`,
-applied by hand), and the rule watches every instance in that account, of which the jump host is the
+applied by hand), and the rule watches every instance in that account and region, of which the jump host is the
 only one this repository runs. Until that root is applied with `AWS/EC2` in its stream, the rule
 warns that no data is arriving.
 

@@ -17,7 +17,7 @@ about a minute of being written. The CloudWatch groups stay as they are, thirty 
 NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and the DynamoDB tables'
 metrics arrive too, through the metric stream
 [fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
-From `AWS/EC2` only `StatusCheckFailed` ships, for every instance in the account; in the prod
+From `AWS/EC2` only `StatusCheckFailed` ships, for every instance in the account and region; in the prod
 account that is the jump host ([jump-host.md](jump-host.md)).
 
 **Not shipped.** Application metrics, since not all services expose a `/metrics` endpoint yet;
@@ -349,7 +349,7 @@ list, `aws_ecs_.*` for example.
 | `AWS/ApplicationELB` | `dimension_LoadBalancer=~"app/fc-<stage>.*"`, `dimension_TargetGroup` |
 | `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
-| `AWS/EC2`            | none; prod's only instance is the jump host, `dimension_InstanceId`   |
+| `AWS/EC2`            | none; the jump host is the only one this repository runs, `dimension_InstanceId` |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
 | `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
 | `AWS/Firehose`       | `dimension_DeliveryStreamName="fc-<stage>-logs"`                      |
