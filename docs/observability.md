@@ -145,6 +145,11 @@ on `stage` and `service` for that long.
 | Ingot volume free space below 10%                    | Forge Regions            | node exporter                 | FIL-1616 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
+| Piri's chain RPC is rejecting its credentials        | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri cannot connect to its chain RPC                 | Forge Regions            | Piri's logs, Loki             | FIL-1553 |
+| Piri cannot reach its chain RPC                      | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri's chain RPC is rate limiting it                 | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri's chain RPC WebSocket keeps dropping            | Forge Regions            | Piri's metrics                | FIL-1553 |
 | Piri's proving period has not advanced               | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proving is failing                              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
