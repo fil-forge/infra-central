@@ -1,16 +1,17 @@
 # Asks infra-nodes to test the nodes of the stages this repository deployed,
 # by sending a central-deployed repository dispatch to it. infra-nodes'
-# test-nodes.yml then smoke-tests each node and runs an end-to-end test on it:
-# it creates a tenant through Hilt, stores two objects on the node and reads
-# them back, so it covers the write path through central that this
-# repository's smoke test does not.
+# test-nodes.yml then smoke-tests each node. On dev and staging nodes it also
+# runs an end-to-end test: it creates a tenant through Hilt, stores two
+# objects on the node and reads them back, so it covers the write path
+# through central that this repository's smoke test does not. Prod nodes get
+# only the smoke test until FIL-1491.
 #
 # Check and deploy calls this once after a push to main, when its central
-# smoke tests (smoke-dev and smoke-staging) have finished, with every stage
-# whose central smoke test passed. The push therefore starts one run in
-# infra-nodes, and that run posts at most one alert, naming the commit passed
-# here. This job only fails when GitHub refuses the dispatch, and Check and
-# deploy's alert reports that.
+# smoke tests (smoke-dev, smoke-staging and smoke-prod) have finished, with
+# every stage whose central smoke test passed. The push therefore starts one
+# run in infra-nodes, and that run posts at most one alert, naming the commit
+# passed here. This job only fails when GitHub refuses the dispatch, and
+# Check and deploy's alert reports that.
 #
 # Promotion does not wait for the tests, which run in infra-nodes.
 name: Start node tests
