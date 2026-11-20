@@ -149,8 +149,7 @@ module "platform" {
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
   # the VPN; docs/pandora-vpn.md has the steps.
   #
-  # It holds the pack ledger for the import service, and runs PostgreSQL 18
-  # while the stage's own cluster stays on 16.
+  # It holds the pack ledger for the import service.
   pandora_db = {
     engine_version        = "18.6"
     instance_count        = 1
