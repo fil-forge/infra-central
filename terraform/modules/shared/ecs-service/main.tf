@@ -134,21 +134,29 @@ resource "aws_ecs_task_definition" "this" {
 
         logConfiguration = {
           logDriver = "awslogs"
-          options = {
-            "awslogs-group"         = aws_cloudwatch_log_group.this.name
-            "awslogs-region"        = var.region
-            "awslogs-stream-prefix" = var.service
-          }
+          options = merge(
+            {
+              "awslogs-group"         = aws_cloudwatch_log_group.this.name
+              "awslogs-region"        = var.region
+              "awslogs-stream-prefix" = var.service
+            },
+            var.log_non_blocking ? {
+              "mode"            = "non-blocking"
+              "max-buffer-size" = "25m"
+            } : {},
+          )
         }
 
         # ECS restarts an unhealthy container without waiting for the ALB to
         # drain it, which matters most for the services with no ALB route.
+        # ECS caps startPeriod at 300 seconds; a longer start window comes
+        # from health_check_retries and health_check_interval.
         healthCheck = {
           command     = ["CMD-SHELL", "${var.health_check_command} || exit 1"]
-          interval    = 30
+          interval    = var.health_check_interval
           timeout     = 5
-          retries     = 3
-          startPeriod = var.health_check_start_period
+          retries     = var.health_check_retries
+          startPeriod = min(var.health_check_start_period, 300)
         }
       },
       local.wrapped_command == null ? {} : {
@@ -165,6 +173,8 @@ resource "aws_ecs_service" "this" {
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
+
+  availability_zone_rebalancing = var.availability_zone_rebalancing
 
   # Migrations run in-process via goose for sprue, hilt, swarf and plc, and
   # concurrent starts race on the goose advisory lock. At desired_count 1 that

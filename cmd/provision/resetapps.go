@@ -197,7 +197,7 @@ func (d *deps) openBaoAsRoot(ctx context.Context) (*api.Client, error) {
 		return nil, err
 	}
 
-	token, err := d.store.GetSecret(ctx, "openbao", "root-token")
+	token, err := openBaoRootToken(ctx, d.keys, d.store)
 	if err != nil {
 		return nil, fmt.Errorf("read openbao's root token: %w", err)
 	}
