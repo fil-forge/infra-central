@@ -30,3 +30,10 @@ chain = {
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
+
+# Appliance region labels. Adding one here creates the transit key its node's
+# OpenBao seals against and the IAM user it writes backups as; moving it to
+# retired_appliance_regions destroys both and revokes the node's unseal token.
+# A retired label stays in that list, and docs/appliance-onboarding.md is the
+# procedure for both.
+appliance_regions = ["us-east-2"]
