@@ -128,11 +128,16 @@ module "platform" {
   # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
   # arithmetic and the costs.
   db_engine         = "aurora"
-  db_engine_version = "16.15"
+  db_engine_version = "18.6"
   db_instance_class = "db.r8g.large"
   db_instance_count = 2
   pitr_window_days  = 35
   db_kms_key_arn    = data.aws_kms_alias.aurora.target_key_arn
+
+  # On only for the upgrade to 18.6, and turned off again once it has applied.
+  # See docs/decisions/2026-11-database-major-upgrades.md.
+  db_allow_major_version_upgrade = true
+  db_apply_immediately           = true
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
