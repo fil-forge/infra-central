@@ -20,25 +20,51 @@ rebuild can read what the keys encrypted.
 
 ## Rebuilding after losing us-east-2
 
-Central is rebuilt in us-east-2 once it is back, or in another region. The steps for the keys do not
-depend on which, and no replica is made ahead of time in a region Central might move to.
+Central is rebuilt in us-east-2 once it is back, or in another region. Either way, Aurora and
+OpenBao are restored with the eu-central-1 replicas while us-east-2 is still down. No replica is
+made ahead of time in a region Central might move to.
 
-KMS limits what can be done while us-east-2 is down. Only a primary key can be replicated, and
-`ReplicateKey` runs in the primary's region; `UpdatePrimaryRegion` also needs the current primary.
-So with us-east-2 down, the replicas cannot be promoted and no new key in the same multi-region set
-can be made in any region. Neither step is needed:
+A replica encrypts and decrypts on its own: it holds the same key material and the same `mrk-…` key
+id as its primary, so whatever the primary encrypted, the replica decrypts, with no call to
+us-east-2. What does need the primary's region is managing the set of keys. Only a primary can be
+replicated, and `UpdatePrimaryRegion` needs the current primary, so while us-east-2 is down no
+replica can be promoted and no new linked key can be made. The rebuild needs neither.
 
-- **Aurora.** Data restored from the DR region into the rebuild region is re-encrypted on the way:
-  a snapshot copied across regions takes a key in the target region (`--kms-key-id`). In us-east-2
-  that is `alias/fc-prod-aurora`; elsewhere, any new key.
-- **OpenBao.** The seal's ciphertext names the multi-region key id, and any key in the set decrypts
-  it: the `awskms` seal's `Decrypt` sends no key id (go-kms-wrapping's `awskms` wrapper v2.4.0, which
-  OpenBao 2.6.0 uses).
-  - Rebuilding in us-east-2 with the primary intact, the platform root finds it by alias as usual.
-  - Otherwise OpenBao unseals against the eu-central-1 replica across regions: its seal takes
-    `region = "eu-central-1"` and the replica's ARN. The platform module sets the seal's region to
-    the stage's, so this needs the change FIL-1297 makes. To stop depending on eu-central-1, migrate
-    the seal to a key in the rebuild region afterwards.
+### Aurora
+
+Data restored from the DR region into the rebuild region is re-encrypted on the way: a snapshot
+copied across regions takes a key in the target region (`--kms-key-id`). In us-east-2 that is
+`alias/fc-prod-aurora`; elsewhere, any new key.
+
+### OpenBao
+
+OpenBao's storage in Aurora holds its root key encrypted by the seal key. To unseal, OpenBao sends
+that ciphertext to KMS `Decrypt`, and it goes on using the seal key afterwards. Any key in the
+multi-region set can do this, because the ciphertext names the multi-region key id and the `awskms`
+seal's `Decrypt` sends no key id of its own (go-kms-wrapping's `awskms` wrapper v2.4.0, which
+OpenBao 2.6.0 uses).
+
+If us-east-2 is back with its primary intact, the platform root finds the key by alias as usual and
+nothing changes. Otherwise:
+
+1. Restore Aurora into the rebuild region (FIL-1297). OpenBao's storage comes with it.
+2. Point OpenBao's seal at the eu-central-1 replica, calling KMS there from the rebuild region:
+
+   ```hcl
+   seal "awskms" {
+     region     = "eu-central-1"
+     kms_key_id = "<ARN of the replica of alias/fc-prod-openbao-seal>"
+   }
+   ```
+
+   The task role needs `kms:Encrypt`, `kms:Decrypt` and `kms:DescribeKey` on the replica's ARN.
+   The platform module sets the seal's region to the stage's and finds the key by alias in that
+   region, so this needs the change FIL-1297 makes.
+
+3. OpenBao starts, decrypts its root key through eu-central-1 and unseals with no operator step.
+4. Optionally, move off eu-central-1: migrate the seal to a new key in the rebuild region with
+   OpenBao's seal migration (the new seal configured beside the old one marked `disabled`, then
+   `bao operator unseal -migrate`). Until then, the rebuilt Central depends on KMS in eu-central-1.
 
 Before relying on a replica, check that it is enabled:
 
