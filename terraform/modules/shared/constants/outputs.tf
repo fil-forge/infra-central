@@ -63,9 +63,9 @@ output "prod_openbao_seal_key_alias" {
   value       = "alias/fc-prod-openbao-seal"
 }
 
-output "prod_kms_break_glass_role_name" {
+output "prod_kms_key_admin_role_name" {
   description = "The only role that may delete, disable or re-policy the prod Aurora and OpenBao seal keys and their replicas. The prod account bootstrap creates it and the prod regional bootstrap names it in the keys' policies. Outside fc-*, so the CI apply role cannot write it."
-  value       = "forge-kms-break-glass"
+  value       = "forge-kms-key-admin"
 }
 
 # The SpiderOak compatibility server's appliances, per stage and then per

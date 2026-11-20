@@ -1,5 +1,5 @@
 # Account-wide bootstrap for the prod account: the state bucket, the two roles
-# GitHub Actions would assume to deploy the prod stage, and the break-glass role
+# GitHub Actions would assume to deploy the prod stage, and the key admin role
 # for the regional root's KMS keys.
 #
 # The non-prod copy of this directory carries the full explanation of why the
@@ -81,60 +81,71 @@ resource "aws_iam_service_linked_role" "s2svpn" {
   aws_service_name = "s2svpn.amazonaws.com"
 }
 
-# The break-glass role: the only principal, besides the account's root user,
+# The key admin role: the only principal, besides the account's root user,
 # that the policies of the Aurora and OpenBao seal keys let schedule deletion
 # of, disable, re-policy or re-alias them. See the regional root for the guard
 # and docs/region-loss.md for when to use it.
 #
-# Only the people below may assume it, each from their own AdministratorAccess
-# SSO session. Identity Center names a session after the user, so aws:userid
-# ends in their username. The guard stops CI and mistakes, not an admin set on
-# it: AdministratorAccess can rewrite this trust policy.
+# It is not a break-glass identity: only the people below may assume it, each
+# from their own AdministratorAccess SSO session, so it needs Identity Center
+# up. Identity Center names a session after the user, so aws:userid ends in
+# their username, and each must name their session after themselves so the
+# role's CloudTrail events name them too. The guard stops CI and mistakes, not
+# an admin set on it: AdministratorAccess can rewrite this trust policy.
 #
 # AdministratorAccess, because an operator applies the whole regional root as
 # this role whenever a key's policy or replica changes.
 locals {
-  kms_break_glass_users = [
+  kms_key_admin_users = [
     "alan@fil.org",
     "hannah@fil.org",
     "miroslav@fil.org",
   ]
 }
 
-data "aws_iam_policy_document" "kms_break_glass_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
+data "aws_iam_policy_document" "kms_key_admin_assume" {
+  dynamic "statement" {
+    for_each = local.kms_key_admin_users
+    content {
+      actions = ["sts:AssumeRole"]
 
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::${module.constants.prod_account_id}:root"]
-    }
+      principals {
+        type        = "AWS"
+        identifiers = ["arn:aws:iam::${module.constants.prod_account_id}:root"]
+      }
 
-    condition {
-      test     = "ArnLike"
-      variable = "aws:PrincipalArn"
-      # Identity Center puts its roles under /aws-reserved/sso.amazonaws.com/,
-      # with a region segment in some accounts and none in others.
-      values = ["arn:aws:iam::${module.constants.prod_account_id}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"]
-    }
+      condition {
+        test     = "ArnLike"
+        variable = "aws:PrincipalArn"
+        # Identity Center puts its roles under /aws-reserved/sso.amazonaws.com/,
+        # with a region segment in some accounts and none in others.
+        values = ["arn:aws:iam::${module.constants.prod_account_id}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"]
+      }
 
-    condition {
-      test     = "StringLike"
-      variable = "aws:userid"
-      values   = [for user in local.kms_break_glass_users : "*:${user}"]
+      condition {
+        test     = "StringLike"
+        variable = "aws:userid"
+        values   = ["*:${statement.value}"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "sts:RoleSessionName"
+        values   = [statement.value]
+      }
     }
   }
 }
 
-resource "aws_iam_role" "kms_break_glass" {
-  name                 = module.constants.prod_kms_break_glass_role_name
-  description          = "Break-glass for the prod Aurora and OpenBao seal KMS keys. See docs/region-loss.md."
-  assume_role_policy   = data.aws_iam_policy_document.kms_break_glass_assume.json
+resource "aws_iam_role" "kms_key_admin" {
+  name                 = module.constants.prod_kms_key_admin_role_name
+  description          = "Key admin for the prod Aurora and OpenBao seal KMS keys. See docs/region-loss.md."
+  assume_role_policy   = data.aws_iam_policy_document.kms_key_admin_assume.json
   max_session_duration = 3600
 }
 
-resource "aws_iam_role_policy_attachment" "kms_break_glass" {
-  role       = aws_iam_role.kms_break_glass.name
+resource "aws_iam_role_policy_attachment" "kms_key_admin" {
+  role       = aws_iam_role.kms_key_admin.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
@@ -150,8 +161,8 @@ output "ci_apply_role_arn" {
   value = module.github_actions_iam.apply_role_arn
 }
 
-output "kms_break_glass_role_arn" {
-  value = aws_iam_role.kms_break_glass.arn
+output "kms_key_admin_role_arn" {
+  value = aws_iam_role.kms_key_admin.arn
 }
 
 # Paste these into the fil-one/infrastructure delegation, one NS record per
