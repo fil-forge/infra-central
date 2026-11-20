@@ -33,8 +33,8 @@ data "aws_iam_policy_document" "this" {
       "ssm:GetParametersByPath",
       # Retiring an appliance region deletes its parameters, because the transit
       # key they describe is gone and a record of a node that can never come
-      # back is worse than no record. Nothing else in this function deletes
-      # anything.
+      # back is worse than no record. The seed and vault phases delete the SSM
+      # copies of keys they moved to Secrets Manager.
       "ssm:DeleteParameters",
     ]
 
@@ -60,10 +60,13 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The service identities and the two wallets. The function creates each one
-  # once and never deletes any; rotating a key is an operator's act. Seeding a
-  # stage that predates the move also copies each key out of SSM, which is what
-  # the ssm:DeleteParameters grant above then removes.
+  # The service identities, the two wallets, and OpenBao's root token and
+  # recovery keys. The function never deletes any; rotating a key is an
+  # operator's act. PutSecretValue writes a derived key, or OpenBao's
+  # credentials after an initialisation replaced an old barrier. Seeding or
+  # running the vault phase on a stage that predates the move also copies each
+  # key out of SSM, which is what the ssm:DeleteParameters grant above then
+  # removes.
   statement {
     sid = "ManageStageKeys"
 

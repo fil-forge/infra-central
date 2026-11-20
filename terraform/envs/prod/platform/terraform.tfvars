@@ -9,7 +9,7 @@ ingot_hostname_suffix = "filonecontent.com"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish STAGE=prod` prints the line to paste here.
-provision_image_digest = "sha256:76b37a0a889dbfc67c2c3d57bd797eb24545d2cf84d985b68f758b3f05fe192f"
+provision_image_digest = "sha256:d43775dcd94b66383386b3147e18ecd67cd6aa0510b423bcf0dd22c14274666d"
 
 # Calibration testnet, with the proxy addresses dev and staging use, for the
 # first prod stack's test run. Prod moves to mainnet with the Forge contracts
