@@ -1,5 +1,6 @@
 // Package secretstore holds the keys this project cannot afford to lose: the
-// service identities and the two funded wallets.
+// service identities, the two funded wallets, and central OpenBao's root token
+// and recovery keys.
 //
 // It follows the same never-regenerate rule as ssmstore. An existing secret
 // always wins, and a caller that loses a creation race reads the winner back.

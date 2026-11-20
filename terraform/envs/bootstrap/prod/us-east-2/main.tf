@@ -4,9 +4,9 @@
 # its Aurora cluster and its OpenBao seal, with their replicas in the DR region,
 # and the EventBridge rules that tell Grafana when one of those keys changes.
 #
-# Apply it with -var break_glass=true whenever a key's policy or replica
-# changes, so both providers act as the break-glass role from ../account/; see
-# docs/region-loss.md.
+# Apply it with -var key_admin=<your SSO username> whenever a key's policy or
+# replica changes, so both providers act as the key admin role from
+# ../account/; see docs/region-loss.md.
 #
 # The non-prod copy of this directory carries the full explanation of why the
 # state bucket and the CI roles are not here but in ../account/, why this root is
@@ -18,18 +18,18 @@
 # backend names.
 
 # The key guard below refuses PutKeyPolicy and ReplicateKey to everyone but the
-# break-glass role, so an apply that changes a key's policy or replica must run
+# key admin role, so an apply that changes a key's policy or replica must run
 # as that role. With this set, each provider assumes it from the operator's own
-# SSO credentials and keeps the role's credentials in memory. The state backend
-# keeps the SSO credentials.
-variable "break_glass" {
-  description = "Run both providers as the KMS break-glass role. Needed when a key's policy or replica changes; only the people the role trusts can use it."
-  type        = bool
-  default     = false
+# SSO credentials, in a session named after the operator, and keeps the role's
+# credentials in memory. The state backend keeps the SSO credentials.
+variable "key_admin" {
+  description = "Your SSO username, such as alan@fil.org. When set, both providers run as the KMS key admin role in a session of that name, which the role's trust policy requires. Needed when a key's policy or replica changes."
+  type        = string
+  default     = null
 }
 
 locals {
-  kms_break_glass_role_arn = "arn:aws:iam::${module.constants.prod_account_id}:role/${module.constants.prod_kms_break_glass_role_name}"
+  kms_key_admin_role_arn = "arn:aws:iam::${module.constants.prod_account_id}:role/${module.constants.prod_kms_key_admin_role_name}"
 }
 
 provider "aws" {
@@ -38,10 +38,10 @@ provider "aws" {
   allowed_account_ids = [module.constants.prod_account_id]
 
   dynamic "assume_role" {
-    for_each = var.break_glass ? [local.kms_break_glass_role_arn] : []
+    for_each = var.key_admin == null ? [] : [var.key_admin]
     content {
-      role_arn     = assume_role.value
-      session_name = "kms-break-glass"
+      role_arn     = local.kms_key_admin_role_arn
+      session_name = assume_role.value
     }
   }
 }
@@ -54,10 +54,10 @@ provider "aws" {
   allowed_account_ids = [module.constants.prod_account_id]
 
   dynamic "assume_role" {
-    for_each = var.break_glass ? [local.kms_break_glass_role_arn] : []
+    for_each = var.key_admin == null ? [] : [var.key_admin]
     content {
-      role_arn     = assume_role.value
-      session_name = "kms-break-glass"
+      role_arn     = local.kms_key_admin_role_arn
+      session_name = assume_role.value
     }
   }
 }
@@ -128,9 +128,9 @@ resource "aws_kms_alias" "aurora_dr" {
 # this key.
 #
 # Multi-region because the flag is fixed when a key is created, and changing
-# the key later means migrating a running OpenBao to a new seal. After losing
-# us-east-2, the platform root applied in the DR region unseals the Global
-# Database secondary's copy of OpenBao with the replica below.
+# the key later means migrating a running OpenBao to a new seal. The replica
+# below is the copy that survives losing us-east-2; docs/region-loss.md says
+# how a rebuild uses it.
 resource "aws_kms_key" "openbao_seal" {
   description                        = "Forge prod: the OpenBao seal"
   multi_region                       = true
@@ -171,7 +171,7 @@ resource "aws_kms_alias" "openbao_seal_dr" {
 }
 
 # The policy of all four keys. Losing either key makes the Aurora cluster, its
-# snapshots and OpenBao's storage unreadable, so only the break-glass role and
+# snapshots and OpenBao's storage unreadable, so only the key admin role and
 # the account's root user may take the actions that end a key's use, or that
 # would let someone else do so.
 #
@@ -192,8 +192,8 @@ resource "aws_kms_alias" "openbao_seal_dr" {
 # scheduled deletion. No action that uses the key may be guarded; the check
 # below fails the plan if one is.
 locals {
-  kms_break_glass_principals = [
-    local.kms_break_glass_role_arn,
+  kms_key_admin_principals = [
+    local.kms_key_admin_role_arn,
     "arn:aws:iam::${module.constants.prod_account_id}:root",
   ]
 
@@ -234,7 +234,7 @@ data "aws_iam_policy_document" "guarded_key" {
     condition {
       test     = "ArnNotEquals"
       variable = "aws:PrincipalArn"
-      values   = local.kms_break_glass_principals
+      values   = local.kms_key_admin_principals
     }
   }
 

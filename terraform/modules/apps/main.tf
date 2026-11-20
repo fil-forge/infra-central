@@ -188,7 +188,7 @@ module "hilt" {
 
   log_forwarding = var.log_forwarding
 
-  environment = {
+  environment = merge({
     # hilt binds 127.0.0.1 by default, which no health check can reach.
     HILT_SERVER_HOST = "0.0.0.0"
     HILT_SERVER_PORT = "8080"
@@ -216,7 +216,12 @@ module "hilt" {
     HILT_UPLOAD_PROOFS      = "${local.keys}/upload-proof.txt"
 
     HILT_LOG_LEVEL = var.log_level
-  }
+    },
+    # Set only where a stage sizes it, so the other stages' task definitions
+    # stay as they are and hilt keeps its own default of 10.
+    var.hilt_postgres_max_conns == null ? {} : {
+      HILT_STORAGE_POSTGRES_MAX_CONNS = tostring(var.hilt_postgres_max_conns)
+  })
 
   secrets = {
     HILT_STORAGE_POSTGRES_DSN            = "${local.ssm}/hilt/postgres-dsn"
@@ -294,6 +299,17 @@ module "swarf" {
 
   health_check_command = "curl -sf http://127.0.0.1:8080/health"
   health_check_path    = "/health"
+
+  # Swarf runs its migrations before /health answers, and 00002_seq.sql
+  # rewrites the whole revocation table, which takes minutes on staging. Swarf
+  # gives its start 10 minutes; this is a 12.5-minute window around it. The
+  # ALB ignores the first 750 seconds, and the container check fails after a
+  # 300-second start period (the ECS maximum) plus ten checks 45 seconds apart.
+  # The cost is a running container that fails its check is restarted after
+  # 7.5 minutes rather than 90 seconds, unless the ALB check replaces it first.
+  health_check_start_period = 750
+  health_check_interval     = 45
+  health_check_retries      = 10
 
   hostname          = local.host.swarf
   listener_arn      = var.listener_arn

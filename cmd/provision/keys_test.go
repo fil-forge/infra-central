@@ -15,6 +15,8 @@ import (
 type fakeLegacy struct {
 	secrets map[string]string
 	public  map[string]string
+	// deleteErr, when set, fails every Delete and deletes nothing.
+	deleteErr error
 }
 
 func (f *fakeLegacy) LookupSecret(ctx context.Context, service, name string) (string, bool, error) {
@@ -28,6 +30,9 @@ func (f *fakeLegacy) LookupPublic(ctx context.Context, service, name string) (st
 }
 
 func (f *fakeLegacy) Delete(ctx context.Context, service string, names ...string) ([]string, error) {
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
 	var deleted []string
 	for _, name := range names {
 		if _, ok := f.secrets[service+"/"+name]; ok {

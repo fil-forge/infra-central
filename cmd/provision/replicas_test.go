@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
+	"time"
+
+	"github.com/aws/smithy-go"
 )
 
 // fakeReplicator records each replicate and wait call in order, treats the
@@ -101,5 +105,90 @@ func TestReplicateKeysDoesNothingWithoutAReplicaRegion(t *testing.T) {
 	}
 	if len(keys.asked) != 0 || resp.BackupReplicaRegion != "" {
 		t.Errorf("replicateKeys() asked for %v and set region %q, want nothing", keys.asked, resp.BackupReplicaRegion)
+	}
+}
+
+// scriptedReplicator answers EnsureReplica with errs in turn, then succeeds,
+// and counts the calls.
+type scriptedReplicator struct {
+	fakeReplicator
+	errs  []error
+	calls int
+}
+
+func (f *scriptedReplicator) EnsureReplica(ctx context.Context, secretARN, replicaRegion string) (bool, error) {
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return false, f.errs[f.calls-1]
+	}
+	return true, nil
+}
+
+var errDenied = &smithy.GenericAPIError{
+	Code:    "AccessDeniedException",
+	Message: "no identity-based policy allows the secretsmanager:ReplicateSecretToRegions action",
+}
+
+func retryUntil(interval, budget time.Duration) grantRetry {
+	return grantRetry{interval: interval, deadline: time.Now().Add(budget)}
+}
+
+func TestEnsureReplicaOnceGrantedRetriesWhileDenied(t *testing.T) {
+	keys := &scriptedReplicator{errs: []error{errDenied, errDenied}}
+
+	added, err := ensureReplicaOnceGranted(context.Background(), keys, "arn:sprue/identity", "eu-central-1", retryUntil(time.Millisecond, time.Second))
+
+	type outcome struct {
+		Added bool
+		Err   error
+		Calls int
+	}
+	if got, want := (outcome{added, err, keys.calls}), (outcome{true, nil, 3}); got != want {
+		t.Errorf("outcome = %+v, want %+v", got, want)
+	}
+}
+
+func TestEnsureReplicaOnceGrantedFailsWithTheDenialWhenTheBudgetRunsOut(t *testing.T) {
+	keys := &scriptedReplicator{errs: slices.Repeat([]error{errDenied}, 1000)}
+	retry := retryUntil(time.Millisecond, 20*time.Millisecond)
+
+	_, err := ensureReplicaOnceGranted(context.Background(), keys, "arn:sprue/identity", "eu-central-1", retry)
+
+	if !errors.Is(err, errDenied) {
+		t.Errorf("error = %v, want it to wrap %v", err, errDenied)
+	}
+}
+
+func TestEnsureReplicaOnceGrantedDoesNotRetryOtherErrors(t *testing.T) {
+	keys := &scriptedReplicator{errs: []error{errors.New("throttled"), errDenied}}
+
+	_, _ = ensureReplicaOnceGranted(context.Background(), keys, "arn:sprue/identity", "eu-central-1", retryUntil(time.Millisecond, time.Second))
+
+	if keys.calls != 1 {
+		t.Errorf("EnsureReplica calls = %d, want 1", keys.calls)
+	}
+}
+
+func TestEnsureReplicaOnceGrantedStopsWhenTheContextEnds(t *testing.T) {
+	keys := &scriptedReplicator{errs: slices.Repeat([]error{errDenied}, 1000)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	retry := retryUntil(time.Hour, 2*time.Hour)
+
+	_, err := ensureReplicaOnceGranted(ctx, keys, "arn:sprue/identity", "eu-central-1", retry)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap %v", err, context.Canceled)
+	}
+}
+
+func TestEnsureReplicaOnceGrantedDoesNotRetryOnceTheSharedDeadlineHasPassed(t *testing.T) {
+	keys := &scriptedReplicator{errs: []error{errDenied}}
+	spentByEarlierKeys := retryUntil(time.Millisecond, -time.Second)
+
+	_, _ = ensureReplicaOnceGranted(context.Background(), keys, "arn:sprue/identity", "eu-central-1", spentByEarlierKeys)
+
+	if keys.calls != 1 {
+		t.Errorf("EnsureReplica calls = %d, want 1", keys.calls)
 	}
 }

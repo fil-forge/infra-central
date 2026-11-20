@@ -111,13 +111,23 @@ module "platform" {
   # enable point-in-time recovery on both tables.
   protect_stateful_resources = true
 
-  # A db.t4g.small allows roughly 225 connections. OpenBao takes 16, leaving
-  # ample headroom for the application services' connection pools.
+  # A db.t4g.small allows roughly 225 connections. OpenBao takes up to 16 per
+  # task, 48 across its three, leaving ample headroom for the application
+  # services' connection pools.
   openbao_max_parallel = 16
+
+  # Keep a replica of every identity and wallet key in the DR region.
+  backup_replica_region = module.constants.dr_region
 
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
   # hostname migration must explicitly replace them. Bumped again to move the
   # identity and wallet keys from SSM to Secrets Manager.
   seed_trigger = "4"
+
+  # Bumped to move OpenBao's root token and recovery keys from SSM to Secrets
+  # Manager and replicate them. The vault phase re-runs only when its input
+  # changes, so the bump has to land with the provision build that does the
+  # move.
+  vault_trigger = "2"
 }

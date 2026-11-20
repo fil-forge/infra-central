@@ -118,7 +118,7 @@ locals {
   # crosses alone and leaves the alert unable to say which stage it means.
   target_group_stage_regex = "targetgroup/fc-(${local.stages})-.*"
 
-  # The EC2 nodes' volume that holds only Ingot's spool, cache and catalog log
+  # The EC2 nodes' volume that holds only Ingot's cache and catalog log
   # (infra-nodes terraform/modules/node, aws_ebs_volume.data). Ingot keeps it
   # near its byte budget by design, so it gets its own, lower threshold.
   ingot_volume_mountpoint = "/mnt/fil-one/data"
@@ -144,6 +144,11 @@ locals {
   # nodes/dev/platform/config/alloy/config.alloy). appliance_matcher cannot be
   # reused: its service_name is the host exporter's.
   piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
+
+  # Piri's container log stream, same scheme as Postgres's below. Each Piri on
+  # a node has its own stream, and its instance label, <node>/piri-<n>, is the
+  # one Piri's metrics carry.
+  piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
 
   # Postgres's container log stream. Alloy names each container's stream
   # appliance-<stage>-<region>-<service> from the Compose service and stamps
@@ -298,6 +303,10 @@ locals {
   central_dashboard = "https://filecoinfoundation.grafana.net/d/forge-central?var-stage={{ $labels.stage }}"
   regions_dashboard = "https://filecoinfoundation.grafana.net/d/forge-regions?var-stage=${local.appliance_stage_label}&var-region={{ $labels.region }}"
 
+  # Every Central rule links to its entry in infra-central's runbook, which is
+  # headed by the rule's name. Appliance rules link to infra-nodes' instead.
+  central_runbook = "https://github.com/fil-forge/infra-central/blob/main/docs/RUNBOOK.md"
+
   # Fields every Prometheus query stage carries. `instant` picks one sample per
   # series and needs no reduce before the threshold; a range query does.
   query_defaults = {
@@ -320,6 +329,20 @@ resource "grafana_rule_group" "central" {
   # firing the hand-built rule had: this reads a CloudWatch metric published once
   # a minute with late and occasionally missing samples, so a single evaluation
   # is not evidence of anything.
+  #
+  # A service with no tasks at all has no registered targets, and CloudWatch then
+  # stops publishing HealthyHostCount for its target group instead of reporting
+  # 0. The series goes stale, its alert instance drops out, and no_data_state
+  # cannot help, because the other services' series keep the result non-empty.
+  # So the query's second half reads 0 for every stage and service seen in the
+  # last day but silent now. Found on 2026-11-10 by scaling fc-staging-swarf to
+  # 0 (FIL-1151): the rule stayed Normal with only the first half. With both,
+  # it fires about ten minutes after the last sample: five for the series to go
+  # stale and five for `for`. A service or stage removed or renamed on purpose
+  # alerts for up to a day, until it falls out of the lookback; silence it on
+  # its stage and service for that long. The second half also means
+  # no_data_state rarely applies now: if CloudWatch delivery stops everywhere,
+  # each stage and service alerts on its own rather than as one NoData alert.
   rule {
     name           = "Service has no healthy hosts"
     condition      = "B"
@@ -328,7 +351,8 @@ resource "grafana_rule_group" "central" {
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}"
+      summary          = "{{ $labels.service }} has no healthy hosts behind its target group on {{ $labels.stage }}, or its target group has stopped reporting"
+      runbook_url      = "${local.central_runbook}#service-has-no-healthy-hosts"
       dashboard_url    = "${local.central_dashboard}&viewPanel=6"
       __dashboardUid__ = "forge-central"
       __panelId__      = "6"
@@ -362,6 +386,16 @@ resource "grafana_rule_group" "central" {
             label_replace(
               label_replace(
                 aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}},
+                "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
+              ),
+              "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
+            )
+          )
+          or
+          0 * group by (stage, service) (
+            label_replace(
+              label_replace(
+                last_over_time(aws_applicationelb_healthy_host_count_minimum{${local.elb_matcher}}[1d]),
                 "service", "$1", "dimension_TargetGroup", "${local.target_group_regex}"
               ),
               "stage", "$1", "dimension_TargetGroup", "${local.target_group_stage_regex}"
@@ -428,6 +462,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning more than 1 server error a minute"
       description      = "More than one 5xx per minute, averaged over five, for ten minutes."
+      runbook_url      = "${local.central_runbook}#service-5xx-errors"
       dashboard_url    = "${local.central_dashboard}&viewPanel=3"
       __dashboardUid__ = "forge-central"
       __panelId__      = "3"
@@ -558,6 +593,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is returning 5xx for more than half of its requests"
       description      = "The service's targets have answered more than half of its requests in the last five minutes with a 5xx. Its ECS service's logs say why; docs/observability.md says how to read them in Grafana. The link opens the dashboard on this service alone, Overview included; drop var-service from its URL to see every service."
+      runbook_url      = "${local.central_runbook}#service-is-failing-most-requests"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=13"
       __dashboardUid__ = "forge-central"
       __panelId__      = "13"
@@ -676,6 +712,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "{{ $labels.dimension_FunctionName }} returned errors in the last five minutes"
       description = "The provision Lambda is erroring. Its log group is /aws/lambda/{{ $labels.dimension_FunctionName }}; docs/observability.md says how to read it in Grafana."
+      runbook_url = "${local.central_runbook}#provision-lambda-errors"
     }
 
     labels = {
@@ -790,6 +827,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
       description = "At least one tunnel of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has been down for 15 minutes, or no TunnelState data has arrived for about 20. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-tunnel-down"
     }
 
     labels = {
@@ -880,6 +918,7 @@ resource "grafana_rule_group" "central" {
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
       description = "Both tunnels of the compatibility server's VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} have been down for five minutes, or no TunnelState data has arrived for about ten. The appliance cannot reach the pandora database. The VPC console's Site-to-Site VPN connections page shows each tunnel's status and the reason. docs/pandora-vpn.md covers the appliance side."
+      runbook_url = "${local.central_runbook}#pandora-vpn-both-tunnels-down"
     }
 
     labels = {
@@ -1135,9 +1174,11 @@ resource "grafana_rule_group" "central_latency" {
   # reading as a request hours long. Central serves no S3 object operations, so
   # there is nothing size-dependent to exclude.
   #
-  # The stream carries no percentiles, so this is a mean: the sum of response
-  # times over their count, which weighs each request equally where averaging
-  # the per-minute averages would weigh each minute equally. CloudWatch
+  # This is a mean: the sum of response times over their count, which weighs
+  # each request equally where averaging the per-minute averages would weigh
+  # each minute equally. A mean hides a slow tail, which is why
+  # modules/telemetry also streams the p99; its rule follows once that series
+  # is in Grafana and its name is known (FIL-1291). CloudWatch
   # publishes the metric only in minutes with requests, so an idle service has
   # no series and no_data_state is OK.
   rule {
@@ -1150,6 +1191,7 @@ resource "grafana_rule_group" "central_latency" {
     annotations = {
       summary          = "{{ $labels.service }} on {{ $labels.stage }} is taking more than ${var.central_response_time_threshold_seconds}s on average to answer"
       description      = "The service's targets have averaged more than ${var.central_response_time_threshold_seconds}s per request over five minutes, for ten minutes. The threshold is provisional until FIL-1242 sets the SLO. Its ECS service's logs and CPU say why; docs/observability.md says how to read them in Grafana."
+      runbook_url      = "${local.central_runbook}#service-response-time-is-high"
       dashboard_url    = "${local.central_dashboard}&var-service={{ $labels.service }}&viewPanel=8"
       __dashboardUid__ = "forge-central"
       __panelId__      = "8"
@@ -1645,13 +1687,13 @@ resource "grafana_rule_group" "appliance" {
   # Ingot's local blob storage stays over its own budget. The threshold is the
   # budget itself, local_blob_max_bytes, which each node sets; this rule chooses
   # no number. Ingot's sweeper evicts cached bodies every 30s to stay under it,
-  # so usage that stays over means what is left is bodies it may not evict:
-  # uploads in flight, or uploads that failed (fil-forge/ingot's README, "Local
-  # disk").
+  # so usage that stays over means what is left is what it may not evict:
+  # writes in progress, more of them than the budget holds (fil-forge/ingot's
+  # README, "Local disk").
   #
   # A node with no budget publishes 0, which `> 0` drops, so it produces no
   # series and no_data_state = OK keeps it quiet. for = 15m is chosen: a burst
-  # of uploads can hold the spool over budget for minutes without anything
+  # of writes can hold the cache over budget for minutes without anything
   # being wrong. An instant query, so no reduce stage.
   rule {
     name           = "Ingot local disk over budget"
@@ -1662,7 +1704,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) is over its local disk budget"
-      description      = "Ingot's spool and cache together have held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: bodies being uploaded, or bodies whose upload failed (see the stalled uploads panel)."
+      description      = "Ingot's cache has held more than local_blob_max_bytes for fifteen minutes. The sweeper cannot evict what is left: writes in progress, which together outgrow the budget."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=17"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "17"
@@ -1730,12 +1772,12 @@ resource "grafana_rule_group" "appliance" {
   }
 
   # Ingot's stalled uploads are growing. Ingot reports the bytes of bodies whose
-  # upload has stalled -- intents still spooled or uploading an hour after their
-  # last state change -- and nothing reclaims a failed PUT's yet (a multipart
-  # part's goes with its session), nor may they be deleted by hand (Ingot's
-  # README), so the figure rarely falls. Firing on any stalled byte would
-  # therefore fire for good after one failure. Growth is the signal instead:
-  # more stalled bytes now than an hour ago means uploads are still failing.
+  # upload has stalled -- intents still uploading an hour after their last state
+  # change. They hold no local disk, and the provider expires an allocation that
+  # is never concluded, but nothing clears the intent, so the figure rarely
+  # falls. Firing on any stalled byte would therefore fire for good after one
+  # failure. Growth is the signal instead: more stalled bytes now than an hour
+  # ago means uploads are still failing.
   #
   # The hour is Ingot's own cutoff, not a choice here; the window matches it so
   # one failure shows as growth for about an hour and then resolves. for = 0m
@@ -1751,7 +1793,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has more stalled uploads than an hour ago"
-      description      = "Bodies whose upload did not finish are piling up in Ingot's spool: the upload failed, or it reached the provider and recording that failed. They count against the local disk budget, and nothing reclaims a failed PUT's yet (a multipart part's goes with its session); Ingot's logs say what failed."
+      description      = "Uploads that did not finish are piling up: the upload failed, or it reached the provider and recording that failed. They hold no local disk; Ingot's logs say what failed."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=18"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "18"
@@ -3201,11 +3243,14 @@ resource "grafana_rule_group" "appliance" {
   # segment holding them ships to Forge, so a copy of the database holds the
   # catalog that exists nowhere but the host's disk (fil-forge/ingot's
   # logstore/README.md). Segments seal within seconds and ship right after, so
-  # the oldest journaled block is normally seconds old. A ship that fails is
-  # retried, a few times at once and then by a sweep each minute until it
-  # lands, so half an hour means shipping is failing, not slow. Nothing is
-  # lost while a segment waits, since its blocks are on disk and in Postgres:
-  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # the oldest journaled block is normally seconds old. A ship is a
+  # queue-bucket.ship task. One that fails is retried with a backoff that
+  # doubles from a second to five minutes, until it lands, so half an hour
+  # means shipping is failing, not slow. A ship that finds no authority is
+  # the exception: Ingot fails that task for good, and the bucket's next
+  # write queues it again. Nothing is lost while a segment waits, since its
+  # blocks are on disk and in Postgres: a warning. The age is measured, not
+  # inferred from a rate, so for = 5m only
   # rides out a slow scrape.
   #
   # A restart is the wrong way to retry. Ingot signs a ship with authority it
@@ -3213,14 +3258,16 @@ resource "grafana_rule_group" "appliance" {
   # an idle bucket's segments then wait for its next write. After an outage
   # longer than that authority's hour, every idle bucket with a backlog waits
   # the same way, so the alert can outlast its cause by days with nothing to do.
+  # A bucket that gets no further write, such as one a test run left behind,
+  # holds the alert until it is deleted: DeleteBucket drops its journal rows.
   # If that ever matters, the fix is in hilt, which holds the tenant's keys and
   # could mint Ingot a narrow ship-only delegation when it has none; it has no
   # endpoint for that yet. A restart is the remedy for two cases. One is a
   # segment whose file is gone from disk: its blocks are safe in the journal,
   # and at startup Ingot rebuilds the segment from them (FIL-1601) before it
   # retires or deletes the lost row. The other is a ship that hangs (its HTTP
-  # clients set no timeout), which blocks the bucket's queue and sweep alike
-  # and logs nothing. Either way the bucket then waits for its next write, like
+  # clients set no timeout), which holds the bucket's ship task and logs
+  # nothing. Either way the bucket then waits for its next write, like
   # any idle bucket after a restart, and a rebuilt segment keeps its blocks'
   # journal age, so the alert stays until that write. One case needs Ingot's
   # maintainers: a ship that fails on its own every time. An Ingot configured
@@ -3230,10 +3277,17 @@ resource "grafana_rule_group" "appliance" {
   # but the delete dropped its journal rows when it emptied the bucket's root,
   # so it neither holds the gauge nor appears in the runbook's query.
   #
-  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
-  # one pass while the queue waits, so a draining backlog and a hung ship both
-  # log nothing but 'flush queue full'. The runbook tells them apart by
-  # progress: whether the bucket's oldest seq moves on.
+  # A ship that succeeds logs nothing, and one task ships a bucket's whole
+  # backlog, so a draining backlog and a hung ship both log nothing. The
+  # runbook tells them apart by progress: whether the bucket's oldest seq
+  # moves on.
+  #
+  # The task runner logs a ship's failures ('task will be retried', 'task
+  # failed') with the bucket's name only inside the error text, and the log's
+  # own lines ('logstore: tick seal') carry it as a `bucket` field, so the
+  # runbook's query filters on the name as text. A ship without authority
+  # logs one 'task failed' line when it gives up, which can be as old as the
+  # bucket's oldest block, so the runbook reads the log back that far.
   #
   # The gauge is the oldest block across every bucket, and several buckets can
   # be stuck at once for different reasons, so the runbook lists every bucket
@@ -3254,7 +3308,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'logstore: ship attempt failed' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost. Ingot retries a failed ship on its own, backing off to every five minutes, except in 2). Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" |= \"<bucket>\"` over a time range that goes back as far as the bucket's age: a failure can be logged once, when the oldest block was written. A ship's failures are the task runner's 'task will be retried' and 'task failed' lines, which name the bucket only in their error text. 'uploader: index publication failed' lines, and 'blob add failed' lines with `publishShardIndex` in their stack trace, come after a ship that succeeded and are unrelated to a stall. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'task will be retried' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. Ingot gives that ship up, logging one 'task failed' line, and the bucket's next write queues it again. It ships within a minute of that write, however long that takes. Nothing to do for a bucket still in use. A bucket nobody will write to again, such as a test's leftover, holds the alert for good: have its owner empty it and delete it with an S3 DeleteBucket, which drops its journal rows. 3) 'task will be retried' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within five minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark catalog segment <seq> shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) No line for the bucket, or 'task will be retried' lines that stopped over ten minutes ago with no 'task failed' after them, and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "34"
@@ -3651,7 +3705,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "{{ $labels.appliance }} has less than 10% free on Ingot's volume"
-      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's spool, cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
+      description      = "{{ $labels.node }} is below 10% free on {{ $labels.mountpoint }}, which holds only Ingot's cache and catalog log. Ingot's byte budget is sized to stay under this line, so the budget or the catalog log has outgrown the volume; writes fail when it fills."
       runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
       dashboard_url    = "${local.regions_dashboard}&viewPanel=8"
       __dashboardUid__ = "forge-regions"
@@ -3715,6 +3769,649 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "lt", params = [0.1] }
+        }]
+      })
+    }
+  }
+
+  # A proof set has an addPieces transaction that succeeded on chain more than
+  # 20 epochs ago whose pieces Curio, inside Piri, has still not recorded from
+  # the receipt. The value is epochs past that grace; the current epoch is the
+  # last head plus the wall-clock time since it, as in "proving is failing".
+  #
+  # Curio records an add on the next chain head. When it cannot read the
+  # receipt, as when its parser did not know PDPVerifier 3.5.0's
+  # PiecesAddedV2 event (FIL-1222), it retries on every head without
+  # reporting a failure. A new proof set is not scheduled for proving until its
+  # first add is recorded, so "proving period has not advanced" and "proving
+  # is failing", which both need a schedule, never fire for it.
+  #
+  # A warning: nothing is lost on chain while it holds, since a set that is
+  # not scheduled records no faults, but its pieces are not being proven. The
+  # likely cause is a contract upgrade Piri's Curio does not support, which
+  # needs a Piri release.
+  #
+  # `for` is 5m. no_data_state is OK: Piri reports the series only while an
+  # add is untracked.
+  rule {
+    name           = "Piri has untracked add pieces"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Proof set {{ $labels.proof_set }} on Piri {{ $labels.instance }} has a piece addition that succeeded on chain over 10 minutes ago and is still untracked"
+      description = "An addPieces transaction for this proof set succeeded on chain, but Curio, inside Piri, has not recorded its pieces from the receipt, and retries on every chain head without reporting a failure. A new proof set is not scheduled for proving until its first addition is recorded, and the added pieces are not proven. Check the Piri container's logs for \"failed to extract pieces from receipt\". The usual cause is a PDPVerifier upgrade that emits an event Piri's Curio cannot parse, which needs a Piri release. Act within a day."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-has-untracked-add-pieces"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          (
+            (
+                max by (appliance, region, node, instance) (piri_chain_head_epoch{${local.piri_metric_matcher}})
+              + (time() - max by (appliance, region, node, instance) (piri_chain_head_timestamp_seconds{${local.piri_metric_matcher}})) / 30
+            )
+            - on (appliance, region, node, instance) group_right()
+            max by (appliance, region, node, instance, proof_set) (
+              piri_pdp_proofset_untracked_add_pieces_confirmed_epoch{${local.piri_metric_matcher}}
+            )
+          )
+          - 20
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Once Piri folds blobs into an aggregate, a PDPAddRoots task adds the
+  # aggregate's root on chain and deletes the blobs' pipeline rows. A full batch
+  # of pdp.aggregation.manager.batch_size roots goes out at once and a partial
+  # one on the next poll_interval (30s by default), and the task then waits
+  # eight epochs (4 minutes) for the transaction to confirm before deleting the
+  # rows. So the oldest blob still waiting was folded under about 5 minutes ago.
+  # Ten minutes is twice that: AddRoots failing on every retry (the chain RPC,
+  # gas, a contract revert), or folding outpacing what AddRoots sends. The blobs
+  # stay retrievable but are not proven until they land: a warning. `for` is
+  # 10m on top of the threshold's ten minutes, so a brief chain RPC outage that
+  # AddRoots retries through does not page. The age is used rather than the
+  # count of waiting blobs, which rises and falls with each batch under steady
+  # uploads and so cannot tell a stall from a burst.
+  #
+  # Grouped by instance as well as node, like the Piri-wide proving rules: each
+  # Piri on a node has its own AddRoots tasks, and one stalled Piri gets an
+  # alert of its own.
+  #
+  # no_data_state is OK: a Piri with nothing aggregated reports 0, and
+  # "Appliance has stopped reporting" covers a silent node.
+  rule {
+    name           = "Piri is not adding aggregates on chain"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary          = "Piri {{ $labels.instance }} has had aggregated blobs waiting over 10 minutes to be added on chain"
+      description      = "Blobs folded into an aggregate are not being added to the proof set, so they are not proven. Check the PDPAddRoots task's logs in the Piri container for the error it retries on, and Piri's chain RPC. If roots are still landing but this age keeps climbing, aggregates are folded faster than AddRoots sends them. The runbook says how to tell the two apart and what to do."
+      runbook_url      = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#piri-is-not-adding-aggregates-on-chain"
+      dashboard_url    = "${local.regions_dashboard}&viewPanel=37"
+      __dashboardUid__ = "forge-regions"
+      __panelId__      = "37"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance) (
+            piri_pdp_aggregated_blobs_oldest_seconds{${local.piri_metric_matcher}}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
+
+  # The rules from here to the end of the group watch Piri's chain RPC
+  # endpoint (FIL-1553). Piri reaches
+  # it through two clients, go-jsonrpc for the Lotus API and go-ethereum for
+  # the eth API, and counts every call through either by method and outcome
+  # (piri_chain_rpc_calls), each ChainNotify subscription that closes under
+  # it (piri_chain_rpc_subscriptions_closed), and whether a probe call through
+  # each client succeeded (piri_chain_rpc_reachable, every 30 seconds), from
+  # fil-forge/piri#222. Piri's docs/content/concepts/telemetry.md lists the
+  # outcomes. A Piri older than that exports none of these series, so its
+  # rules stay quiet rather than fire.
+  #
+  # The probes are what make a refused key visible on an idle Piri. A
+  # WebSocket endpoint checks the key only when a connection opens, so every
+  # five minutes Piri also opens a fresh one with its credentials and counts
+  # it as client "endpoint", method "Handshake": a key revoked since start-up
+  # shows there while Piri's open connections still work. A refused reconnect
+  # of the Lotus WebSocket counts as unavailable rather than unauthorized,
+  # since go-jsonrpc does not report its status.
+  #
+  # Grouped by instance, as the other Piri rules are, so the alert names the
+  # Piri.
+  # no_data_state is OK throughout: each query returns a series only for a
+  # Piri with something to report, so an empty result is the healthy state,
+  # and "Appliance has stopped reporting" covers a silent node.
+
+  # The endpoint answered 401 or 403: the key is wrong, revoked or expired. It
+  # stays that way until somebody changes it, so one call is enough, and the
+  # handshake probe makes one every five minutes. The ten-minute window is
+  # twice the evaluation interval, so one refused call holds the rule across
+  # the two evaluations `for` needs. Critical: Piri cannot read the chain or
+  # submit proofs once its connections drop.
+  rule {
+    name           = "Piri's chain RPC is rejecting its credentials"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being refused by its chain RPC endpoint (401)"
+      description = "Piri's chain RPC endpoint (Chain.Love) refused its API key, so Piri cannot read the chain or submit proofs. Check the key in Chain.Love's dashboard and the LOTUS_RPC_URL Piri is given, then restart Piri. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            increase(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="unauthorized"}[10m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Piri could not open either connection at start-up, so it exits and the
+  # container restarts it. A Piri that never starts exports no metrics, so
+  # this one rule reads Piri's log: the lines start "providing lotus client"
+  # or "providing eth client", for any cause, a refused key included. It drops
+  # fx/echo, Piri's HTTP access log, whose lines quote request paths anyone on
+  # the internet chooses. No annotation quotes the line: Piri versions before
+  # fil-forge/piri#221 print the endpoint, key included, when a dial fails.
+  # Critical, for the reason the credentials rule gives.
+  rule {
+    name           = "Piri cannot connect to its chain RPC"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} cannot connect to its chain RPC endpoint"
+      description = "Piri failed to open its connection to the chain RPC endpoint (Chain.Love) at start-up, so it exits and restarts without reading the chain or submitting proofs. The Piri container log says why: an HTTP status (401 is a bad key, 429 a rate limit), a DNS or TLS error, or a timeout. Check Chain.Love's status page and the LOTUS_RPC_URL Piri is given. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |~ "providing (lotus|eth) client"
+              [10m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # No probe call through a client has succeeded for five minutes: the
+  # endpoint is down, unreachable from the node, or refusing every call. Per
+  # client, since the two connections fail apart. For the Lotus client the
+  # chain head rules say so too, sooner and louder; for the eth client nothing
+  # else does until proofs stop landing. A warning: Piri resumes when the
+  # endpoint answers, and a refused key already pages above.
+  rule {
+    name           = "Piri cannot reach its chain RPC"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} cannot reach its chain RPC endpoint ({{ $labels.client }})"
+      description = "Every probe call through Piri's {{ $labels.client }} client to its chain RPC endpoint (Chain.Love) has failed for five minutes, so Piri cannot read the chain or submit proofs through it. piri_chain_rpc_calls_total by outcome says why: unavailable (down or unreachable), timeout, rate_limited or unauthorized. Check Chain.Love's status page and whether every Piri is affected (the endpoint) or only this node (its network)."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance, client) (
+            max_over_time(piri_chain_rpc_reachable{${local.piri_metric_matcher}}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [1] }
+        }]
+      })
+    }
+  }
+
+  # More than one call in twenty refused as over a limit: HTTP 429, JSON-RPC
+  # error -32005, or an error that names a rate limit. Chain.Love documents
+  # 429 for a key over its own limit or the account over its plan's.
+  # Cancelled calls are left out of the share, since they say nothing about
+  # the endpoint. Calls are retried, so this is a warning: it is a delay, and
+  # a limit that blocks Piri for long shows as a stale chain head.
+  #
+  # The window is five minutes, the evaluation interval, so each evaluation
+  # sees calls the last did not, and `for` = 10m needs three windows in a row
+  # over the threshold, ten to fifteen minutes of rate limiting. A longer
+  # window would not do: a single minute of refusals stays in a fifteen-minute
+  # one, above 5% of it, for three evaluations, and would fire ten minutes
+  # after the endpoint recovered. Going over a per-minute limit refuses the
+  # rest of that minute, so such bursts are expected.
+  rule {
+    name           = "Piri's chain RPC is rate limiting it"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being rate limited by its chain RPC endpoint"
+      description = "More than one in twenty of Piri's calls to its chain RPC endpoint (Chain.Love) have been refused as over a rate limit in each of three five-minute windows in a row. Calls are retried, so Piri falls behind rather than failing, but proofs and piece additions are delayed. Check the key's request limit and the account's credits in Chain.Love's dashboard, and whether something else shares the key."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="rate_limited"}[5m])
+          )
+          /
+          sum by (appliance, region, node, instance) (
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome!="canceled"}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.05] }
+        }]
+      })
+    }
+  }
+
+  # The Lotus WebSocket closed under Piri's ChainNotify subscription more than
+  # five times in an hour. Drops happen on Chain.Love's side, to every Piri at
+  # once, about ten times a week each, and recover within seconds; the busiest
+  # hour in a week of staging and dev logs had three. More than five is a
+  # connection that keeps failing. A drop that does not recover is "Piri's
+  # chain head is stale". A warning: Piri resubscribes after each drop.
+  rule {
+    name           = "Piri's chain RPC WebSocket keeps dropping"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }}'s chain RPC WebSocket keeps dropping"
+      description = "Piri's WebSocket to its chain RPC endpoint (Chain.Love) has dropped more than five times in the last hour. Piri resubscribes each time, but chain notifications are missed while it does. Check Chain.Love's status page and whether every Piri is affected (an endpoint problem) or only this one (its host or network)."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            increase(piri_chain_rpc_subscriptions_closed_total{${local.piri_metric_matcher}, method="ChainNotify"}[1h])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [5] }
         }]
       })
     }
