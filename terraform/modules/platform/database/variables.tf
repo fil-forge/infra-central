@@ -49,6 +49,18 @@ variable "backup_retention_days" {
   default = 7
 }
 
+variable "allow_major_version_upgrade" {
+  description = "Lets a change of engine_version cross a major version. Off by default; see docs/decisions/2026-11-database-major-upgrades.md."
+  type        = bool
+  default     = false
+}
+
+variable "apply_immediately" {
+  description = "Applies every instance change at once. Off, AWS holds a change that needs a restart or an outage, such as a version change, until the next maintenance window."
+  type        = bool
+  default     = false
+}
+
 variable "deletion_protection" {
   type    = bool
   default = true

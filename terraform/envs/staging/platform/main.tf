@@ -101,8 +101,11 @@ module "platform" {
 
   # Staging keeps one database instance, while giving the shared Postgres and
   # OpenBao workload twice dev's memory and connection budget. RDS takes the
-  # major version and applies minors on its own.
-  db_engine_version    = "16"
+  # major version and applies minors on its own. db_allow_major_version_upgrade
+  # and db_apply_immediately stay off here, as in prod: a major upgrade turns
+  # both on in the pull request that changes db_engine_version; see
+  # docs/decisions/2026-11-database-major-upgrades.md.
+  db_engine_version    = "18"
   db_instance_class    = "db.t4g.small"
   db_allocated_storage = 20
   db_multi_az          = false

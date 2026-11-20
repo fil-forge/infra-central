@@ -7,10 +7,13 @@
 // private key ever enters Terraform state, and nothing is written to a local
 // disk anywhere in the flow.
 //
-// Terraform drives two phases, because the ordering is circular otherwise.
-// OpenBao stores its data in Postgres, so its database must exist before it
-// starts; but OpenBao must be running before it can be configured. Phase seed
-// runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
+// Terraform drives seed and vault as two phases, because the ordering is
+// circular otherwise. OpenBao stores its data in Postgres, so its database
+// must exist before it starts; but OpenBao must be running before it can be
+// configured. Phase seed runs after RDS and before OpenBao; phase vault runs
+// once OpenBao is serving. Terraform also drives phase analyze on a stage that
+// allows a major version upgrade and applies it at once, after the database
+// changes version; it only reads data.
 //
 // Every other phase is for an operator, and Terraform must never invoke it: an
 // apply must not move money, issue a credential or delete a registration. An
@@ -45,6 +48,12 @@ type Request struct {
 	// re-invocation by changing the input, which is how aws_lambda_invocation
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
+
+	// --- analyze phase only ---
+
+	// Target names the cluster to analyze: "central", the default, or
+	// "pandora".
+	Target string `json:"target,omitempty"`
 
 	// --- vault phase only ---
 
@@ -151,6 +160,8 @@ type Response struct {
 	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
+	// Analyzed lists the databases the analyze phase ran ANALYZE in.
+	Analyzed []string `json:"analyzed,omitempty"`
 	// BackupReplicaRegion is the region the seed phase replicated the keys to.
 	// Terraform checks it against the region it configured, so an image that
 	// predates replication fails the apply rather than skipping it.
@@ -249,6 +260,8 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.seed(ctx)
 	case "vault":
 		return deps.vault(ctx, req)
+	case "analyze":
+		return deps.analyze(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
 	case "appliance-token":
@@ -265,7 +278,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"analyze\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
 }
 
