@@ -134,10 +134,10 @@ module "platform" {
   pitr_window_days  = 35
   db_kms_key_arn    = data.aws_kms_alias.aurora.target_key_arn
 
-  # On only for the upgrade to 18.6, and turned off again once it has applied.
-  # See docs/decisions/2026-11-database-major-upgrades.md.
-  db_allow_major_version_upgrade = true
-  db_apply_immediately           = true
+  # db_allow_major_version_upgrade and db_apply_immediately stay off here. A
+  # major upgrade turns both on in the pull request that changes
+  # db_engine_version, and the next pull request turns them off; see
+  # docs/decisions/2026-11-database-major-upgrades.md.
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
