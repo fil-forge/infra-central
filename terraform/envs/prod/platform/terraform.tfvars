@@ -9,7 +9,7 @@ ingot_hostname_suffix = "filonecontent.com"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish STAGE=prod` prints the line to paste here.
-provision_image_digest = "sha256:d43775dcd94b66383386b3147e18ecd67cd6aa0510b423bcf0dd22c14274666d"
+provision_image_digest = "sha256:df80e1532f7277553839c0e5f621e8709af93e8f9ac3014895499639173b72b7"
 
 # Calibration testnet, with the proxy addresses dev and staging use, for the
 # first prod stack's test run. Prod moves to mainnet with the Forge contracts
@@ -30,3 +30,10 @@ chain = {
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
+
+# Appliance region labels. Adding one here creates the transit key its node's
+# OpenBao seals against and the IAM user it writes backups as; moving it to
+# retired_appliance_regions destroys both and revokes the node's unseal token.
+# A retired label stays in that list, and docs/appliance-onboarding.md is the
+# procedure for both.
+appliance_regions = ["us-east-2"]

@@ -88,7 +88,7 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 | `pandora_admin` | the estate loader only; owns the database | `/forge-central/<stage>/pandora-admin/postgres-dsn` |
 | `pandora_storage_server` | the server's daemons | `/forge-central/<stage>/pandora-storage-server/postgres-dsn` |
 | `locker` | the server's stats lock tool | `/forge-central/<stage>/locker/postgres-dsn` |
-| `pandora_migration` | the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
+| `pandora_migration` | the import service, the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
 
 `pandora_storage_server` has a 15-second `statement_timeout` and a 30-second
 `idle_in_transaction_session_timeout`. `pandora_migration` has no statement
@@ -188,11 +188,29 @@ ssh root@23.83.66.244 rm -rf /run/pandora-vpn-check
 
 A reboot also clears the secrets.
 
+## The cluster's PostgreSQL version
+
+The cluster runs Aurora PostgreSQL 18, set by `pandora_db.engine_version` in the stage's platform
+root, apart from the stage's own database. Today it holds the pack ledger that the import service
+on the appliance writes as `pandora_migration`.
+
+A new minor release is a one-line change to `engine_version`, applied in place. A new major version
+is an in-place upgrade, as [the major upgrade decision](decisions/2026-11-database-major-upgrades.md)
+describes for the stage's own database. The pull request that changes `engine_version` also sets
+`allow_major_version_upgrade = true` and `apply_immediately = true` in `pandora_db`, and the next
+pull request removes both. The apply upgrades the cluster, then the provision Lambda runs `ANALYZE`
+in the `pandora` database. The endpoint, the database, its roles and their DSNs stay as they are.
+
+While the upgrade runs, the server's daemons and the appliance's import service cannot reach the
+database. The decision record's rehearsal steps apply to this cluster too, with
+`fc-<stage>-pandora-db` in place of `fc-prod`.
+
 ## Dropping the cluster
 
 To drop the Aurora cluster instead of performing a data reset, set `pandora_db = null` in the
 stage's platform root and merge. CI deletes the cluster, with no final snapshot when `protect` is
-off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
+off, along with its subnets, security group and parameter group. The VPN stays, with its tunnel
+addresses and keys.
 
 Removing the VPN as well means deleting the stage's sites from `pandora_sites`, in the same
 pull request or a later one. New tunnels later get new addresses and keys. Removing prod's last

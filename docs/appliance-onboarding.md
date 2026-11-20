@@ -35,8 +35,10 @@ Add the appliance's region label to `appliance_regions` in the stage's
 appliance_regions = ["us-east-9"]
 ```
 
-The region label is the appliance's virtual S3 region, not an AWS one. It has to match the node's
-Ingot `region:` config and what clients sign with, or requests fail without naming the cause.
+The region label is the appliance's S3 region. In a non-production stage it is a name that does not
+exist in AWS: `us-east-9` in dev, `eu-central-3` in staging. A production appliance carries a real
+AWS region name, as `prod/us-east-2` does. In every stage it has to match the node's Ingot `region:`
+config and what clients sign with, or requests fail without naming the cause.
 
 In staging and prod, add `<stage>-<region>` to `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
