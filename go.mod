@@ -14,7 +14,7 @@ require (
 	github.com/ethereum/go-ethereum v1.17.10
 	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
 	github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595
-	github.com/fil-forge/ucantone v0.0.0-20260928174307-22b4465e21b8
+	github.com/fil-forge/ucantone v0.0.0-20261120104359-4253712d41e4
 	github.com/fil-forge/ucantool v0.1.0
 	github.com/hashicorp/go-secure-stdlib/parseutil v0.2.0
 	github.com/jackc/pgx/v5 v5.13.0
@@ -63,7 +63,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/gobwas/glob v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
