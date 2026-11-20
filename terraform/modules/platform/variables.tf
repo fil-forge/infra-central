@@ -63,6 +63,16 @@ variable "db_engine" {
   }
 }
 
+variable "db_engine_version" {
+  description = <<-EOT
+    PostgreSQL release of the stage's own database. RDS takes a major version
+    such as "16" and moves through its minors on its own; Aurora takes a minor
+    release such as "16.15". A new major on a database that holds data needs
+    an in-place major upgrade, which this module does not perform yet.
+  EOT
+  type        = string
+}
+
 variable "db_kms_key_arn" {
   description = "Customer-managed key for the Aurora cluster. Required with db_engine = \"aurora\"; the RDS instance uses the account's default RDS key."
   type        = string
@@ -80,8 +90,15 @@ variable "pandora_db" {
     without one. It uses db_kms_key_arn, and needs the stage to have sites in
     the shared constants module's pandora_sites, because the appliances
     reach it only over the stage's VPN. See docs/pandora-vpn.md.
+
+    engine_version is the cluster's Aurora PostgreSQL minor release, set apart
+    from the stage's own database. A new major on a cluster that holds data
+    needs an in-place major upgrade, which this module does not perform yet.
+    Dropping the cluster first, as docs/pandora-vpn.md describes, is only for
+    a cluster whose data can be lost.
   EOT
   type = object({
+    engine_version        = string
     instance_count        = number
     backup_retention_days = number
     protect               = bool
