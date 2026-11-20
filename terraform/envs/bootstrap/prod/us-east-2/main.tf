@@ -62,6 +62,15 @@ provider "aws" {
   }
 }
 
+# IAM records every call in us-east-1, for the rule that watches the key admin
+# role below.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  allowed_account_ids = [module.constants.prod_account_id]
+}
+
 module "constants" {
   source = "../../../../modules/shared/constants"
 }
@@ -400,7 +409,7 @@ data "aws_iam_policy_document" "kms_key_changes_log_writer" {
     condition {
       test     = "ArnEquals"
       variable = "aws:SourceArn"
-      values   = [aws_cloudwatch_event_rule.kms_key_changes.arn]
+      values   = [aws_cloudwatch_event_rule.kms_key_changes.arn, aws_cloudwatch_event_rule.kms_key_admin.arn]
     }
   }
 }
@@ -408,6 +417,81 @@ data "aws_iam_policy_document" "kms_key_changes_log_writer" {
 resource "aws_cloudwatch_log_resource_policy" "kms_key_changes" {
   policy_name     = "fc-prod-kms-key-changes"
   policy_document = data.aws_iam_policy_document.kms_key_changes_log_writer.json
+}
+
+# ── The key admin role's use and changes, to the same log group ─────────────
+#
+# The rules above see what the key admin role does to the keys; these see the
+# role itself. Its assumption tells on-call a session has started before any
+# key call, and a change to its trust or permissions, which any
+# AdministratorAccess session can make, is otherwise unchecked. STS records
+# AssumeRole in the region whose endpoint was called, and IAM records every
+# call in us-east-1, so us-east-1 and the DR region forward here. The rules
+# take read-only management events too, because CloudTrail may record
+# AssumeRole as one and EventBridge drops those otherwise.
+locals {
+  kms_key_admin_pattern = jsonencode({
+    detail-type = ["AWS API Call via CloudTrail"]
+    "$or" = [
+      {
+        source = ["aws.sts"]
+        detail = { eventName = ["AssumeRole"], requestParameters = { roleArn = [local.kms_key_admin_role_arn] } }
+      },
+      {
+        source = ["aws.iam"]
+        detail = {
+          eventName         = ["UpdateAssumeRolePolicy", "AttachRolePolicy", "DetachRolePolicy", "PutRolePolicy", "DeleteRolePolicy", "DeleteRole"]
+          requestParameters = { roleName = [module.constants.prod_kms_key_admin_role_name] }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin" {
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of and changes to the prod KMS key admin role, to CloudWatch Logs for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin" {
+  rule = aws_cloudwatch_event_rule.kms_key_admin.name
+  arn  = aws_cloudwatch_log_group.kms_key_changes.arn
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin_dr" {
+  provider = aws.dr
+
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of the prod KMS key admin role, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin_dr" {
+  provider = aws.dr
+
+  rule     = aws_cloudwatch_event_rule.kms_key_admin_dr.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin_us_east_1" {
+  provider = aws.us_east_1
+
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of and changes to the prod KMS key admin role, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin_us_east_1" {
+  provider = aws.us_east_1
+
+  rule     = aws_cloudwatch_event_rule.kms_key_admin_us_east_1.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
 }
 
 # The stage's log role belongs to the prod platform root

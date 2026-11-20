@@ -984,7 +984,7 @@ resource "grafana_rule_group" "central" {
   }
 
   # A guarded action on a prod Aurora or OpenBao seal key, or on its DR replica,
-  # that went through. Only the break-glass role and the account root can take
+  # that went through. Only the key admin role and the account root can take
   # one, so it is either planned work or a credential that should not have
   # them. A disabled key stops Aurora and OpenBao now, which is what makes it
   # critical. The events reach Loki through the bootstrap root's EventBridge
@@ -1002,7 +1002,7 @@ resource "grafana_rule_group" "central" {
 
     annotations = {
       summary     = "{{ $labels.detail_eventName }} succeeded on a prod KMS key in {{ $labels.region }}"
-      description = "{{ $labels.detail_userIdentity_arn }} called {{ $labels.detail_eventName }} on the prod Aurora or OpenBao seal key, or its replica, in {{ $labels.region }}. Unless it was planned break-glass work, undo it: EnableKey reverses a disable and CancelKeyDeletion a scheduled deletion, and anyone may call either. A disabled key stops Aurora and OpenBao. Read the event with {aws_log_group=\"${local.kms_key_changes_log_group}\"}."
+      description = "{{ $labels.detail_userIdentity_arn }} called {{ $labels.detail_eventName }} on the prod Aurora or OpenBao seal key, or its replica, in {{ $labels.region }}. Unless it was planned key admin work, undo it: EnableKey reverses a disable and CancelKeyDeletion a scheduled deletion, and anyone may call either. A disabled key stops Aurora and OpenBao. Read the event with {aws_log_group=\"${local.kms_key_changes_log_group}\"}."
       runbook_url = "https://github.com/fil-forge/infra-central/blob/main/docs/region-loss.md#the-guard"
     }
 
@@ -1037,6 +1037,7 @@ resource "grafana_rule_group" "central" {
             count_over_time(
               {aws_log_group="${local.kms_key_changes_log_group}"}
                 | json
+                | detail_eventSource = "kms.amazonaws.com"
                 | detail_errorCode = ""
               [15m]
             )
@@ -1074,7 +1075,7 @@ resource "grafana_rule_group" "central" {
   }
 
   # The same actions, refused by the key guard. Nothing changed, so it can wait
-  # for the working day, but someone without break-glass tried to end a key's
+  # for the working day, but someone without the key admin role tried to end a key's
   # use: a mistake, a tool with too broad a role, or a credential in the wrong
   # hands. Same window and no-data handling as the rule above.
   rule {
@@ -1121,7 +1122,93 @@ resource "grafana_rule_group" "central" {
             count_over_time(
               {aws_log_group="${local.kms_key_changes_log_group}"}
                 | json
+                | detail_eventSource = "kms.amazonaws.com"
                 | detail_errorCode != ""
+              [15m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # The key admin role itself, from the same log group: an operator assumed it,
+  # or someone changed its trust or permissions. A session is usually planned
+  # work, and a change to the role does nothing to a key by itself, so a
+  # warning. Same window and no-data handling as the rules above.
+  rule {
+    name           = "Prod KMS key admin role used or changed"
+    condition      = "B"
+    for            = "0s"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.detail_eventName }} on the prod KMS key admin role in {{ $labels.region }}"
+      description = "{{ $labels.detail_userIdentity_arn }} called {{ $labels.detail_eventName }} on the prod KMS key admin role in {{ $labels.region }}. Check it was planned work by someone on the role's list; a change to its trust or permissions should come from the prod account bootstrap root. Read the event with {aws_log_group=\"${local.kms_key_changes_log_group}\"}."
+      runbook_url = "https://github.com/fil-forge/infra-central/blob/main/docs/region-loss.md#using-the-key-admin-role"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "central"
+      stage     = "prod"
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (region, detail_eventName, detail_userIdentity_arn) (
+            count_over_time(
+              {aws_log_group="${local.kms_key_changes_log_group}"}
+                | json
+                | detail_eventSource != "kms.amazonaws.com"
+                | detail_errorCode = ""
               [15m]
             )
           )
