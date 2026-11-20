@@ -1,6 +1,7 @@
 # Public routing, created only for services that need a public identity. Every
-# service has one today. A null hostname leaves the service reachable over the
-# private namespace alone.
+# service has one, except the signing service in a stage that admits no
+# address. A null hostname leaves the service reachable over the private
+# namespace alone.
 
 resource "aws_lb_target_group" "this" {
   count = var.hostname == null ? 0 : 1
@@ -31,11 +32,17 @@ resource "aws_lb_target_group" "this" {
   }
 }
 
+locals {
+  # One entry per forwarding rule: null for a route open to any source, else
+  # the CIDRs that rule admits. A condition takes at most three values.
+  source_cidr_chunks = var.allowed_source_cidrs == null ? [null] : chunklist(var.allowed_source_cidrs, 3)
+}
+
 resource "aws_lb_listener_rule" "this" {
-  count = var.hostname == null ? 0 : 1
+  count = var.hostname == null ? 0 : length(local.source_cidr_chunks)
 
   listener_arn = var.listener_arn
-  priority     = var.listener_priority
+  priority     = var.listener_priority + count.index
 
   action {
     type             = "forward"
@@ -45,6 +52,49 @@ resource "aws_lb_listener_rule" "this" {
   condition {
     host_header {
       values = [var.hostname]
+    }
+  }
+
+  dynamic "condition" {
+    for_each = local.source_cidr_chunks[count.index] == null ? [] : [local.source_cidr_chunks[count.index]]
+
+    content {
+      source_ip {
+        values = condition.value
+      }
+    }
+  }
+}
+
+# Answers the hostname for every source the rules above do not admit. Without
+# it the listener's default 404 would claim no service is routed here, which
+# sends whoever is debugging a refused caller to look at DNS.
+resource "aws_lb_listener_rule" "refuse" {
+  count = var.hostname == null || var.allowed_source_cidrs == null ? 0 : 1
+
+  listener_arn = var.listener_arn
+  priority     = var.refusal_priority
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "${var.hostname} does not accept requests from this address"
+      status_code  = "403"
+    }
+  }
+
+  condition {
+    host_header {
+      values = [var.hostname]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = coalesce(var.refusal_priority, -1) >= var.listener_priority + length(local.source_cidr_chunks)
+      error_message = "refusal_priority must be set, after the last forwarding rule's priority (listener_priority + ${length(local.source_cidr_chunks) - 1})."
     }
   }
 }
