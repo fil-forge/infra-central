@@ -196,16 +196,18 @@ policy names the mount, so only central's root token reads it.
 
 ### Reading them back
 
-Reading is break-glass. It takes central's own root token, and both steps are recorded:
-CloudTrail records who read that token from SSM, and OpenBao's audit log records the read of the
-region's secret.
+Reading is break-glass. Use the stage's AWS account and region to fetch central's root token
+from Secrets Manager. CloudTrail records the `GetSecretValue` call, and OpenBao's audit log
+records the read of the region's secret.
 
 ```bash
 export BAO_ADDR=https://ssm.<hostname_suffix>
 ```
 
 ```bash
-export BAO_TOKEN="$(aws ssm get-parameter --with-decryption --query Parameter.Value --output text --name /forge-central/<stage>/openbao/root-token)"
+BAO_TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id 'forge-central/<stage>/openbao/root-token' \
+  --query SecretString --output text)" && export BAO_TOKEN
 ```
 
 ```bash
