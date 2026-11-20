@@ -13,7 +13,7 @@ func testDIDs(t *testing.T) map[string]string {
 	t.Helper()
 
 	dids := map[string]string{}
-	for _, service := range []string{"sprue", "hilt", "delegator", "indexer", "etracker"} {
+	for _, service := range []string{"sprue", "hilt", "delegator", "indexer", "etracker", "signing-service"} {
 		dids[service] = "did:web:" + service + ".dev.example"
 	}
 	return dids
@@ -28,6 +28,7 @@ func TestProofsCoverTheStartupDelegations(t *testing.T) {
 	want := map[string]string{
 		"delegator/indexing-service-proof": "indexer",
 		"delegator/egress-tracking-proof":  "etracker",
+		"delegator/signing-service-proof":  "signing-service",
 		"hilt/upload-proof":                "sprue",
 	}
 
