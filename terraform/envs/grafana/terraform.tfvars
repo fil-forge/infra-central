@@ -54,7 +54,7 @@ alert_stages = ["staging", "prod"]
 # commit that moves it to retired_appliance_regions, which is what keeps
 # "Appliance has stopped reporting" from firing for it.
 # scripts/check-appliance-regions.sh fails the build when the two disagree.
-live_appliances = ["staging-eu-central-3"]
+live_appliances = ["staging-eu-central-3", "prod-us-east-2"]
 
 # The alert_stages whose appliances push backups to central: those whose
 # platform root sets appliance_backups. scripts/check-backup-stages.sh fails the

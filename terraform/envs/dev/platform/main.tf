@@ -97,6 +97,8 @@ module "platform" {
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.
+  # RDS takes the major version and applies minors on its own.
+  db_engine_version = "16"
   db_instance_class = "db.t4g.micro"
   db_multi_az       = false
   pitr_window_days  = 1
