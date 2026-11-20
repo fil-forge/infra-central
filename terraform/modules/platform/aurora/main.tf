@@ -34,12 +34,24 @@ resource "aws_rds_cluster_parameter_group" "this" {
   }
 
   tags = { Name = local.name }
+
+  # A major version upgrade replaces this group with one for the new family,
+  # whose name differs. The new group has to exist before the cluster moves to
+  # it, and the old one can go only once the cluster has left it.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_rds_cluster" "this" {
   cluster_identifier = local.name
   engine             = "aurora-postgresql"
   engine_version     = var.engine_version
+
+  # Both off unless a stage turns them on, usually together for a major
+  # upgrade; see the variables.
+  allow_major_version_upgrade = var.allow_major_version_upgrade
+  apply_immediately           = var.apply_immediately
 
   # storage_type is left unset, which is Aurora Standard: I/O is billed per
   # request. The test run's I/O rate decides whether I/O-Optimized
@@ -84,9 +96,12 @@ resource "aws_rds_cluster_instance" "this" {
   identifier         = "${local.name}-${count.index + 1}"
   cluster_identifier = aws_rds_cluster.this.id
   engine             = aws_rds_cluster.this.engine
-  engine_version     = aws_rds_cluster.this.engine_version
   instance_class     = var.instance_class
-  availability_zone  = data.aws_subnet.this[count.index % length(data.aws_subnet.this)].availability_zone
+
+  # engine_version is left unset: an instance runs its cluster's version, and
+  # the cluster upgrades its instances itself. Setting it here would follow a
+  # cluster upgrade with an instance update that changes nothing.
+  availability_zone = data.aws_subnet.this[count.index % length(data.aws_subnet.this)].availability_zone
 
   publicly_accessible = false
 
