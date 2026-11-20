@@ -51,7 +51,7 @@ func (d *deps) applianceToken(ctx context.Context, req Request) (*Response, erro
 	if err != nil {
 		return nil, fmt.Errorf("build openbao client: %w", err)
 	}
-	rootToken, err := d.store.GetSecret(ctx, "openbao", "root-token")
+	rootToken, err := openBaoRootToken(ctx, d.keys, d.store)
 	if err != nil {
 		return nil, fmt.Errorf("read the openbao root token: %w", err)
 	}

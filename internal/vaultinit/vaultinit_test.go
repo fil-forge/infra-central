@@ -180,6 +180,32 @@ func TestSecretIDValidRejectsAnUnknownSecretID(t *testing.T) {
 	}
 }
 
+func TestTokenValid(t *testing.T) {
+	testCases := []struct {
+		name      string
+		token     string
+		wantValid bool
+		wantErr   bool
+	}{
+		{name: "a token OpenBao accepts is valid", token: "fake-live-token", wantValid: true},
+		{name: "a token OpenBao refuses with 403 is not valid", token: "fake-dead-token"},
+		{name: "a lookup that fails otherwise is an error", token: "fake-unlucky-token", wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newClient(t, &fakeOpenBao{initialised: true, liveToken: "fake-live-token", unavailableFor: "fake-unlucky-token"})
+
+			valid, err := TokenValid(context.Background(), client, tc.token)
+
+			type outcome struct{ Valid, Failed bool }
+			if got, want := (outcome{valid, err != nil}), (outcome{tc.wantValid, tc.wantErr}); got != want {
+				t.Errorf("TokenValid() = %+v, want %+v (err = %v)", got, want, err)
+			}
+		})
+	}
+}
+
 func TestIssueSecretIDReturnsTheMintedSecret(t *testing.T) {
 	client := newClient(t, &fakeOpenBao{initialised: true})
 
@@ -242,6 +268,10 @@ type fakeOpenBao struct {
 	accessorKnown bool
 	refuseToWrap  bool
 	lookupFails   bool
+	// liveToken is the one token lookup-self accepts; unavailableFor is a
+	// token whose lookup fails with a status other than 403.
+	liveToken      string
+	unavailableFor string
 
 	mountedPaths     []string
 	enabledAuths     []string
@@ -430,6 +460,17 @@ func (f *fakeOpenBao) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"wrap_info": map[string]any{"token": "wrap-2", "accessor": "wrap-acc-2", "ttl": 86400},
 		})
+
+	case key == "GET /v1/auth/token/lookup-self":
+		token := r.Header.Get("X-Vault-Token")
+		switch {
+		case token == f.unavailableFor:
+			http.Error(w, `{"errors":["bad request"]}`, http.StatusBadRequest)
+		case token == f.liveToken:
+			writeJSON(w, map[string]any{"data": map[string]any{"policies": []string{"root"}}})
+		default:
+			http.Error(w, `{"errors":["permission denied"]}`, http.StatusForbidden)
+		}
 
 	case key == "POST /v1/auth/token/lookup-accessor":
 		if f.lookupFails {

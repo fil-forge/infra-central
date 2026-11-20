@@ -106,9 +106,9 @@ module "platform" {
   # Terraform, so a recreated dev stage comes back with its previous DIDs.
   protect_stateful_resources = false
 
-  # A db.t4g.micro allows roughly 112 connections. OpenBao takes 8 here, and
-  # the application pools take up to 60 more: sprue and swarf 20 each, hilt
-  # and plc 10 each.
+  # A db.t4g.micro allows roughly 112 connections. OpenBao takes up to 8 per
+  # task, 24 across its three, and the application pools up to 60 more: sprue
+  # and swarf 20 each, hilt and plc 10 each.
   openbao_max_parallel = 8
 
   # Both invocations re-run only when their input changes, so replacing the
@@ -117,7 +117,8 @@ module "platform" {
   # rebuilding dev's instance; see the appendix of docs/reset-apps.md. A
   # reset-apps run keeps the instance and needs neither. seed_trigger was
   # bumped alone once, to move the identity and wallet keys from SSM to
-  # Secrets Manager.
+  # Secrets Manager, and vault_trigger once, to move OpenBao's root token and
+  # recovery keys there.
   seed_trigger  = "7"
-  vault_trigger = "6"
+  vault_trigger = "7"
 }

@@ -149,7 +149,7 @@ module "platform" {
   }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
-  # about 80 of them with OpenBao's 24 included.
+  # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
   openbao_max_parallel = 24
 
   # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
@@ -161,6 +161,10 @@ module "platform" {
   # Two static addresses an appliance operator can allowlist once, and an edge
   # that takes a flood before the load balancer does. Dev has neither need.
   enable_global_accelerator = true
+
+  # Keep a replica of every identity and wallet key in the DR region. The
+  # pinned provision image must include replication, or the seed fails the apply.
+  backup_replica_region = module.constants.dr_region
 
   # Bumped to move the identity and wallet keys from SSM to Secrets Manager. The
   # seed phase re-runs only when its input changes, so the bump has to land with
