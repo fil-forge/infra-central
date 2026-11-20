@@ -128,6 +128,7 @@ module "platform" {
   # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
   # arithmetic and the costs.
   db_engine         = "aurora"
+  db_engine_version = "16.15"
   db_instance_class = "db.r8g.large"
   db_instance_count = 2
   pitr_window_days  = 35
@@ -142,7 +143,11 @@ module "platform" {
   # backup retention, and no deletion protection or final snapshot, so dropping
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
   # the VPN; docs/pandora-vpn.md has the steps.
+  #
+  # It holds the pack ledger for the import service, and runs PostgreSQL 18
+  # while the stage's own cluster stays on 16.
   pandora_db = {
+    engine_version        = "18.6"
     instance_count        = 1
     backup_retention_days = 1
     protect               = false

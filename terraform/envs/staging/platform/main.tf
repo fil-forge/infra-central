@@ -100,7 +100,9 @@ module "platform" {
   appliance_backups = { retention_days = 35 }
 
   # Staging keeps one database instance, while giving the shared Postgres and
-  # OpenBao workload twice dev's memory and connection budget.
+  # OpenBao workload twice dev's memory and connection budget. RDS takes the
+  # major version and applies minors on its own.
+  db_engine_version    = "16"
   db_instance_class    = "db.t4g.small"
   db_allocated_storage = 20
   db_multi_az          = false
