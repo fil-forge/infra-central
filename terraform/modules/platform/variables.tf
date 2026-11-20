@@ -67,10 +67,36 @@ variable "db_engine_version" {
   description = <<-EOT
     PostgreSQL release of the stage's own database. RDS takes a major version
     such as "16" and moves through its minors on its own; Aurora takes a minor
-    release such as "16.15". A new major on a database that holds data needs
-    an in-place major upgrade, which this module does not perform yet.
+    release such as "16.15". Moving to a new major version needs
+    db_allow_major_version_upgrade.
   EOT
   type        = string
+}
+
+variable "db_allow_major_version_upgrade" {
+  description = <<-EOT
+    Lets a change of db_engine_version upgrade the stage's own database to a
+    new major version, in place. A stage that keeps data it cannot lose turns
+    it on only in the pull request that upgrades it. With db_apply_immediately
+    also on, the provision Lambda runs ANALYZE in every central database after
+    each version change. Without it, the upgrade waits for the next maintenance
+    window, ANALYZE does not run, and the plan warns that it has to be run by
+    hand. See docs/decisions/2026-11-database-major-upgrades.md.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "db_apply_immediately" {
+  description = <<-EOT
+    Applies every change to the stage's own database at once. Off, AWS holds a
+    change that needs a restart or an outage, such as a version or class
+    change, until the next maintenance window. An upgrade pull request turns it
+    on beside db_allow_major_version_upgrade, so the outage starts when the
+    apply runs.
+  EOT
+  type        = bool
+  default     = false
 }
 
 variable "db_kms_key_arn" {
@@ -92,16 +118,20 @@ variable "pandora_db" {
     reach it only over the stage's VPN. See docs/pandora-vpn.md.
 
     engine_version is the cluster's Aurora PostgreSQL minor release, set apart
-    from the stage's own database. A new major on a cluster that holds data
-    needs an in-place major upgrade, which this module does not perform yet.
-    Dropping the cluster first, as docs/pandora-vpn.md describes, is only for
-    a cluster whose data can be lost.
+    from the stage's own database. allow_major_version_upgrade and
+    apply_immediately work as db_allow_major_version_upgrade and
+    db_apply_immediately do for the stage's own database, for this cluster
+    alone: with both on, a new major engine_version upgrades the cluster in
+    place and the provision Lambda then runs ANALYZE in the pandora database.
+    Both default to off.
   EOT
   type = object({
-    engine_version        = string
-    instance_count        = number
-    backup_retention_days = number
-    protect               = bool
+    engine_version              = string
+    instance_count              = number
+    backup_retention_days       = number
+    protect                     = bool
+    allow_major_version_upgrade = optional(bool, false)
+    apply_immediately           = optional(bool, false)
   })
   default = null
 
