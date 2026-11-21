@@ -353,9 +353,11 @@ module "delegator" {
 
     REGISTRAR_DELEGATOR_DID = local.did.delegator
 
-    # Both proofs must be files: the inline variants panic in current code.
+    # The proofs must be files: the inline variants panic in current code, and
+    # the signing-service proof has no inline variant.
     REGISTRAR_DELEGATOR_INDEXING_SERVICE_PROOF_FILE        = "${local.keys}/indexing-service-proof.txt"
     REGISTRAR_DELEGATOR_EGRESS_TRACKING_SERVICE_PROOF_FILE = "${local.keys}/egress-tracking-proof.txt"
+    REGISTRAR_DELEGATOR_SIGNING_SERVICE_PROOF_FILE         = "${local.keys}/signing-service-proof.txt"
 
     # The indexing service is `_WEB_DID` where its neighbours are `_DID`. The
     # delegator's config struct spells the keys that way, so the asymmetry is
@@ -376,13 +378,15 @@ module "delegator" {
     REGISTRAR_CONTRACT_TRANSACTOR_KEY = local.key["delegator/transactor-key"]
     DELEGATOR_INDEXING_PROOF          = "${local.ssm}/delegator/indexing-service-proof"
     DELEGATOR_EGRESS_PROOF            = "${local.ssm}/delegator/egress-tracking-proof"
+    DELEGATOR_SIGNING_PROOF           = "${local.ssm}/delegator/signing-service-proof"
   }
 
-  # Both proofs are bare DAG-CBOR, so they are stored base64-encoded: their raw
+  # The proofs are bare DAG-CBOR, so they are stored base64-encoded: their raw
   # bytes contain NULs, which an environment variable cannot carry.
   secret_files_base64 = {
     DELEGATOR_INDEXING_PROOF = "indexing-service-proof.txt"
     DELEGATOR_EGRESS_PROOF   = "egress-tracking-proof.txt"
+    DELEGATOR_SIGNING_PROOF  = "signing-service-proof.txt"
   }
   shell_command = "registrar serve"
 
