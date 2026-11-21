@@ -194,6 +194,13 @@ resource "aws_iam_user" "writer" {
       condition     = length("${local.user_prefix}${each.key}") <= 64
       error_message = "The user name ${local.user_prefix}${each.key} is ${length("${local.user_prefix}${each.key}")} characters; IAM allows 64. Shorten the region label."
     }
+
+    # scripts/restore-appliance-backups.sh copies under restores/, which only an
+    # administrator may write. A region of that name would write there too.
+    precondition {
+      condition     = each.key != "restores"
+      error_message = "The region label restores is reserved: restores/ holds the copies a post-leak restore reads."
+    }
   }
 }
 
