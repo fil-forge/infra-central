@@ -34,9 +34,9 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("FORGE_PRIVATE_CIDRS is required for the vault phase")
 	}
 
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve",
