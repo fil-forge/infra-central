@@ -57,9 +57,10 @@ On the appliance host, as the node operator:
 scripts/host/reset-apps.sh
 ```
 
-It stops the apps, drops the Ingot and Piri databases, empties their data
-directories and leaves the apps stopped, so nothing on the node calls central
-during the next step. See "Reset the apps on dev or staging" in infra-nodes'
+It disables `filone-reconcile.timer`, stops the apps, drops the Ingot and Piri
+databases, empties their data directories and leaves the apps stopped, so
+nothing on the node calls central during the next step. The timer has to stay
+off: a reconcile pass starts any app container that is not running. See "Reset the apps on dev or staging" in infra-nodes'
 [RUNBOOK](https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md).
 
 ### 2. Reset central
@@ -98,9 +99,15 @@ Leaving the old versions in place costs only storage.
 
 ### 3. Bring the node back
 
-Deploy the node as usual (`deploy-apps.sh`, or the reconcile timer once a change
-to the node's apps lands). Each Piri runs `piri init`, which the registrar
-refuses with a 403 until its DID is onboarded; the container restarts until then.
+On the appliance host, deploy the apps and turn reconcile back on:
+
+```bash
+scripts/host/deploy-apps.sh
+systemctl enable --now filone-reconcile.timer
+```
+
+Each Piri runs `piri init`, which the registrar refuses with a 403 until its DID
+is onboarded; the container restarts until then.
 
 ### 4. Fund new Piri wallets
 
