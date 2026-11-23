@@ -127,12 +127,18 @@ module "platform" {
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
   # hostname migration must explicitly replace them. Bumped again to move the
-  # identity and wallet keys from SSM to Secrets Manager.
-  seed_trigger = "4"
+  # identity and wallet keys from SSM to Secrets Manager, and again to create
+  # the delegator's database.
+  seed_trigger = "5"
 
   # Bumped to move OpenBao's root token and recovery keys from SSM to Secrets
   # Manager and replicate them, and again to make OpenBao audit the
   # X-Correlation-Id header. The vault phase re-runs only when its input
   # changes, so each bump has to land with the provision build it needs.
   vault_trigger = "3"
+
+  # The delegator reads its own database. The seed run bumped above creates
+  # it, and the delegator migrates it when its task starts. See
+  # docs/decisions/2026-11-delegator-postgres.md.
+  delegator_store = "postgres"
 }
