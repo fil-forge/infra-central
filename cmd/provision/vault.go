@@ -70,6 +70,13 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		}
 	}
 
+	// First of the writes, so every request after it lands in the audit log
+	// with this invocation's ID.
+	slog.Info("auditing the correlation header", "header", vaultinit.CorrelationHeader)
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
+	}
+
 	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)
 	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
 		return nil, err

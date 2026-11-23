@@ -34,7 +34,12 @@ func (d *deps) applianceRootStore(ctx context.Context, req Request) (*Response, 
 	}
 
 	// A stage set up before this mount existed has not run the vault phase
-	// since, so the phase that uses the mount creates it.
+	// since, so the phase that uses the mount creates it. The same goes for
+	// auditing the correlation header, which is what ties the credential write
+	// below to this invocation.
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
+	}
 	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
 		return nil, err
 	}
