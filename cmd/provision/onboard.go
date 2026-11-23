@@ -199,19 +199,27 @@ func (d *deps) delegatorAllowList(ctx context.Context, dynamo *dynamodb.Client) 
 		return onboard.NewDynamoAllowList(dynamo, table, d.cfg.Stage), func() {}, nil
 	}
 
-	// The delegator's own DSN, stored by the seed phase, so the row is
-	// written by the role that owns the table.
+	conn, err := d.connectToDelegatorDatabase(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return onboard.NewPostgresAllowList(conn, d.cfg.Stage), func() { _ = conn.Close(ctx) }, nil
+}
+
+// connectToDelegatorDatabase connects with the delegator's own DSN, stored by
+// the seed phase, so rows are written by the role that owns the tables.
+func (d *deps) connectToDelegatorDatabase(ctx context.Context) (*pgx.Conn, error) {
 	dsn, err := d.store.GetSecret(ctx, "delegator", "postgres-dsn")
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the delegator's postgres DSN: %w", err)
+		return nil, fmt.Errorf("read the delegator's postgres DSN: %w", err)
 	}
 	slog.Info("connecting to the delegator's database", "host", d.cfg.DBHost, "database", "delegator")
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		// pgx leaves the password out of its connection errors.
-		return nil, nil, fmt.Errorf("connect to the delegator's database: %w", err)
+		return nil, fmt.Errorf("connect to the delegator's database: %w", err)
 	}
-	return onboard.NewPostgresAllowList(conn, d.cfg.Stage), func() { _ = conn.Close(ctx) }, nil
+	return conn, nil
 }
 
 // onboardDeps assembles the three clients, the proof issuer and the region's
