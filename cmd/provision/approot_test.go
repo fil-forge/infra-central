@@ -80,6 +80,40 @@ func TestStoreRootCredentialsWritesBothValuesAndReturnsNeither(t *testing.T) {
 	}
 }
 
+func TestStoreRootCredentialsLogsOpenBaosRequestID(t *testing.T) {
+	logs := captureDefaultLogger(t)
+	beginInvocation(context.Background(), logs.base)
+	bao := &fakeRootStore{regions: []string{"eu-central-3"}}
+	req := Request{Region: "eu-central-3", RootToken: "root-token-1", RecoveryKey: "recovery-key-1"}
+
+	if _, err := storeRootCredentials(context.Background(), newTokenClient(t, bao), req); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := logs.lines(t)
+	stored := lines[len(lines)-1]
+	if stored["msg"] != "stored the appliance's root credentials" || stored["openbao_request_id"] != "any-openbao-request" {
+		t.Errorf("last line = %v, want the stored line with openbao_request_id any-openbao-request", stored)
+	}
+}
+
+func TestStoreRootCredentialsLogsNeitherValue(t *testing.T) {
+	logs := captureDefaultLogger(t)
+	beginInvocation(context.Background(), logs.base)
+	bao := &fakeRootStore{regions: []string{"eu-central-3"}}
+	req := Request{Region: "eu-central-3", RootToken: "root-token-1", RecoveryKey: "recovery-key-1"}
+
+	if _, err := storeRootCredentials(context.Background(), newTokenClient(t, bao), req); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, secret := range []string{req.RootToken, req.RecoveryKey} {
+		if strings.Contains(logs.buffer.String(), secret) {
+			t.Errorf("the log carries %q: %s", secret, logs.buffer.String())
+		}
+	}
+}
+
 func TestStoreRootCredentialsRefusesAMissingValue(t *testing.T) {
 	cases := []struct {
 		desc string
@@ -155,11 +189,15 @@ func (f *fakeRootStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.written = body.Data
 		f.versions[data]++
-		respond(map[string]any{
-			"version":       f.versions[data],
-			"created_time":  created,
-			"deletion_time": "",
-			"destroyed":     false,
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"request_id": "any-openbao-request",
+			"data": map[string]any{
+				"version":       f.versions[data],
+				"created_time":  created,
+				"deletion_time": "",
+				"destroyed":     false,
+			},
 		})
 
 	default:

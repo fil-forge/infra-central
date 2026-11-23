@@ -111,7 +111,7 @@ func storeRootCredentials(ctx context.Context, client *api.Client, req Request) 
 	}
 
 	slog.Info("storing the appliance's root credentials", "region", req.Region)
-	version, err := vaultinit.StoreApplianceRootCredentials(ctx, client, req.Region, vaultinit.ApplianceRootCredentials{
+	stored, err := vaultinit.StoreApplianceRootCredentials(ctx, client, req.Region, vaultinit.ApplianceRootCredentials{
 		RootToken:   req.RootToken,
 		RecoveryKey: req.RecoveryKey,
 	})
@@ -119,7 +119,10 @@ func storeRootCredentials(ctx context.Context, client *api.Client, req Request) 
 		return nil, err
 	}
 
-	// The version is logged and the values are not.
-	slog.Info("stored the appliance's root credentials", "region", req.Region, "version", version)
-	return &RootCredentialsResult{Region: req.Region, Version: version}, nil
+	// The version is logged and the values are not. OpenBao's request ID is
+	// the request.id of the write's audit entries, which finds them even on a
+	// stage that does not audit the correlation header yet.
+	slog.Info("stored the appliance's root credentials",
+		"region", req.Region, "version", stored.Version, "openbao_request_id", stored.RequestID)
+	return &RootCredentialsResult{Region: req.Region, Version: stored.Version}, nil
 }

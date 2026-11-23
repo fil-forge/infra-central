@@ -35,17 +35,30 @@ func ApplianceRootCredentialsVersion(ctx context.Context, client *api.Client, re
 	return metadata.CurrentVersion, nil
 }
 
+// StoredApplianceRootCredentials says which write stored a region's copy.
+type StoredApplianceRootCredentials struct {
+	// Version is the KV v2 version the write created.
+	Version int
+	// RequestID is OpenBao's own ID for the write, the request.id of its audit
+	// entries. Empty if OpenBao returned none.
+	RequestID string
+}
+
 // StoreApplianceRootCredentials writes a region's root token and recovery key
-// as a new version and returns that version.
-func StoreApplianceRootCredentials(ctx context.Context, client *api.Client, region string, creds ApplianceRootCredentials) (int, error) {
+// as a new version.
+func StoreApplianceRootCredentials(ctx context.Context, client *api.Client, region string, creds ApplianceRootCredentials) (StoredApplianceRootCredentials, error) {
 	secret, err := client.KVv2(ApplianceRootMount).Put(ctx, region, map[string]any{
 		"root_token":   creds.RootToken,
 		"recovery_key": creds.RecoveryKey,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("store %s's root credentials: %w", region, err)
+		return StoredApplianceRootCredentials{}, fmt.Errorf("store %s's root credentials: %w", region, err)
 	}
-	return secret.VersionMetadata.Version, nil
+	stored := StoredApplianceRootCredentials{Version: secret.VersionMetadata.Version}
+	if secret.Raw != nil {
+		stored.RequestID = secret.Raw.RequestID
+	}
+	return stored, nil
 }
 
 // RemoveApplianceRootCredentials destroys every version of a region's copy. A
