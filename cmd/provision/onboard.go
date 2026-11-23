@@ -12,6 +12,7 @@ import (
 	"github.com/fil-forge/ucantone/multikey"
 	"github.com/fil-forge/ucantone/ucan"
 	"github.com/fil-forge/ucantool/pkg/identity"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/fil-forge/infra-central/internal/keygen"
 	"github.com/fil-forge/infra-central/internal/onboard"
@@ -68,7 +69,13 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	onboardDeps, err := d.onboardDeps(ctx, awsCfg.Region, dynamodb.NewFromConfig(awsCfg))
+	allowList, closeAllowList, err := d.delegatorAllowList(ctx, dynamodb.NewFromConfig(awsCfg))
+	if err != nil {
+		return nil, err
+	}
+	defer closeAllowList()
+
+	onboardDeps, err := d.onboardDeps(ctx, allowList)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +188,35 @@ func (d *deps) ingotDID(region string) (string, error) {
 	return fmt.Sprintf("did:web:s3.%s.%s", region, d.cfg.IngotHostnameSuffix), nil
 }
 
-// onboardDeps assembles the three clients, the proof issuer and the region's
-// Piri record.
-func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.Client) (onboard.Deps, error) {
-	table := d.cfg.AllowListTable
-	if table == "" {
-		return onboard.Deps{}, fmt.Errorf("FORGE_ALLOW_LIST_TABLE is required for the onboard phase")
+// delegatorAllowList returns the allow list in the store the stage's delegator
+// reads, with a function that releases its connection.
+func (d *deps) delegatorAllowList(ctx context.Context, dynamo *dynamodb.Client) (onboard.AllowList, func(), error) {
+	if d.cfg.DelegatorStore == delegatorStoreDynamoDB {
+		table := d.cfg.AllowListTable
+		if table == "" {
+			return nil, nil, fmt.Errorf("FORGE_ALLOW_LIST_TABLE is required for the onboard phase while FORGE_DELEGATOR_STORE is %s", delegatorStoreDynamoDB)
+		}
+		return onboard.NewDynamoAllowList(dynamo, table, d.cfg.Stage), func() {}, nil
 	}
 
+	// The delegator's own DSN, stored by the seed phase, so the row is
+	// written by the role that owns the table.
+	dsn, err := d.store.GetSecret(ctx, "delegator", "postgres-dsn")
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the delegator's postgres DSN: %w", err)
+	}
+	slog.Info("connecting to the delegator's database", "host", d.cfg.DBHost, "database", "delegator")
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		// pgx leaves the password out of its connection errors.
+		return nil, nil, fmt.Errorf("connect to the delegator's database: %w", err)
+	}
+	return onboard.NewPostgresAllowList(conn, d.cfg.Stage), func() { _ = conn.Close(ctx) }, nil
+}
+
+// onboardDeps assembles the three clients, the proof issuer and the region's
+// Piri record around the delegator's allow list.
+func (d *deps) onboardDeps(ctx context.Context, allowList onboard.AllowList) (onboard.Deps, error) {
 	sprueIssuer, sprueDIDWeb, err := d.serviceIssuer(ctx, "sprue")
 	if err != nil {
 		return onboard.Deps{}, err
@@ -208,7 +236,7 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 	}
 
 	return onboard.Deps{
-		AllowList:  onboard.NewDynamoAllowList(dynamo, table, d.cfg.Stage),
+		AllowList:  allowList,
 		Sprue:      sprueClient,
 		Hilt:       hiltClient,
 		IssueProof: d.applianceProofIssuer(hiltDIDWeb),
