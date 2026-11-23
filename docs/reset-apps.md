@@ -163,6 +163,11 @@ make fund-payer STAGE=dev FUND_ARGS="--lockup-allowance 10"
 The script prints what it would send and asks before signing. It skips the
 deposit when the payer's account already holds enough.
 
+It first checks that the payer's wallet holds the deposit amount, 3 USDFC unless
+`DEPOSIT` says otherwise, and stops if it does not, even when the deposit would
+be skipped. Top the wallet up from the faucet the error names, or pass a
+`DEPOSIT` the wallet can cover.
+
 ### 6. Reset FilOne's tenants for the region
 
 FilOne still records the tenant IDs central no longer has. From the fil-one
