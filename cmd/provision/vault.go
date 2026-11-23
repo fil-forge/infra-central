@@ -34,9 +34,9 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("FORGE_PRIVATE_CIDRS is required for the vault phase")
 	}
 
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve",
@@ -68,6 +68,13 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		if err := vaultinit.WaitForUnsealed(unsealCtx, client); err != nil {
 			return nil, err
 		}
+	}
+
+	// First of the writes, so every request after it lands in the audit log
+	// with this invocation's ID.
+	slog.Info("auditing the correlation header", "header", vaultinit.CorrelationHeader)
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
 	}
 
 	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)

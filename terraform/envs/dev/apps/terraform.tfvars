@@ -13,13 +13,13 @@
 # adjacent lines, so six consecutive pins made every pair of open bump pull
 # requests a conflict waiting for the second one to merge.
 image_digests = {
-  sprue = "sha256:8e72c0eb208d327891207f2b53ffabcfed2e34850def8b78774637230a13daa3"
+  sprue = "sha256:bb5952828e9ef120c5a5a1ab8832ce1a8b42bb2cf9a9010a53f401db5599d767"
 
-  hilt = "sha256:51ffa8aa153bc1895294a3290bd0b8a5cfdf1fa7d1b5d8ddb9139b04e5c94903"
+  hilt = "sha256:c52a523576b78822a6c6d453f4cbb49c94373345a6d916a1203958ae025af53b"
 
   swarf = "sha256:c4227532065411b1092ee00be18cada1e17485fa67b979ab4deae9be6177c75d"
 
-  delegator = "sha256:ec178af506f7cd5ee679621db88ddfbc65fd95503fdfacb159810f034a9aee71"
+  delegator = "sha256:4ab71ee18bf15651e37af6519ff90b82e644e47b10bbd22595e8c4af351bf00c"
 
   signing_service = "sha256:9ae0559fa1d3976fd16f40000687b6c059011b1780ff5861c573a3bb30ce5dce"
 

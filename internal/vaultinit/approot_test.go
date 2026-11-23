@@ -26,12 +26,12 @@ func TestStoreApplianceRootCredentialsWritesBothValuesAsANewVersion(t *testing.T
 	client := newHiltKVClient(t, kv)
 
 	creds := ApplianceRootCredentials{RootToken: "root-token-1", RecoveryKey: "recovery-key-1"}
-	version, err := StoreApplianceRootCredentials(context.Background(), client, "eu-central-3", creds)
+	stored, err := StoreApplianceRootCredentials(context.Background(), client, "eu-central-3", creds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Errorf("version = %d, want 2", version)
+	if want := (StoredApplianceRootCredentials{Version: 2, RequestID: "any-openbao-request"}); stored != want {
+		t.Errorf("stored = %+v, want %+v", stored, want)
 	}
 	want := map[string]map[string]any{
 		"eu-central-3": {"root_token": "root-token-1", "recovery_key": "recovery-key-1"},
@@ -40,12 +40,12 @@ func TestStoreApplianceRootCredentialsWritesBothValuesAsANewVersion(t *testing.T
 		t.Errorf("written = %v, want %v", kv.written, want)
 	}
 
-	stored, err := ApplianceRootCredentialsVersion(context.Background(), client, "eu-central-3")
+	storedVersion, err := ApplianceRootCredentialsVersion(context.Background(), client, "eu-central-3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored != 2 {
-		t.Errorf("stored version = %d, want 2", stored)
+	if storedVersion != 2 {
+		t.Errorf("stored version = %d, want 2", storedVersion)
 	}
 }
 
@@ -120,12 +120,15 @@ func (f *fakeRootKV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.written[data] = body.Data
 		f.versions[data]++
-		writeJSON(w, map[string]any{"data": map[string]any{
-			"version":       f.versions[data],
-			"created_time":  created,
-			"deletion_time": "",
-			"destroyed":     false,
-		}})
+		writeJSON(w, map[string]any{
+			"request_id": "any-openbao-request",
+			"data": map[string]any{
+				"version":       f.versions[data],
+				"created_time":  created,
+				"deletion_time": "",
+				"destroyed":     false,
+			},
+		})
 
 	default:
 		http.Error(w, "unexpected request: "+r.Method+" "+r.URL.Path, http.StatusNotFound)

@@ -34,7 +34,12 @@ func (d *deps) applianceRootStore(ctx context.Context, req Request) (*Response, 
 	}
 
 	// A stage set up before this mount existed has not run the vault phase
-	// since, so the phase that uses the mount creates it.
+	// since, so the phase that uses the mount creates it. The same goes for
+	// auditing the correlation header, which is what ties the credential write
+	// below to this invocation.
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
+	}
 	if err := vaultinit.EnsureMounts(ctx, client); err != nil {
 		return nil, err
 	}
@@ -106,7 +111,7 @@ func storeRootCredentials(ctx context.Context, client *api.Client, req Request) 
 	}
 
 	slog.Info("storing the appliance's root credentials", "region", req.Region)
-	version, err := vaultinit.StoreApplianceRootCredentials(ctx, client, req.Region, vaultinit.ApplianceRootCredentials{
+	stored, err := vaultinit.StoreApplianceRootCredentials(ctx, client, req.Region, vaultinit.ApplianceRootCredentials{
 		RootToken:   req.RootToken,
 		RecoveryKey: req.RecoveryKey,
 	})
@@ -114,7 +119,10 @@ func storeRootCredentials(ctx context.Context, client *api.Client, req Request) 
 		return nil, err
 	}
 
-	// The version is logged and the values are not.
-	slog.Info("stored the appliance's root credentials", "region", req.Region, "version", version)
-	return &RootCredentialsResult{Region: req.Region, Version: version}, nil
+	// The version is logged and the values are not. OpenBao's request ID is
+	// the request.id of the write's audit entries, which finds them even on a
+	// stage that does not audit the correlation header yet.
+	slog.Info("stored the appliance's root credentials",
+		"region", req.Region, "version", stored.Version, "openbao_request_id", stored.RequestID)
+	return &RootCredentialsResult{Region: req.Region, Version: stored.Version}, nil
 }

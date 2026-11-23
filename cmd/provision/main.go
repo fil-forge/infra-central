@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-lambda-go/lambdacontext"
 	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -222,12 +223,17 @@ type Response struct {
 	ResetAppsResult *ResetAppsResult `json:"reset_apps_result,omitempty"`
 }
 
+// baseLogger is the logger every invocation's default logger derives from.
+var baseLogger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	slog.SetDefault(baseLogger)
 	lambda.Start(handle)
 }
 
 func handle(ctx context.Context, req Request) (*Response, error) {
+	requestID := beginInvocation(ctx, baseLogger)
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -240,10 +246,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 
 	secretsClient := secretsmanager.NewFromConfig(awsCfg)
 	deps := &deps{
-		cfg:     cfg,
-		store:   ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
-		keys:    secretstore.New(secretsClient, cfg.Stage),
-		secrets: secretsClient,
+		cfg:       cfg,
+		store:     ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
+		keys:      secretstore.New(secretsClient, cfg.Stage),
+		secrets:   secretsClient,
+		requestID: requestID,
 	}
 
 	// Every log line here announces the step about to start, never the one
@@ -282,6 +289,27 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 	}
 }
 
+// beginInvocation tags every log line of this invocation with the Lambda
+// request ID and returns it. CloudTrail records the same ID for the Invoke,
+// and the OpenBao client sends it as X-Correlation-Id, so one value finds the
+// caller, the function's log and OpenBao's audit entries; docs/observability.md
+// has the lookup. Outside Lambda there is no ID, and the lines go untagged.
+//
+// It replaces the default logger rather than threading a logger through every
+// phase. An execution environment runs one invocation at a time and nothing
+// here starts a goroutine, so the default logger belongs to the invocation in
+// progress. It derives from base every time, so a warm environment does not
+// carry the previous invocation's ID along.
+func beginInvocation(ctx context.Context, base *slog.Logger) string {
+	lc, ok := lambdacontext.FromContext(ctx)
+	if !ok || lc.AwsRequestID == "" {
+		slog.SetDefault(base)
+		return ""
+	}
+	slog.SetDefault(base.With("request_id", lc.AwsRequestID))
+	return lc.AwsRequestID
+}
+
 // throttleTolerantRetries slows the SSM client down to the write quota instead
 // of failing the invocation.
 //
@@ -313,6 +341,9 @@ type deps struct {
 	// keys holds the service identities and the wallets.
 	keys    *secretstore.Store
 	secrets *secretsmanager.Client
+	// requestID is the Lambda request ID, empty outside Lambda. The OpenBao
+	// client sends it with every request; see beginInvocation.
+	requestID string
 }
 
 // addSecret records the ARN of a secret the seed phase ensured.
