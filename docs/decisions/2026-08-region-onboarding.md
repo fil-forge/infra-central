@@ -240,9 +240,8 @@ The [Forge service identity RFC] settled Ingot's identity as
 `did:web:s3.<REGION>.filonecontent.com` in production. This repository's dev
 stage uses the `latest` stage label, so its `us-east-9` appliance is
 `did:web:s3.us-east-9.latest.dev.filonecontent.com`. Central derives that value
-from the onboarding region and `ingot_hostname_suffix`. Piri keeps its
-`did:key` and provider URL; Forge owns the Ingot hostname while the operator
-owns Piri's key and endpoint.
+from the onboarding region and `ingot_hostname_suffix`. Piri's identity is
+decided in [Piri is the did:web of its public URL](2026-11-piri-did-web.md).
 
 Two things follow. An appliance can rotate its Ingot key without telling anyone,
 because its DID document publishes the current key and the DID does not move. And

@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -171,8 +173,19 @@ func validateOnboardRequest(req Request) error {
 		return fmt.Errorf("the onboard phase needs %v; all of it comes from the appliance", missing)
 	}
 
-	if _, err := piriParameterName(req.PiriDID); err != nil {
+	host, err := piriParameterName(req.PiriDID)
+	if err != nil {
 		return fmt.Errorf("piri_did: %w", err)
+	}
+	// A Piri derives its DID from its public URL, so a request whose two do
+	// not agree names a DID no node answers to.
+	piriURL, err := url.Parse(req.PiriURL)
+	if err != nil {
+		return fmt.Errorf("piri_url: %w", err)
+	}
+	if want := strings.TrimPrefix(host, piriSubPrefix+"/"); piriURL.Scheme != "https" || strings.ToLower(piriURL.Host) != want {
+		return fmt.Errorf("piri_did %s is not the did:web of piri_url %s: a Piri at that URL is did:web:%s",
+			req.PiriDID, req.PiriURL, strings.ToLower(piriURL.Host))
 	}
 	return nil
 }
