@@ -17,7 +17,7 @@ image_digests = {
 
   hilt = "sha256:c419bc3208610be1660262d58a4ceae2f9a21576a7de74cd1ce8cfff4b6655c6"
 
-  swarf = "sha256:e47a0fe51857195e484f0b6ed5cd1a95e8b0849e76450fb51e851281b00edd04"
+  swarf = "sha256:c4227532065411b1092ee00be18cada1e17485fa67b979ab4deae9be6177c75d"
 
   delegator = "sha256:ec178af506f7cd5ee679621db88ddfbc65fd95503fdfacb159810f034a9aee71"
 
