@@ -179,4 +179,9 @@ module "platform" {
   # seed phase re-runs only when its input changes, so the bump has to land with
   # the provision build that does the move.
   seed_trigger = "2"
+
+  # Bumped to make OpenBao audit the X-Correlation-Id header. The vault phase
+  # re-runs only when its input changes, so the bump has to land with the
+  # provision build that registers the header.
+  vault_trigger = "2"
 }
