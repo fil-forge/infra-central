@@ -75,9 +75,8 @@ were removed.
 ## The tables go in two applies
 
 The DynamoDB tables stayed, untouched, until every stage ran on Postgres. They were the fallback if
-a switch had to be undone. Staging's and prod's tables have deletion protection, so removing them
-takes two merges: the first takes out every reader, writer and grant and turns deletion protection
-off, the second deletes the tables. DynamoDB keeps a
-system backup of a table deleted with point-in-time recovery on, named
-`<table>$DeletedTableBackup`, for 35 days. Dev's tables have point-in-time recovery off and leave
-none.
+a switch had to be undone. Staging's and prod's tables had deletion protection, so removing them
+took two merges: the first took out every reader, writer and grant and turned deletion protection
+off, the second deleted the tables. DynamoDB keeps a system backup of a table deleted with
+point-in-time recovery on, named `<table>$DeletedTableBackup`, for 35 days. Dev's tables had
+point-in-time recovery off and left none.

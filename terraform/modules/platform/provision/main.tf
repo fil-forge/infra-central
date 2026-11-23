@@ -64,12 +64,6 @@ resource "aws_lambda_function" "this" {
       FORGE_OPENBAO_ADDR          = var.openbao_address
       FORGE_PRIVATE_CIDRS         = join(",", var.private_cidrs)
 
-      # Read only by provision images built before the delegator's allow list
-      # lived in Postgres alone. Without it they would write to DynamoDB, and
-      # prod's image rolls separately from this change. Remove it once every
-      # stage pins an image that ignores it.
-      FORGE_DELEGATOR_STORE = "postgres"
-
       # Used only by the appliance-backup-key phase, which Terraform never
       # invokes. Empty in a stage that takes no backups: Lambda rejects a null
       # value, and the phase reads the empty bucket as "not applicable".

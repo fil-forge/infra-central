@@ -13,8 +13,8 @@
 # the account, which combined with a pull request choosing what the plan job runs
 # is an exfiltration path for application data, not just metadata. Hence the
 # list, and hence what is missing from it: no s3:GetObject, no ssm:*, no
-# secretsmanager:*, no kms:Decrypt, no dynamodb:GetItem, Query or Scan, no
-# ecr:BatchGetImage, no lambda:InvokeFunction.
+# secretsmanager:*, no kms:Decrypt, no ecr:BatchGetImage, no
+# lambda:InvokeFunction.
 #
 # The scoping here is by action, not by resource: creating a VPC or a subnet
 # cannot be expressed against a resource ARN that does not exist yet, and several
@@ -34,10 +34,6 @@ data "aws_iam_policy_document" "plan" {
       "acm:Describe*",
       "acm:List*",
       "application-autoscaling:Describe*",
-      "dynamodb:DescribeContinuousBackups",
-      "dynamodb:DescribeTable",
-      "dynamodb:DescribeTimeToLive",
-      "dynamodb:ListTagsOfResource",
       "ec2:Describe*",
       "ecr:Describe*",
       "ecr:GetRepositoryPolicy",

@@ -14,9 +14,9 @@ about a minute of being written. The CloudWatch groups stay as they are, thirty 
 `scripts/tail-logs.sh` and the deploy workflow's diagnose jobs.
 
 **Metrics.** Everything AWS publishes for the stage's ECS services, load balancer, RDS instance,
-NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and the DynamoDB tables'
-metrics arrive too, through the metric stream
-[fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
+NAT gateway and the telemetry Firehoses themselves. The provision Lambda's metrics arrive too,
+through the metric stream [fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs
+in the same account.
 
 **Not shipped.** Application metrics, since not all services expose a `/metrics` endpoint yet;
 traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 respectively. Follow-up work:
@@ -498,7 +498,6 @@ list, `aws_ecs_.*` for example.
 | `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
-| `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
 | `AWS/Firehose`       | `dimension_DeliveryStreamName="fc-<stage>-logs"`                      |
 
 ## Is the pipeline itself healthy

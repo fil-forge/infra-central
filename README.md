@@ -38,8 +38,8 @@ Lambda rather than on an operator's laptop.
    │       └── AppRole ─┼─────────┼─────────┼───────────────┼───────────┘
    │       │            │         │         │
    ├──────── RDS Postgres (one database per service) ───────┤
-   │                                        │
-   S3                                   DynamoDB
+   │
+   S3
 ```
 
 Regional appliances reach OpenBao at `ssm.<hostname_suffix>` to unseal at boot,
@@ -67,7 +67,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
 | **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
+| **S3 through task roles**                       | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -196,7 +196,7 @@ forge-central out, since nothing there is close to a length limit.
 Files:
 
 ```
-terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+terraform/envs/<stage>/platform/   VPC, RDS, S3, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps root

@@ -1,4 +1,4 @@
-# Dev platform: VPC, RDS, S3, DynamoDB, ALB, OpenBao and the provision Lambda.
+# Dev platform: VPC, RDS, S3, ALB, OpenBao and the provision Lambda.
 #
 # .github/workflows/check-and-deploy.yml applies this root on every push to main, then
 # applies envs/dev/apps, which reads its state. The two are ordered by a `needs:`
