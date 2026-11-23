@@ -145,6 +145,7 @@ scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and ba
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
+scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
 scripts/set-pin.sh            pins one service of one stage at one image digest
@@ -476,23 +477,25 @@ names the services it is still waiting on as it polls, and every two minutes
 prints their task counts, their deployments and their recent ECS events, so a
 long wait says whether a rollout is slow or has stopped moving.
 
-`smoke-dev` and `smoke-staging` then call `make smoke` for their stage and retry
-for four minutes. Steady state covers the task; a newly created Route53 record
-or listener rule in front of it can take a moment longer. The smoke checks need
-no credentials because every request goes over public HTTPS. See
-[Smoke-testing a stage](#smoke-testing-a-stage).
+`smoke-dev`, `smoke-staging` and `smoke-prod` then call `make smoke` for their
+stage and retry for four minutes. Steady state covers the task; a newly created
+Route53 record or listener rule in front of it can take a moment longer. The
+smoke checks need no credentials because every request goes over public HTTPS.
+See [Smoke-testing a stage](#smoke-testing-a-stage).
 
-Once `smoke-dev` and `smoke-staging` have finished, `start-node-tests` asks
-infra-nodes to test the nodes of every stage whose central smoke test passed,
-through `.github/workflows/start-node-tests.yml`. The node tests run there, in
-`test-nodes.yml`: a smoke test of each node, then an end-to-end test that creates
-a tenant through Hilt and stores and reads back objects on the node, so it covers
-the write path through central that `make smoke` does not. One push starts one
+Once `smoke-dev`, `smoke-staging` and `smoke-prod` have finished,
+`start-node-tests` asks infra-nodes to test the nodes of every stage whose
+central smoke test passed, through `.github/workflows/start-node-tests.yml`. The
+node tests run there, in `test-nodes.yml`: a smoke test of each node, then, on
+dev and staging nodes, an end-to-end test that creates a tenant through Hilt and
+stores and reads back objects on the node, so it covers the write path through
+central that `make smoke` does not. One push starts one
 run there, which alerts from infra-nodes at most once, naming this repository's
 commit; nothing here waits for it. The job sends a `central-deployed`
 repository dispatch with a fil-forge-bot token scoped to infra-nodes with
-Contents write, a permission the App already has. Prod is not tested until the
-test has a credential that cannot reach customer tenants.
+Contents write, a permission the App already has. Prod nodes get only the smoke
+test until the end-to-end test has a credential that cannot reach customer
+tenants (FIL-1491).
 
 When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
 tail of every log group the stage owns into the run, so the diagnosis is where

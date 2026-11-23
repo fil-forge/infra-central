@@ -12,9 +12,9 @@
 # on the site's appliance host, and keeps no local copy.
 #
 # Usage:
-#   scripts/fetch-pandora-vpn-secrets.sh --stage prod --site provisional \
-#     --host root@23.83.66.244
-#   scripts/fetch-pandora-vpn-secrets.sh --stage prod --site provisional \
+#   scripts/fetch-pandora-vpn-secrets.sh --stage prod --site us-east-2 \
+#     --host <appliance-host>
+#   scripts/fetch-pandora-vpn-secrets.sh --stage prod --site us-east-2 \
 #     --out "$dir"
 #
 # Options:

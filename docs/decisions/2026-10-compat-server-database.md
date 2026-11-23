@@ -53,9 +53,11 @@ key from the regional bootstrap, which the planned backup copies to another acco
 [FIL-1292](https://linear.app/filecoin-foundation/issue/FIL-1292)). The `database` module is shaped
 for dev and staging and uses the account's default RDS key, whose snapshots another account can
 receive only after each one is copied under a customer-managed key. Reusing the `aurora` module
-takes one new input, a cluster name, since every name is `fc-${stage}` today.
+takes two inputs of its own: a cluster name, since every name is `fc-${stage}` today, and an engine
+version, which each cluster states for itself.
 
-The cluster runs Aurora PostgreSQL 16, matching central, on Aurora Standard storage. The test run
+The cluster runs Aurora PostgreSQL 18 on Aurora Standard storage, while central's own cluster stays
+on 16. Each cluster's version is set on its own in the stage's platform root. The test run
 uses a writer alone, about $201 a month, so an instance failure takes the database down for up to
 about 10 minutes while Aurora recreates it. The production cluster runs a writer and a reader in
 different zones.

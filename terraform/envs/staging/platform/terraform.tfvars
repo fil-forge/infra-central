@@ -26,7 +26,7 @@ chain = {
   chain_id = 314159
 
   contracts = {
-    fwss                      = "0x0c6875983B20901a7C3c86871f43FdEE77946424"
+    fwss                      = "0x55325AB46CDAB0FbDef559c810cd6bc95cBFEfFd"
     filecoin_pay              = "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0"
     service_provider_registry = "0x839e5c9988e4e9977d40708d0094103c0839Ac9D"
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"

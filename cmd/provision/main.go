@@ -7,10 +7,13 @@
 // private key ever enters Terraform state, and nothing is written to a local
 // disk anywhere in the flow.
 //
-// Terraform drives two phases, because the ordering is circular otherwise.
-// OpenBao stores its data in Postgres, so its database must exist before it
-// starts; but OpenBao must be running before it can be configured. Phase seed
-// runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
+// Terraform drives seed and vault as two phases, because the ordering is
+// circular otherwise. OpenBao stores its data in Postgres, so its database
+// must exist before it starts; but OpenBao must be running before it can be
+// configured. Phase seed runs after RDS and before OpenBao; phase vault runs
+// once OpenBao is serving. Terraform also drives phase analyze on a stage that
+// allows a major version upgrade and applies it at once, after the database
+// changes version; it only reads data.
 //
 // Every other phase is for an operator, and Terraform must never invoke it: an
 // apply must not move money, issue a credential or delete a registration. An
@@ -45,6 +48,12 @@ type Request struct {
 	// re-invocation by changing the input, which is how aws_lambda_invocation
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
+
+	// --- analyze phase only ---
+
+	// Target names the cluster to analyze: "central", the default, or
+	// "pandora".
+	Target string `json:"target,omitempty"`
 
 	// --- vault phase only ---
 
@@ -108,13 +117,22 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token, appliance-backup-key, onboard, retire and
-	// reset-apps phases ---
+	// --- fund, appliance-token, appliance-backup-key, appliance-root-store,
+	// onboard, retire and reset-apps phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
 	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
+
+	// --- appliance-root-store phase only ---
+
+	// RootToken and RecoveryKey are what an appliance's OpenBao printed at
+	// init. They are secret: the phase stores them and never logs or returns
+	// them, and scripts/store-appliance-root-credentials.sh keeps them off
+	// every command line.
+	RootToken   string `json:"root_token,omitempty"`
+	RecoveryKey string `json:"recovery_key,omitempty"`
 
 	// --- fund phase only ---
 
@@ -142,6 +160,8 @@ type Response struct {
 	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
+	// Analyzed lists the databases the analyze phase ran ANALYZE in.
+	Analyzed []string `json:"analyzed,omitempty"`
 	// BackupReplicaRegion is the region the seed phase replicated the keys to.
 	// Terraform checks it against the region it configured, so an image that
 	// predates replication fails the apply rather than skipping it.
@@ -179,6 +199,11 @@ type Response struct {
 	// access key, so it is no safer for Terraform state than TokenResult.
 	BackupKeyPlan   *BackupKeyPlan   `json:"backup_key_plan,omitempty"`
 	BackupKeyResult *BackupKeyResult `json:"backup_key_result,omitempty"`
+
+	// RootCredentialsPlan and RootCredentialsResult belong to the
+	// appliance-root-store phase, and carry only a region and version numbers.
+	RootCredentialsPlan   *RootCredentialsPlan   `json:"root_credentials_plan,omitempty"`
+	RootCredentialsResult *RootCredentialsResult `json:"root_credentials_result,omitempty"`
 
 	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
 	// public: the result's proof is a delegation, which is useless without the
@@ -235,12 +260,16 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.seed(ctx)
 	case "vault":
 		return deps.vault(ctx, req)
+	case "analyze":
+		return deps.analyze(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
 	case "appliance-token":
 		return deps.applianceToken(ctx, req)
 	case "appliance-backup-key":
 		return deps.applianceBackupKey(ctx, req)
+	case "appliance-root-store":
+		return deps.applianceRootStore(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
 	case "retire":
@@ -249,7 +278,7 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"analyze\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
 }
 

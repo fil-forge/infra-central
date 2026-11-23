@@ -11,7 +11,7 @@
 # because it waits for Enter before tearing down, and through bash, because
 # Debian and Ubuntu mount /run noexec:
 #
-#   ssh -t root@23.83.66.244 bash /run/pandora-vpn-check/check-pandora-vpn-host.sh
+#   ssh -t <appliance-host> bash /run/pandora-vpn-check/check-pandora-vpn-host.sh
 #
 # The checks run in order and stop at the first failure:
 #   0. a container can use nftables on this host's kernel

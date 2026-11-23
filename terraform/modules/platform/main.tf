@@ -67,12 +67,15 @@ module "database" {
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.database_security_group_id
 
-  instance_class        = var.db_instance_class
-  allocated_storage     = var.db_allocated_storage
-  multi_az              = var.db_multi_az
-  backup_retention_days = var.pitr_window_days
-  deletion_protection   = var.protect_stateful_resources
-  skip_final_snapshot   = !var.protect_stateful_resources
+  engine_version              = var.db_engine_version
+  allow_major_version_upgrade = var.db_allow_major_version_upgrade
+  apply_immediately           = var.db_apply_immediately
+  instance_class              = var.db_instance_class
+  allocated_storage           = var.db_allocated_storage
+  multi_az                    = var.db_multi_az
+  backup_retention_days       = var.pitr_window_days
+  deletion_protection         = var.protect_stateful_resources
+  skip_final_snapshot         = !var.protect_stateful_resources
 }
 
 # The database module had no count before db_engine existed. This keeps the
@@ -91,11 +94,14 @@ module "aurora" {
   security_group_id = module.network.database_security_group_id
   kms_key_arn       = var.db_kms_key_arn
 
-  instance_class        = var.db_instance_class
-  instance_count        = var.db_instance_count
-  backup_retention_days = var.pitr_window_days
-  deletion_protection   = var.protect_stateful_resources
-  skip_final_snapshot   = !var.protect_stateful_resources
+  engine_version              = var.db_engine_version
+  allow_major_version_upgrade = var.db_allow_major_version_upgrade
+  apply_immediately           = var.db_apply_immediately
+  instance_class              = var.db_instance_class
+  instance_count              = var.db_instance_count
+  backup_retention_days       = var.pitr_window_days
+  deletion_protection         = var.protect_stateful_resources
+  skip_final_snapshot         = !var.protect_stateful_resources
 }
 
 locals {
@@ -129,9 +135,12 @@ module "pandora_db" {
   kms_key_arn              = var.db_kms_key_arn
   sites                    = local.pandora_sites
 
-  instance_count        = var.pandora_db.instance_count
-  backup_retention_days = var.pandora_db.backup_retention_days
-  protect               = var.pandora_db.protect
+  engine_version              = var.pandora_db.engine_version
+  allow_major_version_upgrade = var.pandora_db.allow_major_version_upgrade
+  apply_immediately           = var.pandora_db.apply_immediately
+  instance_count              = var.pandora_db.instance_count
+  backup_retention_days       = var.pandora_db.backup_retention_days
+  protect                     = var.pandora_db.protect
 }
 
 locals {
@@ -310,6 +319,59 @@ resource "aws_lambda_invocation" "seed" {
       condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
       error_message = "The seed phase did not replicate the keys to ${coalesce(var.backup_replica_region, "-")}. The provision image predates replication: publish a newer one, then bump seed_trigger."
     }
+  }
+}
+
+# Restores the planner's statistics after the stage's database changes
+# version, which a major upgrade discards. The engine version is in the input,
+# so each version change re-invokes the phase, after the database module has
+# finished upgrading. It exists only while the stage allows a major upgrade and
+# applies it at once: without apply_immediately the upgrade waits for the
+# maintenance window, and analyzing at apply time would analyze the old
+# version. The check below warns about that case.
+#
+# An image built before the phase existed answers with "unknown phase" and
+# fails the apply after the upgrade itself succeeded. Publish a newer image,
+# pin it, and apply again; the invocation runs then.
+resource "aws_lambda_invocation" "analyze" {
+  count         = var.db_allow_major_version_upgrade && var.db_apply_immediately ? 1 : 0
+  function_name = module.provision.function_name
+
+  input = jsonencode({
+    phase          = "analyze"
+    engine_version = var.db_engine_version
+  })
+
+  depends_on = [module.database, module.aurora, aws_lambda_invocation.seed]
+}
+
+check "major_upgrade_is_analyzed" {
+  assert {
+    condition     = !var.db_allow_major_version_upgrade || var.db_apply_immediately
+    error_message = "Stage ${var.stage} allows a major upgrade of its database without db_apply_immediately, so AWS holds a version change until the next maintenance window and this apply does not run ANALYZE. Once the upgrade has finished, run it by hand: aws lambda invoke --region ${local.region} --function-name ${module.provision.function_name} --cli-binary-format raw-in-base64-out --payload '{\"phase\":\"analyze\"}' /dev/stdout"
+  }
+}
+
+# The same for the pandora cluster, whose version and switches pandora_db sets
+# apart from the stage's own database. try() covers a stage without the
+# cluster, where pandora_db is null.
+resource "aws_lambda_invocation" "analyze_pandora" {
+  count         = try(var.pandora_db.allow_major_version_upgrade && var.pandora_db.apply_immediately, false) ? 1 : 0
+  function_name = module.provision.function_name
+
+  input = jsonencode({
+    phase          = "analyze"
+    target         = "pandora"
+    engine_version = var.pandora_db.engine_version
+  })
+
+  depends_on = [module.pandora_db, aws_lambda_invocation.seed]
+}
+
+check "pandora_major_upgrade_is_analyzed" {
+  assert {
+    condition     = !try(var.pandora_db.allow_major_version_upgrade, false) || try(var.pandora_db.apply_immediately, false)
+    error_message = "Stage ${var.stage} allows a major upgrade of its pandora cluster without pandora_db.apply_immediately, so AWS holds a version change until the next maintenance window and this apply does not run ANALYZE. Once the upgrade has finished, run it by hand: aws lambda invoke --region ${local.region} --function-name ${module.provision.function_name} --cli-binary-format raw-in-base64-out --payload '{\"phase\":\"analyze\",\"target\":\"pandora\"}' /dev/stdout"
   }
 }
 
