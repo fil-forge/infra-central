@@ -29,13 +29,13 @@
 # Usage:
 #   scripts/onboard-appliance.sh \
 #     --region us-east-9 \
-#     --piri-did did:key:z6Mk... \
+#     --piri-did did:web:piri-0.latest.dev.fil-forge.com \
 #     --piri-url https://piri-0.latest.dev.fil-forge.com \
 #     --piri-proof-file piri-proof.txt
 #
 # Options:
 #   --region            appliance region label                    (required)
-#   --piri-did          the appliance's Piri did:key              (required)
+#   --piri-did          the Piri's DID: the did:web of --piri-url (required)
 #   --piri-url          where Piri answers publicly              (required)
 #   --piri-proof-file   the proof the appliance signed for sprue (required
 #                       unless sprue already has the provider)

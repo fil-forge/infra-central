@@ -79,8 +79,12 @@ module "apps" {
   namespace_id   = local.platform.namespace_id
   namespace_name = local.platform.namespace_name
 
-  bucket_names             = local.platform.bucket_names
-  bucket_arns              = local.platform.bucket_arns
+  bucket_names = local.platform.bucket_names
+  bucket_arns  = local.platform.bucket_arns
+
+  # try(), for the reason given at log_forwarding below: this key reaches the
+  # platform state only once the platform root has applied.
+  delegator_store          = try(local.platform.delegator_store, "dynamodb")
   allow_list_table_name    = local.platform.allow_list_table_name
   provider_info_table_name = local.platform.provider_info_table_name
   dynamodb_table_arns      = local.platform.dynamodb_table_arns
@@ -128,9 +132,10 @@ module "apps" {
     plc             = { cpu = 256, memory = 512 }
   }
 
-  # The same as sprue's own default. The database allows roughly 900
-  # connections; see the platform root.
+  # sprue's own default, restated, and twice hilt's for the same request rate.
+  # The database allows roughly 1,800 connections; see the platform root.
   sprue_postgres_max_conns = 20
+  hilt_postgres_max_conns  = 20
 }
 
 # Read by the workflow's wait for steady state.

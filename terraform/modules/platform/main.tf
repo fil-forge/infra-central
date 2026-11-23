@@ -67,12 +67,15 @@ module "database" {
   subnet_ids        = module.network.private_subnet_ids
   security_group_id = module.network.database_security_group_id
 
-  instance_class        = var.db_instance_class
-  allocated_storage     = var.db_allocated_storage
-  multi_az              = var.db_multi_az
-  backup_retention_days = var.pitr_window_days
-  deletion_protection   = var.protect_stateful_resources
-  skip_final_snapshot   = !var.protect_stateful_resources
+  engine_version              = var.db_engine_version
+  allow_major_version_upgrade = var.db_allow_major_version_upgrade
+  apply_immediately           = var.db_apply_immediately
+  instance_class              = var.db_instance_class
+  allocated_storage           = var.db_allocated_storage
+  multi_az                    = var.db_multi_az
+  backup_retention_days       = var.pitr_window_days
+  deletion_protection         = var.protect_stateful_resources
+  skip_final_snapshot         = !var.protect_stateful_resources
 }
 
 # The database module had no count before db_engine existed. This keeps the
@@ -91,11 +94,14 @@ module "aurora" {
   security_group_id = module.network.database_security_group_id
   kms_key_arn       = var.db_kms_key_arn
 
-  instance_class        = var.db_instance_class
-  instance_count        = var.db_instance_count
-  backup_retention_days = var.pitr_window_days
-  deletion_protection   = var.protect_stateful_resources
-  skip_final_snapshot   = !var.protect_stateful_resources
+  engine_version              = var.db_engine_version
+  allow_major_version_upgrade = var.db_allow_major_version_upgrade
+  apply_immediately           = var.db_apply_immediately
+  instance_class              = var.db_instance_class
+  instance_count              = var.db_instance_count
+  backup_retention_days       = var.pitr_window_days
+  deletion_protection         = var.protect_stateful_resources
+  skip_final_snapshot         = !var.protect_stateful_resources
 }
 
 locals {
@@ -129,9 +135,12 @@ module "pandora_db" {
   kms_key_arn              = var.db_kms_key_arn
   sites                    = local.pandora_sites
 
-  instance_count        = var.pandora_db.instance_count
-  backup_retention_days = var.pandora_db.backup_retention_days
-  protect               = var.pandora_db.protect
+  engine_version              = var.pandora_db.engine_version
+  allow_major_version_upgrade = var.pandora_db.allow_major_version_upgrade
+  apply_immediately           = var.pandora_db.apply_immediately
+  instance_count              = var.pandora_db.instance_count
+  backup_retention_days       = var.pandora_db.backup_retention_days
+  protect                     = var.pandora_db.protect
 }
 
 locals {
@@ -245,8 +254,14 @@ module "provision" {
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
 
+  delegator_store       = var.delegator_store
   allow_list_table_name = module.storage.allow_list_table_name
   allow_list_table_arn  = module.storage.allow_list_table_arn
+
+  provider_info_table_name = module.storage.provider_info_table_name
+  delegator_table_arns     = module.storage.table_arns
+
+  backup_replica_region = var.backup_replica_region
 
   appliance_backups = var.appliance_backups == null ? null : {
     bucket_name = module.appliance_backups[0].bucket_name
@@ -260,21 +275,91 @@ module "provision" {
 resource "aws_lambda_invocation" "seed" {
   function_name = module.provision.function_name
 
-  # The pandora host is here so that creating or replacing that cluster
-  # re-invokes the phase. The function reads the host from its environment.
-  input = jsonencode({
+  # The pandora host and the replica region are here so that changing either
+  # re-invokes the phase. The function reads both from its environment.
+  # The replica region joins the input only when set, so a stage that keeps no
+  # replicas sees the same input as before replication existed.
+  input = jsonencode(merge({
     phase           = "seed"
     trigger         = var.seed_trigger
     pandora_db_host = try(module.pandora_db[0].address, null)
-  })
+    }, var.backup_replica_region == null ? {} : {
+    backup_replica_region = var.backup_replica_region
+  }))
 
   # Static references only: depends_on cannot read local.database, and only one
   # of the two modules exists.
   #
   # module.provision is here for its role policy. function_name depends only on
   # the function, so without it an apply that adds a grant and a phase that
-  # needs it could invoke the phase first and fail with AccessDenied.
+  # needs it could invoke the phase first and fail with AccessDenied. Ordering
+  # alone does not cover IAM propagation, so the function also retries a denied
+  # replication for up to five minutes in total.
   depends_on = [module.database, module.aurora, module.pandora_db, module.provision]
+
+  # The function echoes the region it replicated to. An image built before
+  # replication existed ignores the setting and echoes nothing, and without
+  # this the apply would succeed with no replica made. After publishing a
+  # newer image, bump seed_trigger to re-run the phase.
+  lifecycle {
+    postcondition {
+      condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
+      error_message = "The seed phase did not replicate the keys to ${coalesce(var.backup_replica_region, "-")}. The provision image predates replication: publish a newer one, then bump seed_trigger."
+    }
+  }
+}
+
+# Restores the planner's statistics after the stage's database changes
+# version, which a major upgrade discards. The engine version is in the input,
+# so each version change re-invokes the phase, after the database module has
+# finished upgrading. It exists only while the stage allows a major upgrade and
+# applies it at once: without apply_immediately the upgrade waits for the
+# maintenance window, and analyzing at apply time would analyze the old
+# version. The check below warns about that case.
+#
+# An image built before the phase existed answers with "unknown phase" and
+# fails the apply after the upgrade itself succeeded. Publish a newer image,
+# pin it, and apply again; the invocation runs then.
+resource "aws_lambda_invocation" "analyze" {
+  count         = var.db_allow_major_version_upgrade && var.db_apply_immediately ? 1 : 0
+  function_name = module.provision.function_name
+
+  input = jsonencode({
+    phase          = "analyze"
+    engine_version = var.db_engine_version
+  })
+
+  depends_on = [module.database, module.aurora, aws_lambda_invocation.seed]
+}
+
+check "major_upgrade_is_analyzed" {
+  assert {
+    condition     = !var.db_allow_major_version_upgrade || var.db_apply_immediately
+    error_message = "Stage ${var.stage} allows a major upgrade of its database without db_apply_immediately, so AWS holds a version change until the next maintenance window and this apply does not run ANALYZE. Once the upgrade has finished, run it by hand: aws lambda invoke --region ${local.region} --function-name ${module.provision.function_name} --cli-binary-format raw-in-base64-out --payload '{\"phase\":\"analyze\"}' /dev/stdout"
+  }
+}
+
+# The same for the pandora cluster, whose version and switches pandora_db sets
+# apart from the stage's own database. try() covers a stage without the
+# cluster, where pandora_db is null.
+resource "aws_lambda_invocation" "analyze_pandora" {
+  count         = try(var.pandora_db.allow_major_version_upgrade && var.pandora_db.apply_immediately, false) ? 1 : 0
+  function_name = module.provision.function_name
+
+  input = jsonencode({
+    phase          = "analyze"
+    target         = "pandora"
+    engine_version = var.pandora_db.engine_version
+  })
+
+  depends_on = [module.pandora_db, aws_lambda_invocation.seed]
+}
+
+check "pandora_major_upgrade_is_analyzed" {
+  assert {
+    condition     = !try(var.pandora_db.allow_major_version_upgrade, false) || try(var.pandora_db.apply_immediately, false)
+    error_message = "Stage ${var.stage} allows a major upgrade of its pandora cluster without pandora_db.apply_immediately, so AWS holds a version change until the next maintenance window and this apply does not run ANALYZE. Once the upgrade has finished, run it by hand: aws lambda invoke --region ${local.region} --function-name ${module.provision.function_name} --cli-binary-format raw-in-base64-out --payload '{\"phase\":\"analyze\",\"target\":\"pandora\"}' /dev/stdout"
+  }
 }
 
 module "openbao" {
@@ -326,13 +411,28 @@ resource "aws_lambda_invocation" "vault" {
   function_name = module.provision.function_name
 
   # The region lists are part of the input, so committing a label is what
-  # re-invokes the phase to reconcile the keys against it.
-  input = jsonencode({
+  # re-invokes the phase to reconcile the keys against it. The replica region
+  # is here for the same reason as in seed: setting it re-invokes the phase,
+  # which replicates OpenBao's root token and recovery keys. It joins the input
+  # only when set, so a stage that keeps no replicas sees an unchanged input.
+  input = jsonencode(merge({
     phase                     = "vault"
     trigger                   = var.vault_trigger
     appliance_regions         = var.appliance_regions
     retired_appliance_regions = var.retired_appliance_regions
-  })
+    }, var.backup_replica_region == null ? {} : {
+    backup_replica_region = var.backup_replica_region
+  }))
 
   depends_on = [module.openbao]
+
+  # An image built before OpenBao's credentials moved to Secrets Manager
+  # ignores the setting and echoes nothing; without this the apply would
+  # succeed with the root token and recovery keys still only in this region.
+  lifecycle {
+    postcondition {
+      condition     = var.backup_replica_region == null || try(jsondecode(self.result).backup_replica_region, null) == var.backup_replica_region
+      error_message = "The vault phase did not replicate OpenBao's credentials to ${coalesce(var.backup_replica_region, "-")}. The provision image predates that: publish a newer one, then bump vault_trigger."
+    }
+  }
 }

@@ -58,7 +58,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | Decision                                        | Why                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Secrets minted by a Lambda in the VPC**       | Private keys are generated where they will be used. Nothing is written to a laptop, and no key enters Terraform state: the function returns only DIDs, addresses and names.                                                                                                                                                          |
-| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys are Secrets Manager secrets, which can be replicated to a DR region; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
+| **Keys in Secrets Manager, the rest in SSM**    | Identity and wallet keys and OpenBao's root token and recovery keys are Secrets Manager secrets, replicated to the DR region where a stage sets `backup_replica_region`; DSNs, passwords and public records stay SSM parameters. Each task execution role reads only `forge-central/<stage>/<service>/*` in both. A compromised sprue task cannot read hilt's AppRole secret or the delegator's transactor key. |
 | **OpenBao stores in Postgres, not on a volume** | Fargate has no durable local disk. Reusing the RDS instance avoids an EFS filesystem and keeps a replaced task's data intact.                                                                                                                                                                                                        |
 | **OpenBao seals with KMS**                      | There is no unseal key to store, share or leak, and no sidecar polling to apply one. A restarted task comes back ready with no operator step. smelt runs 1-of-1 Shamir with the key in 1Password.                                                                                                                                    |
 | **hilt authenticates with AppRole, not root**   | Its policy reaches only `forge-central/hilt/data/tenant/*`. smelt hands hilt the Vault root token and tracks that as debt.                                                                                                                                                                                                           |
@@ -76,14 +76,14 @@ registration writes central performs on its behalf.
 
 ## What each service needs
 
-| Service              | Port | Health         | Postgres | Other                        |
-| -------------------- | ---- | -------------- | -------- | ---------------------------- |
-| sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
-| hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
-| swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
-| delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
-| piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
-| plc                  | 3000 | `/_health`     | yes      | nothing else                 |
+| Service              | Port | Health         | Postgres  | Other                                                 |
+| -------------------- | ---- | -------------- | --------- | ----------------------------------------------------- |
+| sprue                | 8080 | `/health`      | yes       | 3 S3 buckets, plc                                     |
+| hilt                 | 8080 | `/health`      | yes       | OpenBao, plc, calls sprue                             |
+| swarf                | 8080 | `/health`      | yes       | plc, serves an SSE stream                             |
+| delegator            | 8080 | `/healthcheck` | per stage | chain RPC, DynamoDB until its stage moves to Postgres |
+| piri-signing-service | 7446 | `/healthcheck` | no        | chain RPC                                             |
+| plc                  | 3000 | `/_health`     | yes       | nothing else                                          |
 
 Two more names appear among the stage's keys: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
@@ -106,7 +106,8 @@ These each cost an afternoon to rediscover.
   injects secrets as environment variables, so the `ecs-service` module wraps
   the entrypoint to write them out before exec'ing the process.
 - **Health paths disagree**: `/health`, `/healthcheck` and `/_health` all appear.
-- **Migrations run in-process** via goose for sprue, hilt, swarf and plc.
+- **Migrations run in-process** via goose for sprue, hilt, swarf and plc, and
+  for the delegator on a stage whose `delegator_store` is `postgres`.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on
@@ -145,6 +146,7 @@ scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and ba
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
+scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
 scripts/set-pin.sh            pins one service of one stage at one image digest
@@ -164,7 +166,7 @@ terraform/
   modules/                                         the wiring; see Stages below
   envs/                                            one directory per root module
     bootstrap/<account>/account/                   state bucket, CI roles
-    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
+    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana, the provision Lambda's invocation trail
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  applied on every push to main
@@ -231,6 +233,7 @@ terraform/modules/
     constants/             every root, bootstrap included
   ecr/                     regional bootstrap only: the image registry
   telemetry/               regional bootstrap only: the Firehoses and metric stream to Grafana
+  provision-invocations/   regional bootstrap only: the trail of who invoked the provision Lambdas
   tfstate/                 account bootstrap only: the state bucket
   github-actions-iam/      account bootstrap only: the two CI roles
 ```
@@ -327,7 +330,8 @@ The provision Lambda creates them, so Terraform has no record of them and never
 removes them. An accidental destroy therefore cannot burn a funded wallet or
 invalidate a DID that storage providers have already registered against.
 
-The service identities and the two wallets are Secrets Manager secrets under
+The service identities, the two wallets, and central OpenBao's root token and
+recovery keys are Secrets Manager secrets under
 `forge-central/<stage>/<service>/`. Everything else is an SSM parameter under
 `/forge-central/<stage>/<service>/`.
 
@@ -339,6 +343,19 @@ A mismatch fails the run and leaves SSM untouched. The apps root reads the keys
 only from the seed result, so a stage whose seed result does not list a key's
 secret fails its apps plan, naming the key, instead of pointing ECS at SSM.
 
+OpenBao's root token and recovery keys move the same way in the vault phase.
+Each one is copied from SSM, read back and compared; a credential whose two
+copies differ, or that is in neither store, fails the phase and deletes
+nothing. One case is settled by asking OpenBao: when it accepts the root token
+in Secrets Manager and refuses the one in SSM, the SSM pair is left over from
+an earlier OpenBao, so both SSM copies are deleted and the phase continues.
+The SecureStrings go last, after the root token has configured the
+mounts, hilt's AppRole and the appliance keys. Until a stage's vault phase
+runs with a provision image that knows about the move, the `appliance-token`
+and `reset-apps` phases read the root token from SSM. Once the SSM copies are
+gone, a provision image older than the move cannot find the root token, so
+roll forward rather than back.
+
 They also stay readable, which takes deliberate arrangement. SecureStrings and
 secrets are encrypted under the account's AWS-managed SSM and Secrets Manager
 keys rather than the stage's own customer-managed key. The stage's key is destroyed with the stage, and a key in
@@ -347,6 +364,10 @@ would leave every secret unreadable the moment the stage came down and would
 fail the next apply that tried to rebuild it. The stage's key seals OpenBao and
 nothing else, and what it protects is meant to die with the stage: OpenBao's
 storage sits in the stage's database and goes at the same time.
+
+OpenBao's credentials outlive the OpenBao they open, since its storage goes
+with the stage. When the vault phase initialises a new OpenBao, it overwrites
+both secrets with the new values and deletes any SSM copies.
 
 So **a destroyed and recreated stage silently comes back with its previous
 identities and wallets.** An appliance's stored delegation is one of them: a
@@ -373,6 +394,17 @@ aws ssm get-parameter --name /forge-central/dev/delegator/transactor-key.address
 aws ssm get-parameters-by-path --path /forge-central/dev --recursive \
   --query 'Parameters[].Name' --output text \
   | xargs -n 10 aws ssm delete-parameters --names
+# A secret with a DR replica cannot be deleted until the replica is removed.
+# list-secrets does not report replicas, so ask each secret.
+for name in $(aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
+  --query 'SecretList[].Name' --output text); do
+  regions=$(aws secretsmanager describe-secret --secret-id "$name" \
+    --query 'ReplicationStatus[].Region' --output text)
+  if [ -n "$regions" ] && [ "$regions" != None ]; then
+    aws secretsmanager remove-regions-from-replication --secret-id "$name" \
+      --remove-replica-regions $regions
+  fi
+done
 aws secretsmanager list-secrets --filters Key=name,Values=forge-central/dev/ \
   --query 'SecretList[].Name' --output text \
   | xargs -n 1 aws secretsmanager delete-secret --force-delete-without-recovery --secret-id
@@ -449,11 +481,25 @@ names the services it is still waiting on as it polls, and every two minutes
 prints their task counts, their deployments and their recent ECS events, so a
 long wait says whether a rollout is slow or has stopped moving.
 
-`smoke-dev` and `smoke-staging` then call `make smoke` for their stage and retry
-for four minutes. Steady state covers the task; a newly created Route53 record
-or listener rule in front of it can take a moment longer. The smoke checks need
-no credentials because every request goes over public HTTPS. See
-[Smoke-testing a stage](#smoke-testing-a-stage).
+`smoke-dev`, `smoke-staging` and `smoke-prod` then call `make smoke` for their
+stage and retry for four minutes. Steady state covers the task; a newly created
+Route53 record or listener rule in front of it can take a moment longer. The
+smoke checks need no credentials because every request goes over public HTTPS.
+See [Smoke-testing a stage](#smoke-testing-a-stage).
+
+Once `smoke-dev`, `smoke-staging` and `smoke-prod` have finished,
+`start-node-tests` asks infra-nodes to test the nodes of every stage whose
+central smoke test passed, through `.github/workflows/start-node-tests.yml`. The
+node tests run there, in `test-nodes.yml`: a smoke test of each node, then, on
+dev and staging nodes, an end-to-end test that creates a tenant through Hilt and
+stores and reads back objects on the node, so it covers the write path through
+central that `make smoke` does not. One push starts one
+run there, which alerts from infra-nodes at most once, naming this repository's
+commit; nothing here waits for it. The job sends a `central-deployed`
+repository dispatch with a fil-forge-bot token scoped to infra-nodes with
+Contents write, a permission the App already has. Prod nodes get only the smoke
+test until the end-to-end test has a credential that cannot reach customer
+tenants (FIL-1491).
 
 When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
 tail of every log group the stage owns into the run, so the diagnosis is where
@@ -464,7 +510,8 @@ needs `logs:FilterLogEvents` and the plan role deliberately has none of it.
 A failed run on `main` posts to `#filone-alerts` in Slack with the stage that
 failed, the failed jobs, the commit subject, its author and a link to the run.
 The stage comes from the job name: `apply-<stage>-<root>` and `smoke-<stage>`
-name a stage, `apply-grafana` reports as `grafana`, and `check` as itself.
+name a stage, `start-node-tests` reports the stages it started tests on,
+`apply-grafana` reports as `grafana`, and `check` as itself.
 When the commit is an image bump, one more line names the service commit that
 produced the image and who wrote it, looked up from the source commit link Bump
 deployed image puts in the commit body. A lookup that fails drops the line and
@@ -584,7 +631,7 @@ bucket that now exists. The regional root beside it comes next.
 
 ### Setting up an AWS region
 
-The regional root, `bootstrap/<account>/<region>/`, holds two things:
+The regional root, `bootstrap/<account>/<region>/`, holds three things:
 
 - `forge-central/provision`, the **ECR repository** for the provision Lambda
   image. Lambda pulls an image only from ECR in the same region as the
@@ -595,6 +642,10 @@ The regional root, `bootstrap/<account>/<region>/`, holds two things:
 - The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
   the stage list in `terraform/modules/shared/constants`, and one CloudWatch
   metric stream, which covers one account in one region.
+- The **invocation trail**: a CloudTrail trail that records each `Invoke` of
+  the stages' provision Lambdas, to a bucket and to Grafana. It answers who
+  invoked a phase, which OpenBao's audit log cannot; see
+  [docs/observability.md](docs/observability.md#who-invoked-the-provision-lambda).
 
 The first region of an account already has this directory next to the account
 root. For a further region, copy it:
@@ -650,7 +701,7 @@ The bucket already exists, so there is no bootstrap dance here:
 ```bash
 cd terraform/envs/bootstrap/nonprod/us-east-2
 tofu init
-tofu apply                           # the image registry and the telemetry egress
+tofu apply                           # the image registry, the telemetry egress and the trail
 ```
 
 Every image this project publishes to ECR lives under the `forge-central/`
@@ -956,6 +1007,38 @@ and wallets, Secrets Manager secrets.
 A key the seed phase moved out of SSM is reused, not minted, so moving the keys
 leaves the list empty and `service_dids` and `wallet_addresses` unchanged.
 
+### Backup replicas of the keys
+
+A stage that sets `backup_replica_region` in its platform root, normally to
+`module.constants.dr_region`, keeps a replica of every identity and wallet key
+there. It must differ from the stage's own region, or the plan fails. Staging
+and prod set it; dev keeps no replicas. Pin a provision image built with
+replication before setting it: an older image ignores the setting, and the seed
+invocation then fails the apply.
+
+Each seed run adds any replica that is missing, so a key minted before
+replication existed gets one on the next run, and a run that finds every
+replica in place changes nothing. A seed returns only once every replica is in
+sync; a replica that fails or does not sync in time fails the apply. Secrets
+Manager fails a replica when the backup region already holds a secret of the
+same name, and the run reports that rather than overwriting it, since that
+secret may hold a key worth keeping.
+
+The vault phase does the same for OpenBao's root token and recovery keys,
+right after storing them and before anything else in the phase can fail. The
+recovery keys cannot be regenerated, and without them and the root token a
+restored OpenBao admits nobody. Setting `backup_replica_region` re-runs the
+vault phase too, and an image that predates the move fails that apply as it
+does the seed one: publish a newer image, then bump `vault_trigger`.
+
+The apply is the only check. A replica removed between applies goes unnoticed
+until the next seed or vault run. To check one by hand:
+
+```bash
+aws secretsmanager describe-secret --secret-id forge-central/prod/openbao/recovery-keys \
+  --query 'ReplicationStatus[].[Region,Status]' --output text
+```
+
 ### Smoke-testing a stage
 
 ```bash
@@ -998,10 +1081,19 @@ stage's apps apply job closes that gap by waiting for steady state first.
 
 ### Rotating a service identity
 
-Delete the secret, skipping the recovery window:
+In a stage that keeps DR replicas, remove the replica first. Secrets Manager
+refuses to delete a secret that still has one, and the seed run that mints the
+new key replicates it again:
 
 ```bash
-aws secretsmanager delete-secret --secret-id forge-central/dev/swarf/identity \
+aws secretsmanager remove-regions-from-replication \
+  --secret-id forge-central/<stage>/swarf/identity --remove-replica-regions eu-central-1
+```
+
+Then delete the secret, skipping the recovery window:
+
+```bash
+aws secretsmanager delete-secret --secret-id forge-central/<stage>/swarf/identity \
   --force-delete-without-recovery
 ```
 
@@ -1088,8 +1180,14 @@ plans have passed. The push that lands applies both shared non-prod stages the
 same way any other merge to `main` does.
 
 A major bump stays open for someone to read. So does a group whose highest
-change is a major, and so does any Dependabot branch that carries a commit
+change is a major, and so does any Dependabot branch whose first commit
 Dependabot did not write.
+
+The workflow runs on `pull_request`, so a Dependabot run reads its secrets from
+the Dependabot store. `FORGE_BOT_PRIVATE_KEY` is a fil-forge organization secret
+in both the Actions and the Dependabot store, and rotating the key means
+updating both. Dependabot waits a week before proposing a new action release,
+because the workflow runs the releases a bump proposes while holding that key.
 
 Dependabot rebases its pull requests in place, and the workflow runs again on
 each new head, so a branch that stops qualifying also loses the auto-merge it
@@ -1109,8 +1207,6 @@ See the following Linear tickets:
 - [FIL-1091](https://linear.app/filecoin-foundation/issue/FIL-1091) Hilt: API to remove Ingot node
 - [FIL-1154](https://linear.app/filecoin-foundation/issue/FIL-1154) Hilt authenticates to OpenBao with AWS IAM auth
 - [FIL-1148](https://linear.app/filecoin-foundation/issue/FIL-1148) Publish the provision Lambda image from CI
-- [FIL-1150](https://linear.app/filecoin-foundation/issue/FIL-1150) Enable the OpenBao audit log on Forge Central
-- [FIL-1157](https://linear.app/filecoin-foundation/issue/FIL-1157) Decide the OpenBao availability target for Forge Central
 - [FIL-1149](https://linear.app/filecoin-foundation/issue/FIL-1149) Write and rehearse the RDS restore procedure
 - [FIL-1151](https://linear.app/filecoin-foundation/issue/FIL-1151) Grafana alarms for Forge Central services
 - [FIL-1152](https://linear.app/filecoin-foundation/issue/FIL-1152) Expose metrics from swarf, delegator and piri-signing-service

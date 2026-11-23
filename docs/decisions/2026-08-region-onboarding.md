@@ -74,8 +74,9 @@ The cost is a second list to keep, and one that only grows. A retired label stay
 forever, because dropping it is what the refusal is there to catch.
 
 Retirement fires the kill lever in a fixed order: revoke the node's unseal token, delete its token
-role, delete its parameters, destroy the transit key. Revoking first means a retirement that fails
-halfway has still contained the node it was meant to contain. Destroying the key last makes it the
+role, delete its parameters, delete the copy of its root credentials, destroy the transit key.
+Revoking first means a retirement that fails halfway has still contained the node it was meant to
+contain. Destroying the key last makes it the
 record of whether the sequence finished, since the key's presence is what puts the region back in
 front of the next apply; deleting it earlier would strand every step after it with nothing left to
 notice.
@@ -161,8 +162,9 @@ is abandoned or decommissioned fails closed within days. 24 hours would strand a
 than a day and buys little, since revocation is immediate at any period. A month would keep a
 forgotten node's credential renewable long past the point anyone was watching it.
 
-The node's renewal timer runs hourly regardless, so the period is a tolerance for outages rather
-than a schedule.
+OpenBao on the node renews the token itself while it runs. The node's renewal timer covers the time
+OpenBao is not running: it renews daily, two minutes after boot and two minutes after the timer is
+enabled. So the period is a tolerance for outages rather than a schedule.
 
 ## Only the accessor is stored
 
@@ -238,9 +240,8 @@ The [Forge service identity RFC] settled Ingot's identity as
 `did:web:s3.<REGION>.filonecontent.com` in production. This repository's dev
 stage uses the `latest` stage label, so its `us-east-9` appliance is
 `did:web:s3.us-east-9.latest.dev.filonecontent.com`. Central derives that value
-from the onboarding region and `ingot_hostname_suffix`. Piri keeps its
-`did:key` and provider URL; Forge owns the Ingot hostname while the operator
-owns Piri's key and endpoint.
+from the onboarding region and `ingot_hostname_suffix`. Piri's identity is
+decided in [Piri is the did:web of its public URL](2026-11-piri-did-web.md).
 
 Two things follow. An appliance can rotate its Ingot key without telling anyone,
 because its DID document publishes the current key and the DID does not move. And

@@ -33,8 +33,8 @@ data "aws_iam_policy_document" "this" {
       "ssm:GetParametersByPath",
       # Retiring an appliance region deletes its parameters, because the transit
       # key they describe is gone and a record of a node that can never come
-      # back is worse than no record. Nothing else in this function deletes
-      # anything.
+      # back is worse than no record. The seed and vault phases delete the SSM
+      # copies of keys they moved to Secrets Manager.
       "ssm:DeleteParameters",
     ]
 
@@ -60,10 +60,13 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The service identities and the two wallets. The function creates each one
-  # once and never deletes any; rotating a key is an operator's act. Seeding a
-  # stage that predates the move also copies each key out of SSM, which is what
-  # the ssm:DeleteParameters grant above then removes.
+  # The service identities, the two wallets, and OpenBao's root token and
+  # recovery keys. The function never deletes any; rotating a key is an
+  # operator's act. PutSecretValue writes a derived key, or OpenBao's
+  # credentials after an initialisation replaced an old barrier. Seeding or
+  # running the vault phase on a stage that predates the move also copies each
+  # key out of SSM, which is what the ssm:DeleteParameters grant above then
+  # removes.
   statement {
     sid = "ManageStageKeys"
 
@@ -71,6 +74,8 @@ data "aws_iam_policy_document" "this" {
       "secretsmanager:CreateSecret",
       "secretsmanager:GetSecretValue",
       "secretsmanager:PutSecretValue",
+      # Reads a key's replica status, never its value.
+      "secretsmanager:DescribeSecret",
     ]
 
     resources = [
@@ -78,8 +83,40 @@ data "aws_iam_policy_document" "this" {
     ]
   }
 
+  # Each key gets a replica in the DR region, so losing this region loses no
+  # key. The replica takes that region's AWS-managed key, as below. Replicating
+  # is allowed to the DR region only, and never over a secret of the same name
+  # already there. Nothing here removes a replica.
+  dynamic "statement" {
+    for_each = var.backup_replica_region == null ? [] : [var.backup_replica_region]
+
+    content {
+      sid = "ReplicateStageKeys"
+
+      actions = ["secretsmanager:ReplicateSecretToRegions"]
+
+      resources = [
+        "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:forge-central/${var.stage}/*",
+      ]
+
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "secretsmanager:AddReplicaRegions"
+        values   = [statement.value]
+      }
+
+      # The SDK omits the flag when it is false, hence IfExists.
+      condition {
+        test     = "BoolIfExists"
+        variable = "secretsmanager:ForceOverwriteReplicaSecret"
+        values   = ["false"]
+      }
+    }
+  }
+
   # The keys take the account's AWS-managed Secrets Manager key, for the same
-  # reason the SecureStrings take the AWS-managed SSM key.
+  # reason the SecureStrings take the AWS-managed SSM key, and their replicas
+  # take the DR region's.
   statement {
     sid       = "EncryptAndDecryptKeys"
     actions   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
@@ -88,7 +125,9 @@ data "aws_iam_policy_document" "this" {
     condition {
       test     = "StringEquals"
       variable = "kms:ViaService"
-      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+      values = [
+        for region in compact([var.region, var.backup_replica_region]) : "secretsmanager.${region}.amazonaws.com"
+      ]
     }
   }
 
@@ -104,6 +143,14 @@ data "aws_iam_policy_document" "this" {
     ]
 
     resources = [var.allow_list_table_arn]
+  }
+
+  # The copy-delegator-records phase reads both tables to carry the delegator's
+  # records into Postgres. Read-only: the tables stay as they were.
+  statement {
+    sid       = "ReadDelegatorTables"
+    actions   = ["dynamodb:Scan"]
+    resources = var.delegator_table_arns
   }
 
   # The appliance-backup-key phase mints each region's backup key, so the

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -35,9 +34,9 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("FORGE_PRIVATE_CIDRS is required for the vault phase")
 	}
 
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve",
@@ -52,7 +51,7 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 	resp := &Response{Phase: "vault", Created: []string{}}
 
 	slog.Info("resolving the root token")
-	rootToken, err := d.ensureRootToken(ctx, client, resp)
+	rootToken, deleteLegacy, err := d.ensureRootToken(ctx, client, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +68,13 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		if err := vaultinit.WaitForUnsealed(unsealCtx, client); err != nil {
 			return nil, err
 		}
+	}
+
+	// First of the writes, so every request after it lands in the audit log
+	// with this invocation's ID.
+	slog.Info("auditing the correlation header", "header", vaultinit.CorrelationHeader)
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
 	}
 
 	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)
@@ -94,6 +100,16 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 
 	if err := d.reconcileApplianceKeys(ctx, client, req, resp); err != nil {
 		return nil, err
+	}
+
+	// The SSM copies go last, once the root token has proven itself against
+	// OpenBao in every step above. A failure here leaves them in place, and the
+	// next run finds them beside their secrets and deletes them then.
+	if deleteLegacy {
+		slog.Info("deleting openbao credentials moved to Secrets Manager")
+		if _, err := d.store.Delete(ctx, openBaoService, openBaoCredentialNames...); err != nil {
+			return nil, err
+		}
 	}
 
 	slog.Info("vault phase complete",
@@ -147,7 +163,8 @@ func (d *deps) reconcileApplianceKeys(ctx context.Context, client *api.Client, r
 }
 
 // retireAppliance revokes a retired region's unseal token, removes the
-// parameters describing it and destroys its transit key.
+// parameters describing it and the copy of its root credentials, and destroys
+// its transit key.
 //
 // Both ends of the order carry weight. Revoking first means the node loses its
 // unseal ability even if a later step fails, so a half-finished retirement still
@@ -181,6 +198,12 @@ func (d *deps) retireAppliance(ctx context.Context, client *api.Client, region s
 		return err
 	}
 
+	// A retired region's OpenBao never unseals again, so its root credentials
+	// open nothing. The 1Password entry is the operator's to delete.
+	if err := vaultinit.RemoveApplianceRootCredentials(ctx, client, region); err != nil {
+		return err
+	}
+
 	if err := vaultinit.RemoveApplianceTransitKey(ctx, client, region); err != nil {
 		return err
 	}
@@ -190,44 +213,45 @@ func (d *deps) retireAppliance(ctx context.Context, client *api.Client, region s
 }
 
 // ensureRootToken initialises OpenBao on first run and returns the root token,
-// reading the stored one on every subsequent run.
+// reading the stored one on every subsequent run. It also reports whether SSM
+// may still hold copies of the credentials for the caller to delete once the
+// rest of the phase has succeeded.
+//
+// Both credentials go to Secrets Manager and, when the stage sets a backup
+// replica region, get a replica there before anything else in the phase runs.
 //
 // The root token is kept for break-glass use only. No service is given it,
 // which is the difference from smelt, where hilt authenticates as root.
-func (d *deps) ensureRootToken(ctx context.Context, client *api.Client, resp *Response) (string, error) {
+func (d *deps) ensureRootToken(ctx context.Context, client *api.Client, resp *Response) (string, bool, error) {
 	result, err := vaultinit.EnsureInitialised(ctx, client)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	if !result.Initialised {
+	if result.Initialised {
+		slog.Info("openbao was uninitialised; storing the new root token and recovery keys")
+	} else {
 		slog.Info("openbao was already initialised; reading the stored root token")
-		token, err := d.store.GetSecret(ctx, "openbao", "root-token")
-		if err != nil {
-			return "", fmt.Errorf("openbao is initialised but its root token is not in SSM: %w", err)
-		}
-		return token, nil
 	}
-	slog.Info("openbao was uninitialised; storing the new root token and recovery keys")
 
-	// Store the credentials before anything else can fail. An initialised
-	// OpenBao whose root token was never persisted is unrecoverable.
-	if err := d.store.PutSecret(ctx, "openbao", "root-token", result.RootToken); err != nil {
-		return "", err
+	tokenValid := func(ctx context.Context, token string) (bool, error) {
+		return vaultinit.TokenValid(ctx, client, token)
 	}
-	recovery, err := json.Marshal(result.RecoveryKeys)
+	creds, err := ensureOpenBaoCredentials(ctx, d.keys, d.store, tokenValid, result)
 	if err != nil {
-		return "", fmt.Errorf("encode recovery keys: %w", err)
+		return "", false, err
 	}
-	if err := d.store.PutSecret(ctx, "openbao", "recovery-keys", string(recovery)); err != nil {
-		return "", err
+	if result.Initialised {
+		resp.Initialised = true
+		for _, name := range openBaoCredentialNames {
+			resp.Created = append(resp.Created, d.keys.Name(openBaoService, name))
+		}
 	}
 
-	resp.Initialised = true
-	resp.Created = append(resp.Created,
-		d.store.Path("openbao", "root-token"),
-		d.store.Path("openbao", "recovery-keys"))
-	return result.RootToken, nil
+	if err := replicateOpenBaoCredentials(ctx, d.keys, d.cfg.BackupReplicaRegion, creds.arns, resp); err != nil {
+		return "", false, err
+	}
+	return creds.rootToken, creds.deleteLegacy, nil
 }
 
 // ensureHiltSecretID keeps hilt's stored secret_id in step with OpenBao.

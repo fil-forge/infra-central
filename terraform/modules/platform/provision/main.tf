@@ -51,9 +51,9 @@ resource "aws_lambda_function" "this" {
   }
 
   environment {
-    # Lambda rejects a null value, so the pandora variables are merged in only
-    # when the stage has that cluster. The function treats their absence as
-    # nothing to do.
+    # Lambda rejects a null value, so the replica region and the pandora
+    # variables are merged in only when the stage has them. The function treats
+    # their absence as nothing to do.
     variables = merge({
       FORGE_STAGE                 = var.stage
       FORGE_HOSTNAME_SUFFIX       = var.hostname_suffix
@@ -68,7 +68,12 @@ resource "aws_lambda_function" "this" {
       # reaches sprue and hilt at their public hostnames, built from
       # FORGE_HOSTNAME_SUFFIX above, out through the NAT gateway — the same path
       # hilt already takes to resolve sprue's did:web document.
+      FORGE_DELEGATOR_STORE  = var.delegator_store
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
+
+      # Read only by the copy-delegator-records phase, which Terraform never
+      # invokes, together with FORGE_ALLOW_LIST_TABLE.
+      FORGE_PROVIDER_INFO_TABLE = var.provider_info_table_name
 
       # Used only by the appliance-backup-key phase, which Terraform never
       # invokes. Empty in a stage that takes no backups: Lambda rejects a null
@@ -82,6 +87,8 @@ resource "aws_lambda_function" "this" {
       FORGE_USDFC_ADDRESS        = var.chain.contracts.usdfc_token
       FORGE_FILECOIN_PAY_ADDRESS = var.chain.contracts.filecoin_pay
       FORGE_FWSS_ADDRESS         = var.chain.contracts.fwss
+      }, var.backup_replica_region == null ? {} : {
+      FORGE_BACKUP_REPLICA_REGION = var.backup_replica_region
       }, var.pandora_db_connection == null ? {} : {
       FORGE_PANDORA_DB_HOST              = var.pandora_db_connection.host
       FORGE_PANDORA_DB_PORT              = tostring(var.pandora_db_connection.port)

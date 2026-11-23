@@ -16,15 +16,17 @@ import (
 // resetAppsPhase wipes the state central's apps keep inside the VPC, so a stage
 // can start over without rebuilding its platform.
 //
-// It drops and recreates the databases of sprue, hilt, swarf and plc, and
-// destroys the tenant secrets hilt keeps in OpenBao. Everything else stays: the
-// RDS instance, every role and its password, OpenBao with its transit keys and
-// hilt's AppRole, and every identity and wallet. The recreated databases are
-// empty, and each service migrates its schema when it next starts.
+// It drops and recreates the databases of sprue, hilt, swarf, plc and the
+// delegator, and destroys the tenant secrets hilt keeps in OpenBao. Everything
+// else stays: the RDS instance, every role and its password, OpenBao with its
+// transit keys and hilt's AppRole, and every identity and wallet. The
+// recreated databases are empty, and each service migrates its schema when it
+// next starts.
 //
-// The delegator's tables, sprue's buckets and the region's Piri records live
-// outside the VPC. scripts/reset-apps.sh empties those itself, while the
-// services are scaled to zero around this phase. See docs/reset-apps.md.
+// The delegator's DynamoDB tables, sprue's buckets and the region's Piri
+// records live outside the VPC. scripts/reset-apps.sh empties those itself,
+// while the services are scaled to zero around this phase. See
+// docs/reset-apps.md.
 func (d *deps) resetAppsPhase(ctx context.Context, req Request) (*Response, error) {
 	if err := checkResettableStage(d.cfg.Stage); err != nil {
 		return nil, err
@@ -44,6 +46,14 @@ func (d *deps) resetAppsPhase(ctx context.Context, req Request) (*Response, erro
 		return nil, err
 	}
 
+	// Read before anything is dropped, so a password the seed phase has not
+	// stored yet fails the dry run, rather than a confirmed run after some
+	// databases are gone.
+	passwords, err := d.appDatabasePasswords(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	plan, err := planResetApps(ctx, conn, bao, d.cfg.Stage)
 	if err != nil {
 		return nil, err
@@ -57,7 +67,7 @@ func (d *deps) resetAppsPhase(ctx context.Context, req Request) (*Response, erro
 
 	slog.Warn("resetting the apps' databases and hilt's tenant secrets",
 		"stage", d.cfg.Stage, "databases", plan.Databases, "hilt_secrets", plan.HiltSecrets)
-	result, err := d.applyResetApps(ctx, conn, bao)
+	result, err := d.applyResetApps(ctx, conn, bao, passwords)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +81,7 @@ var appDatabases = []string{
 	"hilt",
 	"swarf",
 	"plc",
+	"delegator",
 }
 
 // resettableStages are the stages whose app state is disposable.
@@ -133,18 +144,10 @@ func planResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Client, stage s
 // The databases go first because hilt's rows are what reference its secrets.
 // Destroying the secrets first would leave, on a failed run, a hilt database
 // pointing at keys that no longer exist.
-func (d *deps) applyResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Client) (*ResetAppsResult, error) {
+func (d *deps) applyResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Client, passwords map[string]string) (*ResetAppsResult, error) {
 	result := &ResetAppsResult{Stage: d.cfg.Stage, Dropped: []string{}, Recreated: []string{}}
 
 	for _, name := range appDatabases {
-		// The password was stored by the seed phase. Reading it rather than
-		// minting one keeps the stored DSN valid; a missing one means seed never
-		// ran here, which is not a state this phase should paper over.
-		password, err := d.store.GetSecret(ctx, name, "postgres-password")
-		if err != nil {
-			return nil, fmt.Errorf("read the postgres password for %s: %w", name, err)
-		}
-
 		slog.Info("dropping database", "database", name)
 		dropped, err := dbinit.Drop(ctx, conn, name)
 		if err != nil {
@@ -155,7 +158,7 @@ func (d *deps) applyResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Clie
 		}
 
 		slog.Info("recreating database", "database", name)
-		if err := dbinit.Ensure(ctx, conn, []dbinit.Database{{Name: name, Password: password}}); err != nil {
+		if err := dbinit.Ensure(ctx, conn, []dbinit.Database{{Name: name, Password: passwords[name]}}); err != nil {
 			return nil, err
 		}
 		result.Recreated = append(result.Recreated, name)
@@ -181,13 +184,32 @@ func (d *deps) applyResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Clie
 	return result, nil
 }
 
+// appDatabasePasswords reads the password of every app database, keyed by
+// database.
+//
+// The seed phase stored them. Reading them rather than minting new ones keeps
+// the stored DSNs valid; a missing one means seed never ran here, or has not
+// run since a database joined databaseConsumers, which is not a state this
+// phase should paper over.
+func (d *deps) appDatabasePasswords(ctx context.Context) (map[string]string, error) {
+	passwords := make(map[string]string, len(appDatabases))
+	for _, name := range appDatabases {
+		password, err := d.store.GetSecret(ctx, name, "postgres-password")
+		if err != nil {
+			return nil, fmt.Errorf("read the postgres password for %s, which the seed phase stores; re-run the seed phase if it has not run since %s was added: %w", name, name, err)
+		}
+		passwords[name] = password
+	}
+	return passwords, nil
+}
+
 // openBaoAsRoot returns a client for central's OpenBao holding the break-glass
 // root token. hilt's AppRole could destroy its own secrets, but its secret_id is
 // bound to hilt's CIDRs and this phase is not hilt.
 func (d *deps) openBaoAsRoot(ctx context.Context) (*api.Client, error) {
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve", "addr", d.cfg.OpenBaoAddr)
@@ -197,7 +219,7 @@ func (d *deps) openBaoAsRoot(ctx context.Context) (*api.Client, error) {
 		return nil, err
 	}
 
-	token, err := d.store.GetSecret(ctx, "openbao", "root-token")
+	token, err := openBaoRootToken(ctx, d.keys, d.store)
 	if err != nil {
 		return nil, fmt.Errorf("read openbao's root token: %w", err)
 	}

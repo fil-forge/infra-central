@@ -80,7 +80,7 @@ func TestServiceHostnamesUseStableIdentityLabels(t *testing.T) {
 func TestValidateOnboardRequestRefusesASuppliedIngotDID(t *testing.T) {
 	err := validateOnboardRequest(Request{
 		Region:   "us-east-9",
-		PiriDID:  "did:key:zPiri",
+		PiriDID:  "did:web:piri.example",
 		PiriURL:  "https://piri.example",
 		IngotDID: "did:key:zIngot",
 	})
@@ -89,14 +89,48 @@ func TestValidateOnboardRequestRefusesASuppliedIngotDID(t *testing.T) {
 	}
 }
 
-func TestValidateOnboardRequestRefusesANonKeyPiriDID(t *testing.T) {
+func TestValidateOnboardRequestAcceptsThePiriDIDOfItsURL(t *testing.T) {
+	for _, piriURL := range []string{"https://piri.example", "https://piri.example/", "https://Piri.Example"} {
+		err := validateOnboardRequest(Request{
+			Region:  "us-east-9",
+			PiriDID: "did:web:piri.example",
+			PiriURL: piriURL,
+		})
+		if err != nil {
+			t.Errorf("%s: got %v, want the request accepted", piriURL, err)
+		}
+	}
+}
+
+func TestValidateOnboardRequestRefusesANonWebPiriDID(t *testing.T) {
 	err := validateOnboardRequest(Request{
 		Region:  "us-east-9",
-		PiriDID: "did:web:piri.example",
+		PiriDID: "did:key:zPiri",
 		PiriURL: "https://piri.example",
 	})
 	if err == nil || !strings.Contains(err.Error(), "piri_did") {
 		t.Fatalf("got %v, want a refusal naming the field", err)
+	}
+}
+
+// A Piri derives its DID from its URL, so the two in a request have to agree.
+func TestValidateOnboardRequestRefusesAPiriDIDThatIsNotItsURLs(t *testing.T) {
+	cases := map[string]string{
+		"another host": "https://other.example",
+		"a port":       "https://piri.example:8443",
+		"http":         "http://piri.example",
+	}
+	for desc, piriURL := range cases {
+		t.Run(desc, func(t *testing.T) {
+			err := validateOnboardRequest(Request{
+				Region:  "us-east-9",
+				PiriDID: "did:web:piri.example",
+				PiriURL: piriURL,
+			})
+			if err == nil || !strings.Contains(err.Error(), "not the did:web of piri_url") {
+				t.Fatalf("got %v, want a refusal naming the mismatch", err)
+			}
+		})
 	}
 }
 

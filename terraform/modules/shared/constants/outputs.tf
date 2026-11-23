@@ -48,6 +48,11 @@ output "prod_stages" {
   value       = ["prod"]
 }
 
+output "dr_region" {
+  description = "The region that holds a stage's backup replicas, so a lost region can be restored from them. The provision Lambda replicates each key secret here, and the Aurora secondary (FIL-1297) lives here too. Restoring a stage may target a different region, closer to the one it lost."
+  value       = "eu-central-1"
+}
+
 output "prod_aurora_key_alias" {
   description = "Alias of the KMS key encrypting the prod Aurora cluster. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
   value       = "alias/fc-prod-aurora"
@@ -65,21 +70,19 @@ output "prod_openbao_seal_key_alias" {
 # tunnels up while the cluster is dropped; a stage with the cluster needs sites.
 # See docs/pandora-vpn.md for adding one.
 #
-# public_ip is the appliance's static IPv4. It is public anyway, behind
-# s3.<region>.filonecontent.com. private_ip is the /32 the appliance
-# source-NATs its database traffic to, from pandora_sites_private_cidr.
+# public_ip is the static IPv4 AWS sees the appliance's IKE traffic come from:
+# the host's own address, or its provider's NAT address when the host sits
+# behind NAT. private_ip is the /32 the appliance source-NATs its database
+# traffic to, from pandora_sites_private_cidr.
 output "pandora_sites" {
   description = "Compatibility server appliances by stage, then by region label."
   value = {
     dev     = {}
     staging = {}
     prod = {
-      # Provisional: the staging appliance server, standing in to test the
-      # VPN and TLS to the cluster until the server is deployed on the
-      # production node. That node's entry replaces this one, which gives it
-      # new tunnel addresses and keys.
-      provisional = {
-        public_ip  = "23.83.66.244"
+      # Bare metal on IST-1.
+      us-east-2 = {
+        public_ip  = "162.43.174.98"
         private_ip = "10.21.0.1/32"
       }
     }

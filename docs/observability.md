@@ -122,6 +122,20 @@ stages in `appliance_backup_stages`, the alert stages whose platform root sets
 `scripts/check-backup-stages.sh` fail `make check` when either list disagrees
 with the platform roots.
 
+"Service has no healthy hosts" reads absence too, without a list. A Central
+service with no tasks has no registered targets, and CloudWatch then stops
+publishing `HealthyHostCount` for its target group instead of reporting 0. So
+the rule counts any stage and service seen in the last day but silent now as 0
+healthy hosts. It fires about ten minutes after the last sample. A service or
+stage removed or renamed on purpose alerts until a day has passed, so silence it
+on `stage` and `service` for that long.
+
+The delegator's Postgres store needs no rule of its own. A delegator that cannot
+reach or migrate its database exits at startup and never passes its health
+check, which "Service has no healthy hosts" reports, and a failed query returns
+a 5xx. An onboard run that cannot write the allow list fails its invocation,
+which "Provision Lambda errors" reports.
+
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
 | Service has no healthy hosts                         | Forge Central            | ALB, CloudWatch               | FIL-1151 |
@@ -134,16 +148,27 @@ with the platform roots.
 | Appliance has stopped reporting                      | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance has stopped reconciling                    | Forge Regions            | deploy stamp                  | FIL-1163 |
 | Appliance free disk space below 40%                  | Forge Regions            | node exporter                 | FIL-1209 |
+| Ingot volume free space below 10%                    | Forge Regions            | node exporter                 | FIL-1616 |
 | Piri's chain head is stale                           | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri is reporting but has no chain head              | Forge Regions            | Piri's metrics                | FIL-1383 |
+| Piri's chain RPC is rejecting its credentials        | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri cannot connect to its chain RPC                 | Forge Regions            | Piri's logs, Loki             | FIL-1553 |
+| Piri cannot reach its chain RPC                      | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri's chain RPC is rate limiting it                 | Forge Regions            | Piri's metrics                | FIL-1553 |
+| Piri's chain RPC WebSocket keeps dropping            | Forge Regions            | Piri's metrics                | FIL-1553 |
 | Piri's proving period has not advanced               | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proving is failing                              | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri proof set is unrecoverable                      | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri's Prove task has not run in 1.5 proving periods | Forge Regions            | Piri's metrics                | FIL-1383 |
 | Piri CommP claims have stalled                       | Forge Regions            | Piri's metrics                |          |
+| Piri is not adding aggregates on chain               | Forge Regions            | Piri's metrics                | FIL-1578 |
+| Appliance ZFS pool is not online                     | Forge Regions            | node exporter                 |          |
+| Appliance ZFS pool has data errors                   | Forge Regions            | node textfile report          |          |
+| Appliance ZFS pool health is not reporting           | Forge Regions            | node exporter, textfile       |          |
 | Piri Postgres pool is saturated                      | Forge Regions            | Piri's metrics                | FIL-1281 |
 | Piri's deletion drain is stuck                       | Forge Regions            | Piri's metrics                | FIL-1222 |
 | Piri proof cache builds have stalled                 | Forge Regions            | Piri's metrics                | FIL-1449 |
+| Piri has untracked add pieces                        | Forge Regions            | Piri's metrics                | FIL-1624 |
 | Postgres is refusing connections                     | Forge Regions            | Postgres's logs, Loki         | FIL-1163 |
 | Appliance 5xx rate too high                          | Forge Regions            | Caddy                         | FIL-1163 |
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
@@ -156,6 +181,10 @@ with the platform roots.
 | Central service CPU high                             | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central service memory high                          | Forge capacity           | ECS, CloudWatch               | FIL-1214 |
 | Central database CPU high                            | Forge capacity           | RDS, CloudWatch               | FIL-1214 |
+| Central database failed over                         | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database reader lag is high                  | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
+| Central database free storage low                    | Forge Central database   | RDS, CloudWatch, staging      | FIL-1291 |
+| Central database local storage low                   | Forge Central database   | RDS, CloudWatch, prod         | FIL-1291 |
 | Appliance container memory high                      | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance container CPU high                         | Forge capacity           | cAdvisor, staging             | FIL-1214 |
 | Appliance host memory low                            | Forge capacity           | node exporter                 | FIL-1214 |
@@ -182,15 +211,19 @@ What a change needs so that on-call hears when it breaks. Appliance services (Pi
 rest) export their own telemetry, which fil-forge/infra-nodes ships; their alerts and panels still
 live here.
 
-- **Alerts** go in `terraform/envs/grafana/alerts.tf`, in the rule group whose evaluation interval
-  and no-data handling fit; the appliance has three. Each rule needs:
+- **Alerts** go in the rule group whose evaluation interval and no-data handling fit; the
+  appliance has three. The groups are in `terraform/envs/grafana/`: most in `alerts.tf`, the
+  capacity and database groups in `alerts_capacity.tf` and `alerts_database.tf`. Each rule needs:
   - `team_name = "forge"` and a `component` (`central`, `appliance` or `usage`);
   - a `severity` chosen by the severity definitions above;
   - `stage` when it watches a stage. A Central rule gets it from its query's labels, from a label
     template over them, or as a literal for a rule that watches one stage; an appliance rule uses
     `local.appliance_stage_label`;
   - `notification_settings { policy = local.forge_policy }`, which routes it through the `forge`
-    tree described above.
+    tree described above;
+  - a `runbook_url`. A Central rule links to its own section of [RUNBOOK.md](RUNBOOK.md),
+    headed by the rule's name, through `local.central_runbook`; an appliance rule links to
+    fil-forge/infra-nodes' runbook.
 
   CI's `scripts/check-alert-routing.sh` fails the Grafana plan when a rule isn't routed. Add new
   rules at the end of their group, because the provider keeps each rule's uid by its position. Add
@@ -236,6 +269,135 @@ The provision Lambda, which uses the AWS-defined log group format:
 {aws_log_group="/aws/lambda/fc-dev-provision"}
 ```
 
+A key the seed phase could not replicate to the DR region, or whose replica did not reach InSync
+within two minutes, fails the stage's platform apply, and the workflow's `notify-failure` job
+reports the failed job in Slack. The vault phase does the same for OpenBao's root token and recovery
+keys. The error names the key and, for a failed replica, the reason Secrets Manager gave. A
+replication denied by IAM is retried for up to five minutes, shared by all the keys, because a
+grant added in the same apply takes a few seconds to propagate; each retry logs a
+`replication denied` warning, and a denial that outlasts the five minutes fails the apply as above:
+
+```logql
+{aws_log_group=~"/aws/lambda/fc-(staging|prod)-provision"} |= "replica"
+```
+
+Nothing checks between applies, so a replica removed by hand is noticed only on the next seed or
+vault run. The README's "Backup replicas of the keys" section has the command to check one.
+
+OpenBao's audit log, one JSON entry per request and one per response, in the same group as its
+server log. Secret values and tokens are HMACed; paths, operations and the caller's address are
+not. The log driver drops entries rather than block OpenBao when CloudWatch falls behind:
+
+```logql
+{aws_log_group="/forge-central/dev/openbao"} | json | type=~"request|response"
+```
+
+Hilt's AppRole logins:
+
+```logql
+{aws_log_group="/forge-central/dev/openbao"} | json | type="response" | request_path="auth/approle/login"
+```
+
+### Who invoked the provision Lambda
+
+Each account runs a trail, `forge-central-provision-invocations`, that records every `Invoke` of
+its provision functions and nothing else. EventBridge copies each stage's invocations to
+`/forge-central/<stage>/provision-invocations`, kept 30 days, and the trail's bucket,
+`forge-central-cloudtrail-<account>-us-east-2`, keeps them a year. The organization trail both
+accounts sit under records management events only, so this trail is the only record of who invoked
+the function.
+
+The Lambda request ID ties the three logs together. CloudTrail records it as the invocation's
+`requestID`, the function tags every line it writes with it as `request_id`, and it sends it to
+OpenBao as the `X-Correlation-Id` header, which OpenBao's audit log records. AWS does not document
+that CloudTrail's `requestID` is the ID the function sees; [the staging
+check](#checking-the-invocation-trail-on-staging) confirms it. If it ever differs, match the
+CloudTrail event to the function's `START RequestId:` line by function and time.
+
+To find who stored or replaced a region's appliance root credentials, start from OpenBao's audit
+log and read the invocation's ID from the header. A plain `| json` skips arrays, and OpenBao records
+each header as an array, so the query names the field:
+
+```logql
+{aws_log_group="/forge-central/prod/openbao"} | json type, request_path="request.path", correlation_id="request.headers[\"x-correlation-id\"][0]" | type="response" | request_path="forge-central/appliance-root/data/<region>"
+```
+
+The function's lines for that invocation, starting with its phase and region:
+
+```logql
+{aws_log_group="/aws/lambda/fc-prod-provision"} | json | request_id="<correlation_id>"
+```
+
+The line that reports the write also carries `openbao_request_id`, OpenBao's own ID for it. In the
+audit log, `| json` names that ID `request_id`, so the same name means different IDs in the two
+groups.
+
+The invocation, and who made it:
+
+```logql
+{aws_log_group="/forge-central/prod/provision-invocations"} | json | detail_requestID="<correlation_id>"
+```
+
+`detail_userIdentity_arn` names the caller. CI's apply role shows as
+`assumed-role/forge-central-ci-apply/gha-apply-prod-<run_id>` (`gha-apply-<run_id>` on dev,
+`gha-apply-staging-<run_id>` on staging), and the run id finds the workflow run. An operator shows
+as their SSO role session. `detail_sourceIPAddress` and `detail_userAgent` say where the call came
+from.
+
+### Checking the invocation trail on staging
+
+Run this once the non-prod regional bootstrap root is applied and staging runs a provision image
+that tags its log lines. It uses no credentials and writes no secret. First, invoke staging's
+function with a phase it does not have, which fails before it touches anything:
+
+```bash
+aws lambda invoke --region us-east-2 --function-name fc-staging-provision \
+  --cli-binary-format raw-in-base64-out --payload '{"phase":"noop"}' \
+  --log-type Tail --query LogResult --output text /dev/null | base64 -d
+```
+
+The output starts with `START RequestId: <id>`, and the JSON line after it carries
+`"request_id":"<id>"`. A line without it means staging runs an older image. A few minutes later the
+invocation is in Grafana:
+
+```logql
+{aws_log_group="/forge-central/staging/provision-invocations"} | json | detail_requestID="<id>"
+```
+
+Expect one event, with your session in `detail_userIdentity_arn`. No event means the trail or the
+rule is not delivering: `aws cloudtrail get-trail-status --name forge-central-provision-invocations`
+reports whether the trail is logging, and the rule's `FailedInvocations` metric in `AWS/Events`
+whether EventBridge failed to write to the group. An event with a different `requestID` means the
+two IDs differ: the lookup above then falls back to function and time, and this page should say so.
+The event must not carry the payload; this returns nothing when it does not:
+
+```logql
+{aws_log_group="/forge-central/staging/provision-invocations"} |= "noop"
+```
+
+Then check that OpenBao records the header, with the plan-only call of the root-credentials phase.
+It reads OpenBao and stores nothing, though it creates the phase's mount if it is missing and
+registers the header for auditing:
+
+```bash
+aws lambda invoke --region us-east-2 --function-name fc-staging-provision \
+  --cli-binary-format raw-in-base64-out --payload '{"phase":"appliance-root-store","region":"eu-central-3"}' \
+  --log-type Tail --query LogResult --output text /dev/null | base64 -d
+```
+
+```logql
+{aws_log_group="/forge-central/staging/openbao"} | json type, request_path="request.path", correlation_id="request.headers[\"x-correlation-id\"][0]" | type="response" | correlation_id="<id>"
+```
+
+Expect entries for `forge-central/appliance-root/metadata/eu-central-3`. None means OpenBao is not
+auditing the header: the invocation's log says whether registering it failed. Do not store
+credentials on staging to test the `data/` path, because that adds a version over the region's real
+copy.
+
+Last, after the next staging apply re-runs the vault phase, its invocation shows in the same group
+with a `gha-apply-staging-<run_id>` session. That confirms the trail's selector matches the calls
+CI makes, which name the function's `$LATEST` version, before prod relies on the same selector.
+
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |
@@ -264,6 +426,9 @@ and `node` and `region` labels instead.
 
 Metric names follow `aws_<namespace>_<metric>_<statistic>`, with the CloudWatch name in snake case
 and one series per statistic: `_sum`, `_average`, `_minimum`, `_maximum`, `_sample_count`.
+A stream sends a percentile only for the metrics its `statistics_configuration` names.
+`terraform/modules/telemetry` names the load balancer's `TargetResponseTime` with its p99, which
+reaches Grafana once the bootstrap roots that use the module are applied.
 CloudWatch dimensions arrive as labels prefixed `dimension_`, and every series carries
 `account_id`, `region` and `namespace`.
 
@@ -321,7 +486,7 @@ aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 The warning rule reads that minimum, and the critical rule reads `aws_vpn_tunnel_state_maximum`,
 which is 0 only when no tunnel was up during the minute.
 
-Reads against the delegator's tables, likewise:
+Reads against the delegator's tables, on a stage whose delegator still uses DynamoDB, likewise:
 
 ```promql
 aws_dynamodb_consumed_read_capacity_units_sum{dimension_TableName=~"fc-dev-delegator-.*"}

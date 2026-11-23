@@ -9,7 +9,7 @@ ingot_hostname_suffix = "filonecontent.com"
 
 # Pinned by digest rather than tag, so the image can never move underneath a
 # deploy. `make publish STAGE=prod` prints the line to paste here.
-provision_image_digest = "sha256:76b37a0a889dbfc67c2c3d57bd797eb24545d2cf84d985b68f758b3f05fe192f"
+provision_image_digest = "sha256:7e7974a4453a71cb727df3c81ced61e5d209c97180eb2287f53bf8aa58165932"
 
 # Calibration testnet, with the proxy addresses dev and staging use, for the
 # first prod stack's test run. Prod moves to mainnet with the Forge contracts
@@ -24,9 +24,16 @@ chain = {
   chain_id = 314159
 
   contracts = {
-    fwss                      = "0x0c6875983B20901a7C3c86871f43FdEE77946424"
+    fwss                      = "0x55325AB46CDAB0FbDef559c810cd6bc95cBFEfFd"
     filecoin_pay              = "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0"
     service_provider_registry = "0x839e5c9988e4e9977d40708d0094103c0839Ac9D"
     usdfc_token               = "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   }
 }
+
+# Appliance region labels. Adding one here creates the transit key its node's
+# OpenBao seals against and the IAM user it writes backups as; moving it to
+# retired_appliance_regions destroys both and revokes the node's unseal token.
+# A retired label stays in that list, and docs/appliance-onboarding.md is the
+# procedure for both.
+appliance_regions = ["us-east-2"]

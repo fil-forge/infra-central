@@ -11,8 +11,10 @@ package vaultinit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/openbao/openbao/api/v2"
@@ -46,7 +48,7 @@ func ApplianceKeyName(region string) string {
 }
 
 // InitResult reports what initialisation produced. Both fields are secret and
-// belong in SSM immediately; neither is returned to Terraform.
+// belong in Secrets Manager immediately; neither is returned to Terraform.
 type InitResult struct {
 	RootToken    string
 	RecoveryKeys []string
@@ -138,12 +140,13 @@ func EnsureInitialised(ctx context.Context, client *api.Client) (InitResult, err
 	}, nil
 }
 
-// EnsureMounts brings up hilt's KV v2 engine and the transit engine. The client
-// must carry a root or equivalently privileged token.
+// EnsureMounts brings up hilt's KV v2 engine, the transit engine and the KV v2
+// engine for the appliances' root credentials. The client must carry a root or
+// equivalently privileged token.
 //
-// No audit device is enabled: OpenBao 2.x rejects audit devices created over
-// the API and takes them only from the server config file. See the audit
-// follow-up in README.md.
+// The audit device is not enabled here: OpenBao 2.x rejects audit devices
+// created over the API and takes them only from the server config file, which
+// terraform/modules/platform/openbao renders.
 func EnsureMounts(ctx context.Context, client *api.Client) error {
 	mounts, err := client.Sys().ListMountsWithContext(ctx)
 	if err != nil {
@@ -163,6 +166,16 @@ func EnsureMounts(ctx context.Context, client *api.Client) error {
 	if _, ok := mounts[TransitMount+"/"]; !ok {
 		if err := client.Sys().MountWithContext(ctx, TransitMount, &api.MountInput{Type: "transit"}); err != nil {
 			return fmt.Errorf("mount transit: %w", err)
+		}
+	}
+
+	if _, ok := mounts[ApplianceRootMount+"/"]; !ok {
+		err := client.Sys().MountWithContext(ctx, ApplianceRootMount, &api.MountInput{
+			Type:    "kv",
+			Options: map[string]string{"version": "2"},
+		})
+		if err != nil {
+			return fmt.Errorf("mount kv v2 at %s: %w", ApplianceRootMount, err)
 		}
 	}
 
@@ -226,6 +239,29 @@ func SecretIDValid(ctx context.Context, client *api.Client, secretID string) boo
 	path := fmt.Sprintf("auth/%s/role/%s/secret-id/lookup", appRoleAuthMount, hiltAppRoleName)
 	resp, err := client.Logical().WriteWithContext(ctx, path, map[string]any{"secret_id": secretID})
 	return err == nil && resp != nil
+}
+
+// TokenValid reports whether OpenBao accepts a token. A token issued by an
+// OpenBao whose storage has since been rebuilt is refused with 403, which is
+// reported as false; any other failure is an error, so an unreachable server
+// is never mistaken for a dead token.
+func TokenValid(ctx context.Context, client *api.Client, token string) (bool, error) {
+	probe, err := client.Clone()
+	if err != nil {
+		return false, fmt.Errorf("clone openbao client: %w", err)
+	}
+	probe.SetToken(token)
+
+	_, err = probe.Auth().Token().LookupSelfWithContext(ctx)
+	var respErr *api.ResponseError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &respErr) && respErr.StatusCode == http.StatusForbidden:
+		return false, nil
+	default:
+		return false, fmt.Errorf("look up a token: %w", err)
+	}
 }
 
 // IssueSecretID mints a new secret_id for hilt's AppRole.

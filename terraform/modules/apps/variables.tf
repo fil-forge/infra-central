@@ -77,6 +77,16 @@ variable "provider_info_table_name" {
   type = string
 }
 
+variable "delegator_store" {
+  description = "Where the delegator keeps its allow list and provider registrations, \"dynamodb\" or \"postgres\". Set by the platform root's delegator_store."
+  type        = string
+
+  validation {
+    condition     = contains(["dynamodb", "postgres"], var.delegator_store)
+    error_message = "delegator_store must be \"dynamodb\" or \"postgres\"."
+  }
+}
+
 variable "dynamodb_table_arns" {
   type = list(string)
 }
@@ -164,6 +174,12 @@ variable "sprue_postgres_max_conns" {
 
 variable "swarf_postgres_max_conns" {
   description = "Size of swarf's Postgres connection pool. Null keeps swarf's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
+  type        = number
+  default     = null
+}
+
+variable "hilt_postgres_max_conns" {
+  description = "Size of hilt's Postgres connection pool. Null keeps hilt's default of 10. It counts against the database's max_connections together with every other service's pool and OpenBao's max_parallel."
   type        = number
   default     = null
 }

@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// The delegator's two stores. Each stage names its own in delegator_store.
+const (
+	delegatorStoreDynamoDB = "dynamodb"
+	delegatorStorePostgres = "postgres"
+)
+
 // config is the Lambda's environment, set by Terraform. Everything here is
 // non-secret: endpoints, identifiers and names. The secrets this function
 // touches are read from SSM and Secrets Manager at call time.
@@ -45,9 +51,24 @@ type config struct {
 	// internal/vaultinit about what this does and does not buy.
 	PrivateCIDRs []string
 
+	// BackupReplicaRegion is the region the seed phase replicates every key
+	// to, so a copy survives the loss of Region. Empty in a stage that keeps no
+	// replicas.
+	BackupReplicaRegion string
+
+	// DelegatorStore is where the delegator keeps its allow list, which the
+	// onboard phase writes: "dynamodb" or "postgres". Unset means dynamodb, the
+	// store every stage used before the delegator moved to Postgres.
+	DelegatorStore string
+
 	// AllowListTable is the delegator's DynamoDB table, written by the onboard
-	// phase. Not validated at startup, because every other phase runs without it.
+	// phase when DelegatorStore is dynamodb. Not validated at startup, because
+	// every other phase runs without it.
 	AllowListTable string
+
+	// ProviderInfoTable is the delegator's other DynamoDB table. Only the
+	// copy-delegator-records phase reads it.
+	ProviderInfoTable string
 
 	// BackupBucket is the stage's appliance backup bucket, and BackupUserPrefix
 	// the name every region's writer user starts with. Both are empty in a stage
@@ -67,7 +88,10 @@ func loadConfig() (config, error) {
 		DBAdminDatabase:     envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
+		DelegatorStore:      envOr("FORGE_DELEGATOR_STORE", delegatorStoreDynamoDB),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
+		ProviderInfoTable:   os.Getenv("FORGE_PROVIDER_INFO_TABLE"),
+		BackupReplicaRegion: os.Getenv("FORGE_BACKUP_REPLICA_REGION"),
 		BackupBucket:        os.Getenv("FORGE_BACKUP_BUCKET"),
 		BackupUserPrefix:    os.Getenv("FORGE_BACKUP_USER_PREFIX"),
 
@@ -75,6 +99,13 @@ func loadConfig() (config, error) {
 		USDFCAddress:       os.Getenv("FORGE_USDFC_ADDRESS"),
 		FilecoinPayAddress: os.Getenv("FORGE_FILECOIN_PAY_ADDRESS"),
 		FWSSAddress:        os.Getenv("FORGE_FWSS_ADDRESS"),
+	}
+
+	switch cfg.DelegatorStore {
+	case delegatorStoreDynamoDB, delegatorStorePostgres:
+	default:
+		return config{}, fmt.Errorf("FORGE_DELEGATOR_STORE is %q; want %q or %q",
+			cfg.DelegatorStore, delegatorStoreDynamoDB, delegatorStorePostgres)
 	}
 
 	port, err := strconv.Atoi(envOr("FORGE_DB_PORT", "5432"))
@@ -124,6 +155,10 @@ func loadConfig() (config, error) {
 	}
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("missing required environment: %s", strings.Join(missing, ", "))
+	}
+
+	if cfg.BackupReplicaRegion != "" && cfg.BackupReplicaRegion == cfg.Region {
+		return config{}, fmt.Errorf("FORGE_BACKUP_REPLICA_REGION is %s, the function's own region; a backup replica must live in another region", cfg.Region)
 	}
 
 	return cfg, nil

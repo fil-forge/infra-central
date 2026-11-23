@@ -100,7 +100,12 @@ module "platform" {
   appliance_backups = { retention_days = 35 }
 
   # Staging keeps one database instance, while giving the shared Postgres and
-  # OpenBao workload twice dev's memory and connection budget.
+  # OpenBao workload twice dev's memory and connection budget. RDS takes the
+  # major version and applies minors on its own. db_allow_major_version_upgrade
+  # and db_apply_immediately stay off here, as in prod: a major upgrade turns
+  # both on in the pull request that changes db_engine_version; see
+  # docs/decisions/2026-11-database-major-upgrades.md.
+  db_engine_version    = "18"
   db_instance_class    = "db.t4g.small"
   db_allocated_storage = 20
   db_multi_az          = false
@@ -111,13 +116,29 @@ module "platform" {
   # enable point-in-time recovery on both tables.
   protect_stateful_resources = true
 
-  # A db.t4g.small allows roughly 225 connections. OpenBao takes 16, leaving
-  # ample headroom for the application services' connection pools.
+  # A db.t4g.small allows roughly 225 connections. OpenBao takes up to 16 per
+  # task, 48 across its three, leaving ample headroom for the application
+  # services' connection pools.
   openbao_max_parallel = 16
+
+  # Keep a replica of every identity and wallet key in the DR region.
+  backup_replica_region = module.constants.dr_region
 
   # Bumped to re-issue proofs with the stable service identities from the Forge
   # identity RFC. Stored proofs retain their original issuer and audience, so a
   # hostname migration must explicitly replace them. Bumped again to move the
-  # identity and wallet keys from SSM to Secrets Manager.
-  seed_trigger = "4"
+  # identity and wallet keys from SSM to Secrets Manager, and again to create
+  # the delegator's database.
+  seed_trigger = "5"
+
+  # Bumped to move OpenBao's root token and recovery keys from SSM to Secrets
+  # Manager and replicate them, and again to make OpenBao audit the
+  # X-Correlation-Id header. The vault phase re-runs only when its input
+  # changes, so each bump has to land with the provision build it needs.
+  vault_trigger = "3"
+
+  # The delegator reads its own database. The seed run bumped above creates
+  # it, and the delegator migrates it when its task starts. See
+  # docs/decisions/2026-11-delegator-postgres.md.
+  delegator_store = "postgres"
 }

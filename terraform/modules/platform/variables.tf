@@ -63,6 +63,42 @@ variable "db_engine" {
   }
 }
 
+variable "db_engine_version" {
+  description = <<-EOT
+    PostgreSQL release of the stage's own database. RDS takes a major version
+    such as "16" and moves through its minors on its own; Aurora takes a minor
+    release such as "16.15". Moving to a new major version needs
+    db_allow_major_version_upgrade.
+  EOT
+  type        = string
+}
+
+variable "db_allow_major_version_upgrade" {
+  description = <<-EOT
+    Lets a change of db_engine_version upgrade the stage's own database to a
+    new major version, in place. A stage that keeps data it cannot lose turns
+    it on only in the pull request that upgrades it. With db_apply_immediately
+    also on, the provision Lambda runs ANALYZE in every central database after
+    each version change. Without it, the upgrade waits for the next maintenance
+    window, ANALYZE does not run, and the plan warns that it has to be run by
+    hand. See docs/decisions/2026-11-database-major-upgrades.md.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "db_apply_immediately" {
+  description = <<-EOT
+    Applies every change to the stage's own database at once. Off, AWS holds a
+    change that needs a restart or an outage, such as a version or class
+    change, until the next maintenance window. An upgrade pull request turns it
+    on beside db_allow_major_version_upgrade, so the outage starts when the
+    apply runs.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "db_kms_key_arn" {
   description = "Customer-managed key for the Aurora cluster. Required with db_engine = \"aurora\"; the RDS instance uses the account's default RDS key."
   type        = string
@@ -80,11 +116,22 @@ variable "pandora_db" {
     without one. It uses db_kms_key_arn, and needs the stage to have sites in
     the shared constants module's pandora_sites, because the appliances
     reach it only over the stage's VPN. See docs/pandora-vpn.md.
+
+    engine_version is the cluster's Aurora PostgreSQL minor release, set apart
+    from the stage's own database. allow_major_version_upgrade and
+    apply_immediately work as db_allow_major_version_upgrade and
+    db_apply_immediately do for the stage's own database, for this cluster
+    alone: with both on, a new major engine_version upgrades the cluster in
+    place and the provision Lambda then runs ANALYZE in the pandora database.
+    Both default to off.
   EOT
   type = object({
-    instance_count        = number
-    backup_retention_days = number
-    protect               = bool
+    engine_version              = string
+    instance_count              = number
+    backup_retention_days       = number
+    protect                     = bool
+    allow_major_version_upgrade = optional(bool, false)
+    apply_immediately           = optional(bool, false)
   })
   default = null
 
@@ -167,7 +214,7 @@ variable "openbao_image" {
 }
 
 variable "openbao_max_parallel" {
-  description = "Postgres connections OpenBao may open. Budget against the RDS instance's or the Aurora writer's max_connections alongside the application services."
+  description = "Postgres connections each of the three OpenBao tasks may open. Budget three times this against the RDS instance's or the Aurora writer's max_connections alongside the application services."
   type        = number
   default     = 16
 }
@@ -175,6 +222,23 @@ variable "openbao_max_parallel" {
 variable "container_insights" {
   type    = bool
   default = false
+}
+
+variable "backup_replica_region" {
+  description = "Region the seed phase replicates every identity and wallet secret to, and the vault phase replicates OpenBao's root token and recovery keys to, normally module.constants.dr_region. Null keeps no replicas."
+  type        = string
+  default     = null
+}
+
+variable "delegator_store" {
+  description = "Where the delegator keeps its allow list and provider registrations, \"dynamodb\" or \"postgres\". The provision Lambda's onboard phase writes the allow list there, and the apps root configures the delegator from this output. Switch a stage only once its delegator image supports Postgres and its seed phase has created the delegator database; see docs/decisions/2026-11-delegator-postgres.md."
+  type        = string
+  default     = "dynamodb"
+
+  validation {
+    condition     = contains(["dynamodb", "postgres"], var.delegator_store)
+    error_message = "delegator_store must be \"dynamodb\" or \"postgres\"."
+  }
 }
 
 variable "seed_trigger" {
