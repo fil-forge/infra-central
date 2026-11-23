@@ -13,15 +13,15 @@
 # adjacent lines, so six consecutive pins made every pair of open bump pull
 # requests a conflict waiting for the second one to merge.
 image_digests = {
-  sprue = "sha256:8e000ed3e7fb3a09d53c4ce35de943d454b0528678fcc6250679d5a1cc1f226c"
+  sprue = "sha256:8e72c0eb208d327891207f2b53ffabcfed2e34850def8b78774637230a13daa3"
 
-  hilt = "sha256:05822fcb23b3db600218978a8e0056a2f5364b6d4e2ccf42c5cea101100320c8"
+  hilt = "sha256:51ffa8aa153bc1895294a3290bd0b8a5cfdf1fa7d1b5d8ddb9139b04e5c94903"
 
-  swarf = "sha256:014ed9319f1eff0debee11f127d30eb7e33cc6af8bccf67fd3c18f84ccf367b0"
+  swarf = "sha256:c4227532065411b1092ee00be18cada1e17485fa67b979ab4deae9be6177c75d"
 
-  delegator = "sha256:06ede396eb1ed1ab56ecafc4ae754443ddd6f259b161e22e20264dfca5c5d839"
+  delegator = "sha256:ec178af506f7cd5ee679621db88ddfbc65fd95503fdfacb159810f034a9aee71"
 
-  signing_service = "sha256:4493534d96a4f7f202e58f8811b7258da7feda4d79e710473c903f99ace76a98"
+  signing_service = "sha256:9ae0559fa1d3976fd16f40000687b6c059011b1780ff5861c573a3bb30ce5dce"
 
   plc = "sha256:ebb12470f6fc50906c0ed867d009a056e131db1a994b45d7c3f1c8d2eb26dee9"
 }

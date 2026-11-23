@@ -26,9 +26,12 @@ the cluster; the platform plan warns about it, because each VPN connection costs
 The site's operator provides:
 
 - one static public IPv4 address. A change means a new customer gateway; the VPN connection moves
-  to it in place and keeps its tunnel addresses and keys, after a brief outage.
+  to it in place and keeps its tunnel addresses and keys, after a brief outage. For a host behind
+  its provider's NAT, it is the NAT's public address, which must stay the same for the host's UDP
+  500 and 4500 traffic.
 - UDP 500, UDP 4500 and IP protocol 50 (ESP) open in both directions between that address and the
-  two AWS tunnel addresses, with no upstream filtering or rate limiting of IPsec.
+  two AWS tunnel addresses, with no upstream filtering or rate limiting of IPsec. Behind NAT, ESP
+  travels inside UDP 4500, so the two UDP ports are enough.
 - the path MTU to the internet, expected to be 1,500 bytes.
 
 Pick the site's private /32 from `10.21.0.0/24`. No other site in the same stage may use it, since
@@ -88,7 +91,7 @@ The seed phase stores one password and one DSN per role, under the role's own pr
 | `pandora_admin` | the estate loader only; owns the database | `/forge-central/<stage>/pandora-admin/postgres-dsn` |
 | `pandora_storage_server` | the server's daemons | `/forge-central/<stage>/pandora-storage-server/postgres-dsn` |
 | `locker` | the server's stats lock tool | `/forge-central/<stage>/locker/postgres-dsn` |
-| `pandora_migration` | the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
+| `pandora_migration` | the import service, the capture load, the sync and the stage record, on the appliance | `/forge-central/<stage>/pandora-migration/postgres-dsn` |
 
 `pandora_storage_server` has a 15-second `statement_timeout` and a 30-second
 `idle_in_transaction_session_timeout`. `pandora_migration` has no statement
@@ -129,10 +132,7 @@ minutes, and "Pandora VPN both tunnels down" is a critical after both have been 
 also fire when no `TunnelState` data arrives, about 20 and ten minutes after the last sample: the
 query keeps returning that sample for Mimir's five-minute lookback before the wait starts. With more
 than one site, the rules do not notice one VPN connection's data stopping while another's arrives.
-Both rules stay paused until the first production appliance runs strongSwan (FIL-1402). The pull
-request that brings that site live replaces their `is_paused = true` in
-`terraform/envs/grafana/alerts.tf` with `length(module.constants.pandora_sites.prod) == 0`, which
-pauses a rule while prod has no site. An apply that changes a VPN connection's options or its
+Both rules are paused while prod has no site. An apply that changes a VPN connection's options or its
 customer gateway takes both tunnels down, so silence both rules for it.
 
 ### Checking a site before its appliance is configured
@@ -146,11 +146,11 @@ The host check runs strongSwan and psql in containers on the site's appliance ho
 host's network configuration alone. Start it from a laptop with credentials for the stage's account:
 
 ```bash
-scripts/fetch-pandora-vpn-secrets.sh --stage prod --site provisional --host root@23.83.66.244
+scripts/fetch-pandora-vpn-secrets.sh --stage prod --site <site> --host <appliance-host>
 ```
 
 ```bash
-ssh -t root@23.83.66.244 bash /run/pandora-vpn-check/check-pandora-vpn-host.sh
+ssh -t <appliance-host> bash /run/pandora-vpn-check/check-pandora-vpn-host.sh
 ```
 
 The first copies the check, the tunnel addresses, the keys, the `pandora_storage_server` DSN and the
@@ -164,7 +164,7 @@ while it runs, since two initiators from one address compete for the same tunnel
 The laptop check confirms that no tunnel establishes from any other address:
 
 ```bash
-scripts/check-pandora-vpn-laptop.sh --stage prod --site provisional
+scripts/check-pandora-vpn-laptop.sh --stage prod --site <site>
 ```
 
 It attempts IKE with both tunnels using the site's identity and real keys, and passes when neither
@@ -179,20 +179,38 @@ A host run interrupted before its cleanup leaves its containers and secrets behi
 fetch refuses to overwrite them. Remove them from the laptop with:
 
 ```bash
-ssh root@23.83.66.244 docker compose -f /run/pandora-vpn-check/pandora-vpn-check/compose.yml down --rmi local --volumes
+ssh <appliance-host> docker compose -f /run/pandora-vpn-check/pandora-vpn-check/compose.yml down --rmi local --volumes
 ```
 
 ```bash
-ssh root@23.83.66.244 rm -rf /run/pandora-vpn-check
+ssh <appliance-host> rm -rf /run/pandora-vpn-check
 ```
 
 A reboot also clears the secrets.
+
+## The cluster's PostgreSQL version
+
+The cluster runs Aurora PostgreSQL 18, set by `pandora_db.engine_version` in the stage's platform
+root, apart from the stage's own database. Today it holds the pack ledger that the import service
+on the appliance writes as `pandora_migration`.
+
+A new minor release is a one-line change to `engine_version`, applied in place. A new major version
+is an in-place upgrade, as [the major upgrade decision](decisions/2026-11-database-major-upgrades.md)
+describes for the stage's own database. The pull request that changes `engine_version` also sets
+`allow_major_version_upgrade = true` and `apply_immediately = true` in `pandora_db`, and the next
+pull request removes both. The apply upgrades the cluster, then the provision Lambda runs `ANALYZE`
+in the `pandora` database. The endpoint, the database, its roles and their DSNs stay as they are.
+
+While the upgrade runs, the server's daemons and the appliance's import service cannot reach the
+database. The decision record's rehearsal steps apply to this cluster too, with
+`fc-<stage>-pandora-db` in place of `fc-prod`.
 
 ## Dropping the cluster
 
 To drop the Aurora cluster instead of performing a data reset, set `pandora_db = null` in the
 stage's platform root and merge. CI deletes the cluster, with no final snapshot when `protect` is
-off, along with its subnets and security group. The VPN stays, with its tunnel addresses and keys.
+off, along with its subnets, security group and parameter group. The VPN stays, with its tunnel
+addresses and keys.
 
 Removing the VPN as well means deleting the stage's sites from `pandora_sites`, in the same
 pull request or a later one. New tunnels later get new addresses and keys. Removing prod's last

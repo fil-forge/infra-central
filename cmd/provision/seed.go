@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/fil-forge/infra-central/internal/dbinit"
 	"github.com/fil-forge/infra-central/internal/keygen"
@@ -475,23 +476,33 @@ func (d *deps) ensureDatabases(ctx context.Context, target dbTarget, databases [
 // master user. CREATE and DROP DATABASE cannot run inside a transaction, so
 // this is a connection rather than a pool.
 func (d *deps) connectAsMaster(ctx context.Context, target dbTarget) (*pgx.Conn, error) {
+	return d.connectAsMasterTo(ctx, target, d.cfg.DBAdminDatabase, nil)
+}
+
+// connectAsMasterTo opens a plain connection to database as the RDS master
+// user. onNotice, when set, receives the server's notices and warnings.
+func (d *deps) connectAsMasterTo(ctx context.Context, target dbTarget, database string, onNotice pgconn.NoticeHandler) (*pgx.Conn, error) {
 	slog.Info("reading the RDS master secret", "secret", target.MasterSecret)
 	master, err := d.masterCredentials(ctx, target.MasterSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	adminDSN := dbinit.AdminDSN(target.Host, target.Port, d.cfg.DBAdminDatabase,
-		master.Username, master.Password)
+	config, err := pgx.ParseConfig(dbinit.AdminDSN(target.Host, target.Port, database,
+		master.Username, master.Password))
+	if err != nil {
+		return nil, fmt.Errorf("parse the master connection string for %s: %w", target.Host, err)
+	}
+	config.OnNotice = onNotice
 
 	// A security group that drops the connection shows up as a long silence
 	// rather than an error, so the host is worth having in the log before the
 	// dial. The DSN itself is never logged, because it carries the master
 	// password.
 	slog.Info("connecting to postgres as master",
-		"host", target.Host, "port", target.Port, "database", d.cfg.DBAdminDatabase)
+		"host", target.Host, "port", target.Port, "database", database)
 
-	conn, err := pgx.Connect(ctx, adminDSN)
+	conn, err := pgx.ConnectConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s as master: %w", target.Host, err)
 	}
