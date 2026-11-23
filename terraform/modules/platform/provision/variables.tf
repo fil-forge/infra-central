@@ -124,16 +124,6 @@ variable "allow_list_table_arn" {
   type        = string
 }
 
-variable "provider_info_table_name" {
-  description = "The delegator's provider-info table. Only the copy-delegator-records phase reads it."
-  type        = string
-}
-
-variable "delegator_table_arns" {
-  description = "ARNs of both delegator tables, which the copy-delegator-records phase scans."
-  type        = list(string)
-}
-
 variable "backup_replica_region" {
   description = "Region the seed and vault phases replicate the key secrets and OpenBao's credentials to. Null keeps no replicas, and the role gets no grant in any other region."
   type        = string

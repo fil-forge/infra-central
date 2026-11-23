@@ -258,9 +258,6 @@ module "provision" {
   allow_list_table_name = module.storage.allow_list_table_name
   allow_list_table_arn  = module.storage.allow_list_table_arn
 
-  provider_info_table_name = module.storage.provider_info_table_name
-  delegator_table_arns     = module.storage.table_arns
-
   backup_replica_region = var.backup_replica_region
 
   appliance_backups = var.appliance_backups == null ? null : {
