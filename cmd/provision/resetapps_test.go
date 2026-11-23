@@ -51,3 +51,13 @@ func TestAppDatabasesAreSeededDatabases(t *testing.T) {
 		}
 	}
 }
+
+// An app database the reset skips keeps its rows across a reset, so the stage
+// comes back half-forgotten. Every seeded database but openbao's is an app's.
+func TestAppDatabasesCoverEverySeededApp(t *testing.T) {
+	for _, name := range databaseConsumers {
+		if name != "openbao" && !slices.Contains(appDatabases, name) {
+			t.Errorf("databaseConsumers has %q, which appDatabases %v does not reset", name, appDatabases)
+		}
+	}
+}
