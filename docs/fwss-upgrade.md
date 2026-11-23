@@ -108,10 +108,14 @@ once it has buffered `pdp.aggregation.aggregator.min_aggregate_size` (128 MiB by
 `pdp.aggregation.commp.delay` (one hour by default) before computing a piece's commitment. Both can be lowered on a
 running Piri for a test with `piri client admin config set`, and set back after.
 
-### Rolling back
+### Recovery
 
-A migration that ran cannot be reversed in one call. Announce and run another migration that restores the previous
-`current` routes, under the same delay.
+Decide how to recover before the announcement, and record the decision in the fork's pull request. A migration that
+ran cannot be reversed in one call: recovery is another migration, under the same delay. Routing back to the previous
+`current` facets is safe only when the release leaves storage as the old code reads it. A release whose migration
+writes storage the old facets would misread needs either a reverse migration, reviewed and run on smelt like the
+forward one, or a decision to fix forward. One migration moves dev, staging and prod together, so a bad recovery
+reaches all three.
 
 ## Path B: deploy a fresh proxy and reset a stage onto it
 
@@ -160,11 +164,14 @@ service's.
 ### 3. Approve the new FWSS as the payer's operator
 
 ```bash
-make fund-payer STAGE=<stage> FUND_ARGS="--lockup-allowance <cap> --rate-allowance <cap> --force-deposit"
+make fund-payer STAGE=<stage> \
+  FUND_ARGS="--lockup-allowance <cap> --rate-allowance <cap> --max-lockup-period <epochs> --force-deposit"
 ```
 
-Copy the caps of the payer's approval for the FWSS it leaves; the defaults (3 USDFC lockup, 0.1 USDFC per epoch)
-suit dev only. Each new proof set locks about 0.9 USDFC. The old proof sets keep their lockup, and the fund phase
+Copy all three limits of the payer's approval for the FWSS it leaves, which FilecoinPay's
+`operatorApprovals(token, payer, operator)` returns: the rate and lockup allowances and the maximum lockup period.
+The defaults (3 USDFC lockup, 0.1 USDFC per epoch, 86,400 epochs) suit dev only, and a shorter period than the old
+approval's can make new proof sets fail to lock up. Each new proof set locks about 0.9 USDFC. The old proof sets keep their lockup, and the fund phase
 skips the deposit whenever the account's total funds exceed it, so pass `--force-deposit` when little of that total is
 available. The script prints its plan and asks before it signs.
 
