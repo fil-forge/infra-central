@@ -251,10 +251,53 @@ resource "aws_cloudwatch_log_resource_policy" "invocations" {
   policy_document = data.aws_iam_policy_document.invocations_log_writer.json
 }
 
-# The role belongs to the stage's platform root (modules/platform/log-forwarding),
-# so its ARN is built from the name both roots state rather than looked up. A
-# new account applies its platform root before this filter can be created:
-# apply this root, then the stage, then this root again.
+# A role of its own for CloudWatch Logs to write into the stages' Firehoses,
+# rather than each stage's fc-<stage>-logs-to-firehose. That role belongs to the
+# stage's platform root, which a new account applies only after this root, so
+# borrowing it would fail this root's first apply. The region is in the name
+# for the reason the telemetry module gives for its roles.
+data "aws_iam_policy_document" "logs_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["logs.amazonaws.com"]
+    }
+
+    # The conditions modules/platform/log-forwarding gives the same principal.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:logs:${local.region}:${local.account_id}:*"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "logs_write" {
+  statement {
+    actions   = ["firehose:PutRecord", "firehose:PutRecordBatch"]
+    resources = [for stage in var.stages : var.log_firehose_arns[stage]]
+  }
+}
+
+resource "aws_iam_role" "logs" {
+  name               = "forge-central-provision-invocations-logs-${local.region}"
+  assume_role_policy = data.aws_iam_policy_document.logs_assume.json
+}
+
+resource "aws_iam_role_policy" "logs" {
+  name   = "write-to-firehose"
+  role   = aws_iam_role.logs.id
+  policy = data.aws_iam_policy_document.logs_write.json
+}
+
 resource "aws_cloudwatch_log_subscription_filter" "invocations" {
   for_each = toset(var.stages)
 
@@ -262,5 +305,9 @@ resource "aws_cloudwatch_log_subscription_filter" "invocations" {
   log_group_name  = aws_cloudwatch_log_group.invocations[each.key].name
   filter_pattern  = ""
   destination_arn = var.log_firehose_arns[each.key]
-  role_arn        = "arn:aws:iam::${local.account_id}:role/fc-${each.key}-logs-to-firehose"
+  role_arn        = aws_iam_role.logs.arn
+
+  # CloudWatch Logs checks it can assume the role when the filter is created,
+  # and the role reference alone orders this after the role, not its policy.
+  depends_on = [aws_iam_role_policy.logs]
 }
