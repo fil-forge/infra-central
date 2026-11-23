@@ -70,21 +70,19 @@ output "prod_openbao_seal_key_alias" {
 # tunnels up while the cluster is dropped; a stage with the cluster needs sites.
 # See docs/pandora-vpn.md for adding one.
 #
-# public_ip is the appliance's static IPv4. It is public anyway, behind
-# s3.<region>.filonecontent.com. private_ip is the /32 the appliance
-# source-NATs its database traffic to, from pandora_sites_private_cidr.
+# public_ip is the static IPv4 AWS sees the appliance's IKE traffic come from:
+# the host's own address, or its provider's NAT address when the host sits
+# behind NAT. private_ip is the /32 the appliance source-NATs its database
+# traffic to, from pandora_sites_private_cidr.
 output "pandora_sites" {
   description = "Compatibility server appliances by stage, then by region label."
   value = {
     dev     = {}
     staging = {}
     prod = {
-      # Provisional: the staging appliance server, standing in to test the
-      # VPN and TLS to the cluster until the server is deployed on the
-      # production node. That node's entry replaces this one, which gives it
-      # new tunnel addresses and keys.
-      provisional = {
-        public_ip  = "23.83.66.244"
+      # Bare metal on IST-1.
+      us-east-2 = {
+        public_ip  = "162.43.174.98"
         private_ip = "10.21.0.1/32"
       }
     }
