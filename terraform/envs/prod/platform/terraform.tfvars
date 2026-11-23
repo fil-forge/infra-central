@@ -43,6 +43,8 @@ appliance_regions = ["us-east-2"]
 # from appliance_regions. Null admits any source and an empty map closes the
 # route; docs/appliance-onboarding.md has the step that adds an address.
 #
-# Empty, and so no public route, until us-east-2's egress address is confirmed.
-# Until then the platform plan warns and that node's signing calls fail.
-signer_allowed_sources = {}
+# us-east-2 is the IST-1 host's address behind its provider's NAT, the same
+# public_ip its pandora VPN site uses (modules/shared/constants).
+signer_allowed_sources = {
+  us-east-2 = "162.43.174.98"
+}
