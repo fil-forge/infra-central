@@ -46,6 +46,11 @@ Move smelt to the new localdev image, as `systems/blockchain/README.md` in smelt
 tests. A fresh deploy inside the image can move the FWSS address in smelt's configs; that is local and says nothing
 about the shared proxy.
 
+To rehearse the upgrade itself, run steps 3 to 6 against a smelt stack still on the previous image, with a data set
+that has pieces and a proof. Record smelt's proxy on chain 31337 in a local copy of `josuke.json` first, as the shared
+proxy is recorded for 314159. After the migration, the same data set should keep proving and take new pieces. smelt's
+delegator signs with the owner's Anvil key, so send `josuke deploy` from another Anvil account (see step 3).
+
 ### 3. Deploy the modules
 
 ```bash
@@ -60,12 +65,18 @@ proxy, deploys them, and records them and the migration under `proposed`. `josuk
 and checks the migration installs exactly those routes.
 
 Set the signing wallet for `josuke deploy` only. Foundry unlocks a configured keystore even for read-only calls, so
-keep it out of the environment for every other step. Commit the `proposed` entry in a pull request to the fork.
+keep it out of the environment for every other step. Any funded account can deploy the modules; only the announcement
+and the migration need the owner. `josuke deploy` reserves its nonces before it builds and sends minutes later, so
+nothing else may send from that account while it runs, or the deploy fails with "nonce too low". Commit the
+`proposed` entry in a pull request to the fork.
+
+`josuke verify` rebuilds every commit the entry records from scratch. On a laptop that took 45 minutes for two
+commits, so plan for each run in steps 3, 5 and 6.
 
 ### 4. Announce the migration
 
 The owner announces the migration with a delay in epochs (30 seconds each). The delay gives a second person time to
-check the pending plan before it can run; upstream gives a day (2880 epochs) for a mainnet proxy with outside
+check the pending plan and run `josuke verify` before it can run; upstream gives a day (2880 epochs) for a mainnet proxy with outside
 integrators.
 
 ```bash
