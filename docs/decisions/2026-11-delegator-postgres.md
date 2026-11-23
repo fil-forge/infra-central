@@ -55,31 +55,39 @@ bumps its `seed_trigger`, and needs two images pinned for that stage:
 Each stage applies its platform root before its apps root. The seed run creates the database and its
 DSN in the platform apply, and the delegator's new task starts on it in the apps apply that follows.
 
-## Existing records are not copied
+## The provision Lambda copies the existing records
 
-Each stage starts on Postgres with an empty allow list and no registrations. Re-running the onboard
-phase for each of the stage's regions restores the allow list: one row per region, dev's
-`us-east-9`, staging's `eu-central-3` and prod's `us-east-2`. The phase's other steps find sprue and
-hilt already holding the appliance and leave them alone, except for the two sprue weights, which it
-rewrites from the request on every run. The re-run passes the region's current weights.
+A stage switched to Postgres keeps every allow-list row and provider registration it had. The
+provision Lambda's `copy-delegator-records` phase scans both DynamoDB tables and inserts their items
+into the delegator's tables, connected as the delegator's role. Without the copy, each region would
+have to be onboarded again, and each Piri would stay unregistered until its next `piri init`
+registered it again.
 
-Piri calls the delegator only from `piri init`. A running Piri holds its indexer and egress-tracker
-proofs in its configuration and serves without the delegator. infra-nodes re-runs `piri init` when
-the node's Piri image or init inputs change. With the DID on the allow list, that run finds the node
-unregistered and registers it again. Without it, the run is refused, and the node keeps serving from
-its existing configuration until a later run succeeds. Until a node registers again,
-`/registrar/is-registered` answers false for it.
+The copy runs after the switch, because the delegator's migrations create the tables when its task
+first starts on Postgres. Until it runs, the allow list is empty, which matters only to a `piri init`
+in that window: the delegator refuses it, and the node keeps serving from its existing
+configuration. Running it is an operator step right after the switch's deploy:
 
-Prod gets the same treatment. Its records are one allow-list row and the registration of one Piri.
-The onboard phase rebuilds the row, and the node's next `piri init` rebuilds the registration. A
-one-off copy would need a tool that reads both stores and maps DynamoDB's attributes onto the new
-columns, run once, against prod alone. Nothing else in central reads the tables: no other task role
-is granted them.
+```bash
+aws lambda invoke --function-name fc-<stage>-provision --cli-binary-format raw-in-base64-out \
+  --payload '{"phase":"copy-delegator-records"}' /dev/stdout
+aws lambda invoke --function-name fc-<stage>-provision --cli-binary-format raw-in-base64-out \
+  --payload '{"phase":"copy-delegator-records","confirm":true}' /dev/stdout
+```
+
+The first call is a dry run that lists, per table, the keys Postgres lacks and the keys it already
+holds. The second inserts the missing rows in one transaction. A row already in Postgres was written
+after the switch, so it is kept, which also makes the phase safe to run again. Every column keeps its
+DynamoDB value, timestamps included. An item missing an attribute the delegator always wrote, or
+holding one of the wrong type, fails the phase and names the item.
+
+The Lambda's grant on the tables is `dynamodb:Scan` alone, so the copy cannot change them. They stay
+as they are until every stage has switched.
 
 ## The tables go in two applies
 
 The DynamoDB tables stay, untouched, until every stage runs on Postgres. They are the fallback if
-the switch has to be undone, and the record of the old registrations. Staging's and prod's tables
+the switch has to be undone. Staging's and prod's tables
 have deletion protection, so removing them takes two merges: the first takes out every reader,
 writer and grant and turns deletion protection off, the second deletes the tables. DynamoDB keeps a
 system backup of a table deleted with point-in-time recovery on, named

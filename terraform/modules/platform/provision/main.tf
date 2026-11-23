@@ -68,7 +68,12 @@ resource "aws_lambda_function" "this" {
       # reaches sprue and hilt at their public hostnames, built from
       # FORGE_HOSTNAME_SUFFIX above, out through the NAT gateway — the same path
       # hilt already takes to resolve sprue's did:web document.
+      FORGE_DELEGATOR_STORE  = var.delegator_store
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
+
+      # Read only by the copy-delegator-records phase, which Terraform never
+      # invokes, together with FORGE_ALLOW_LIST_TABLE.
+      FORGE_PROVIDER_INFO_TABLE = var.provider_info_table_name
 
       # Used only by the appliance-backup-key phase, which Terraform never
       # invokes. Empty in a stage that takes no backups: Lambda rejects a null

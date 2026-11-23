@@ -74,6 +74,10 @@ output "bucket_arns" {
   value = module.storage.bucket_arns
 }
 
+output "delegator_store" {
+  value = var.delegator_store
+}
+
 output "allow_list_table_name" {
   value = module.storage.allow_list_table_name
 }

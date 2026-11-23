@@ -76,14 +76,14 @@ registration writes central performs on its behalf.
 
 ## What each service needs
 
-| Service              | Port | Health         | Postgres | Other                        |
-| -------------------- | ---- | -------------- | -------- | ---------------------------- |
-| sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
-| hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
-| swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
-| delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
-| piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
-| plc                  | 3000 | `/_health`     | yes      | nothing else                 |
+| Service              | Port | Health         | Postgres  | Other                                                 |
+| -------------------- | ---- | -------------- | --------- | ----------------------------------------------------- |
+| sprue                | 8080 | `/health`      | yes       | 3 S3 buckets, plc                                     |
+| hilt                 | 8080 | `/health`      | yes       | OpenBao, plc, calls sprue                             |
+| swarf                | 8080 | `/health`      | yes       | plc, serves an SSE stream                             |
+| delegator            | 8080 | `/healthcheck` | per stage | chain RPC, DynamoDB until its stage moves to Postgres |
+| piri-signing-service | 7446 | `/healthcheck` | no        | chain RPC                                             |
+| plc                  | 3000 | `/_health`     | yes       | nothing else                                          |
 
 Two more names appear among the stage's keys: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
@@ -106,7 +106,8 @@ These each cost an afternoon to rediscover.
   injects secrets as environment variables, so the `ecs-service` module wraps
   the entrypoint to write them out before exec'ing the process.
 - **Health paths disagree**: `/health`, `/healthcheck` and `/_health` all appear.
-- **Migrations run in-process** via goose for sprue, hilt, swarf and plc.
+- **Migrations run in-process** via goose for sprue, hilt, swarf and plc, and
+  for the delegator on a stage whose `delegator_store` is `postgres`.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on

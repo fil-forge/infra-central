@@ -18,6 +18,7 @@ output "platform" {
     route53_zone_id           = module.platform.route53_zone_id
     bucket_names              = module.platform.bucket_names
     bucket_arns               = module.platform.bucket_arns
+    delegator_store           = module.platform.delegator_store
     allow_list_table_name     = module.platform.allow_list_table_name
     provider_info_table_name  = module.platform.provider_info_table_name
     dynamodb_table_arns       = module.platform.dynamodb_table_arns
