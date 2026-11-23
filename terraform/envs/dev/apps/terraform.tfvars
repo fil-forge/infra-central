@@ -21,7 +21,7 @@ image_digests = {
 
   delegator = "sha256:ec178af506f7cd5ee679621db88ddfbc65fd95503fdfacb159810f034a9aee71"
 
-  signing_service = "sha256:e15b207903e6d84e97e2766e0cc736a34428c882952a5c4301372e51169d17f4"
+  signing_service = "sha256:9ae0559fa1d3976fd16f40000687b6c059011b1780ff5861c573a3bb30ce5dce"
 
   plc = "sha256:ebb12470f6fc50906c0ed867d009a056e131db1a994b45d7c3f1c8d2eb26dee9"
 }
