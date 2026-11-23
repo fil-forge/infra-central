@@ -131,8 +131,8 @@ module "platform" {
   seed_trigger = "4"
 
   # Bumped to move OpenBao's root token and recovery keys from SSM to Secrets
-  # Manager and replicate them. The vault phase re-runs only when its input
-  # changes, so the bump has to land with the provision build that does the
-  # move.
-  vault_trigger = "2"
+  # Manager and replicate them, and again to make OpenBao audit the
+  # X-Correlation-Id header. The vault phase re-runs only when its input
+  # changes, so each bump has to land with the provision build it needs.
+  vault_trigger = "3"
 }
