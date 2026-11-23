@@ -138,7 +138,8 @@ store-appliance-root-credentials:
 # Register an appliance with sprue, hilt and the delegator, and return the
 # delegation its Ingot needs. Run it once the appliance has provisioned its keys.
 #
-#   make onboard-appliance REGION=us-east-9 PIRI_DID=did:key:… \
+#   make onboard-appliance REGION=us-east-9 \
+#     PIRI_DID=did:web:piri-0.latest.dev.fil-forge.com \
 #     PIRI_URL=https://piri-0.latest.dev.fil-forge.com \
 #     PIRI_PROOF=piri-proof.txt
 PIRI_DID      ?=
