@@ -16,7 +16,7 @@
 # attempt from here would prove nothing.
 #
 # Usage:
-#   scripts/check-pandora-vpn-laptop.sh --stage prod --site provisional
+#   scripts/check-pandora-vpn-laptop.sh --stage prod --site us-east-2
 #
 # Options:
 #   --stage   stage the site belongs to         (required)
