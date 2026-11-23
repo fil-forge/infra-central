@@ -292,6 +292,106 @@ Hilt's AppRole logins:
 {aws_log_group="/forge-central/dev/openbao"} | json | type="response" | request_path="auth/approle/login"
 ```
 
+### Who invoked the provision Lambda
+
+Each account runs a trail, `forge-central-provision-invocations`, that records every `Invoke` of
+its provision functions and nothing else. EventBridge copies each stage's invocations to
+`/forge-central/<stage>/provision-invocations`, kept 30 days, and the trail's bucket,
+`forge-central-cloudtrail-<account>-us-east-2`, keeps them a year. The organization trail both
+accounts sit under records management events only, so this trail is the only record of who invoked
+the function.
+
+The Lambda request ID ties the three logs together. CloudTrail records it as the invocation's
+`requestID`, the function tags every line it writes with it as `request_id`, and it sends it to
+OpenBao as the `X-Correlation-Id` header, which OpenBao's audit log records. AWS does not document
+that CloudTrail's `requestID` is the ID the function sees; [the staging
+check](#checking-the-invocation-trail-on-staging) confirms it. If it ever differs, match the
+CloudTrail event to the function's `START RequestId:` line by function and time.
+
+To find who stored or replaced a region's appliance root credentials, start from OpenBao's audit
+log and read the invocation's ID from the header. A plain `| json` skips arrays, and OpenBao records
+each header as an array, so the query names the field:
+
+```logql
+{aws_log_group="/forge-central/prod/openbao"} | json type, request_path="request.path", correlation_id="request.headers[\"x-correlation-id\"][0]" | type="response" | request_path="forge-central/appliance-root/data/<region>"
+```
+
+The function's lines for that invocation, starting with its phase and region:
+
+```logql
+{aws_log_group="/aws/lambda/fc-prod-provision"} | json | request_id="<correlation_id>"
+```
+
+The line that reports the write also carries `openbao_request_id`, OpenBao's own ID for it. In the
+audit log, `| json` names that ID `request_id`, so the same name means different IDs in the two
+groups.
+
+The invocation, and who made it:
+
+```logql
+{aws_log_group="/forge-central/prod/provision-invocations"} | json | detail_requestID="<correlation_id>"
+```
+
+`detail_userIdentity_arn` names the caller. CI's apply role shows as
+`assumed-role/forge-central-ci-apply/gha-apply-prod-<run_id>` (`gha-apply-<run_id>` on dev,
+`gha-apply-staging-<run_id>` on staging), and the run id finds the workflow run. An operator shows
+as their SSO role session. `detail_sourceIPAddress` and `detail_userAgent` say where the call came
+from.
+
+### Checking the invocation trail on staging
+
+Run this once the non-prod regional bootstrap root is applied and staging runs a provision image
+that tags its log lines. It uses no credentials and writes no secret. First, invoke staging's
+function with a phase it does not have, which fails before it touches anything:
+
+```bash
+aws lambda invoke --region us-east-2 --function-name fc-staging-provision \
+  --cli-binary-format raw-in-base64-out --payload '{"phase":"noop"}' \
+  --log-type Tail --query LogResult --output text /dev/null | base64 -d
+```
+
+The output starts with `START RequestId: <id>`, and the JSON line after it carries
+`"request_id":"<id>"`. A line without it means staging runs an older image. A few minutes later the
+invocation is in Grafana:
+
+```logql
+{aws_log_group="/forge-central/staging/provision-invocations"} | json | detail_requestID="<id>"
+```
+
+Expect one event, with your session in `detail_userIdentity_arn`. No event means the trail or the
+rule is not delivering: `aws cloudtrail get-trail-status --name forge-central-provision-invocations`
+reports whether the trail is logging, and the rule's `FailedInvocations` metric in `AWS/Events`
+whether EventBridge failed to write to the group. An event with a different `requestID` means the
+two IDs differ: the lookup above then falls back to function and time, and this page should say so.
+The event must not carry the payload; this returns nothing when it does not:
+
+```logql
+{aws_log_group="/forge-central/staging/provision-invocations"} |= "noop"
+```
+
+Then check that OpenBao records the header, with the plan-only call of the root-credentials phase.
+It reads OpenBao and stores nothing, though it creates the phase's mount if it is missing and
+registers the header for auditing:
+
+```bash
+aws lambda invoke --region us-east-2 --function-name fc-staging-provision \
+  --cli-binary-format raw-in-base64-out --payload '{"phase":"appliance-root-store","region":"eu-central-3"}' \
+  --log-type Tail --query LogResult --output text /dev/null | base64 -d
+```
+
+```logql
+{aws_log_group="/forge-central/staging/openbao"} | json type, request_path="request.path", correlation_id="request.headers[\"x-correlation-id\"][0]" | type="response" | correlation_id="<id>"
+```
+
+Expect entries for `forge-central/appliance-root/metadata/eu-central-3`. None means OpenBao is not
+auditing the header: the invocation's log says whether registering it failed. Do not store
+credentials on staging to test the `data/` path, because that adds a version over the region's real
+copy.
+
+Last, after the next staging apply re-runs the vault phase, its invocation shows in the same group
+with a `gha-apply-staging-<run_id>` session. That confirms the trail's selector matches the calls
+CI makes, which name the function's `$LATEST` version, before prod relies on the same selector.
+
 ### Log labels
 
 | Label            | Example                   | Set by                                                                  |

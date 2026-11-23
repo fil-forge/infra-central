@@ -185,9 +185,9 @@ func (d *deps) applyResetApps(ctx context.Context, conn *pgx.Conn, bao *api.Clie
 // root token. hilt's AppRole could destroy its own secrets, but its secret_id is
 // bound to hilt's CIDRs and this phase is not hilt.
 func (d *deps) openBaoAsRoot(ctx context.Context) (*api.Client, error) {
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve", "addr", d.cfg.OpenBaoAddr)

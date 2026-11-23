@@ -123,8 +123,8 @@ module "platform" {
   # rebuilding dev's instance; see the appendix of docs/reset-apps.md. A
   # reset-apps run keeps the instance and needs neither. seed_trigger was
   # bumped alone once, to move the identity and wallet keys from SSM to
-  # Secrets Manager, and vault_trigger once, to move OpenBao's root token and
-  # recovery keys there.
+  # Secrets Manager, and vault_trigger twice: to move OpenBao's root token and
+  # recovery keys there, and to make OpenBao audit the X-Correlation-Id header.
   seed_trigger  = "7"
-  vault_trigger = "7"
+  vault_trigger = "8"
 }

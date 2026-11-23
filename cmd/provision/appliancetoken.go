@@ -47,9 +47,9 @@ func (d *deps) applianceToken(ctx context.Context, req Request) (*Response, erro
 		return nil, fmt.Errorf("FORGE_OPENBAO_ADDR is required for the appliance-token phase")
 	}
 
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 	rootToken, err := openBaoRootToken(ctx, d.keys, d.store)
 	if err != nil {
