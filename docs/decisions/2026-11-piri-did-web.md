@@ -22,6 +22,11 @@ document says which key is current, the same property that settled
   parameter per DID. A DID cannot be a parameter name, so the host the DID names is the name:
   `appliance/<region>/piri/<host>`. The value is the full DID, as before.
 
+- **A region with a Piri recorded under another DID method cannot be onboarded into.** Such a record
+  names an identity no node answers to, and onboarding beside it would give it to hilt as one of the
+  region's storage nodes and leave its provider in sprue. The onboard phase reports it as a blocker
+  until the old provider is deregistered and its record removed. A dev or staging reset clears both.
+
 ## What it costs
 
 - **The hostname is the identity.** Renaming a Piri makes it a new node to the network, to be
