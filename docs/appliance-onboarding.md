@@ -198,7 +198,8 @@ policy names the mount, so only central's root token reads it.
 
 Reading is break-glass. Use the stage's AWS account and region to fetch central's root token
 from Secrets Manager. CloudTrail records the `GetSecretValue` call, and OpenBao's audit log
-records the read of the region's secret.
+records the read of the region's secret. To find who stored a copy, see
+[Who invoked the provision Lambda](observability.md#who-invoked-the-provision-lambda).
 
 ```bash
 export BAO_ADDR=https://ssm.<hostname_suffix>

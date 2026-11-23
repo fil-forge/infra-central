@@ -164,7 +164,7 @@ terraform/
   modules/                                         the wiring; see Stages below
   envs/                                            one directory per root module
     bootstrap/<account>/account/                   state bucket, CI roles
-    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
+    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana, the provision Lambda's invocation trail
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  applied on every push to main
@@ -230,6 +230,7 @@ terraform/modules/
     constants/             every root, bootstrap included
   ecr/                     regional bootstrap only: the image registry
   telemetry/               regional bootstrap only: the Firehoses and metric stream to Grafana
+  provision-invocations/   regional bootstrap only: the trail of who invoked the provision Lambdas
   tfstate/                 account bootstrap only: the state bucket
   github-actions-iam/      account bootstrap only: the two CI roles
 ```
@@ -627,7 +628,7 @@ bucket that now exists. The regional root beside it comes next.
 
 ### Setting up an AWS region
 
-The regional root, `bootstrap/<account>/<region>/`, holds two things:
+The regional root, `bootstrap/<account>/<region>/`, holds three things:
 
 - `forge-central/provision`, the **ECR repository** for the provision Lambda
   image. Lambda pulls an image only from ECR in the same region as the
@@ -638,6 +639,10 @@ The regional root, `bootstrap/<account>/<region>/`, holds two things:
 - The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
   the stage list in `terraform/modules/shared/constants`, and one CloudWatch
   metric stream, which covers one account in one region.
+- The **invocation trail**: a CloudTrail trail that records each `Invoke` of
+  the stages' provision Lambdas, to a bucket and to Grafana. It answers who
+  invoked a phase, which OpenBao's audit log cannot; see
+  [docs/observability.md](docs/observability.md#who-invoked-the-provision-lambda).
 
 The first region of an account already has this directory next to the account
 root. For a further region, copy it:
@@ -693,7 +698,7 @@ The bucket already exists, so there is no bootstrap dance here:
 ```bash
 cd terraform/envs/bootstrap/nonprod/us-east-2
 tofu init
-tofu apply                           # the image registry and the telemetry egress
+tofu apply                           # the image registry, the telemetry egress and the trail
 ```
 
 Every image this project publishes to ECR lives under the `forge-central/`
