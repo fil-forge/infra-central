@@ -805,12 +805,7 @@ resource "grafana_rule_group" "central" {
   # site, so the whole-query no data covers it; a second site needs a check of
   # the series count against pandora_sites.
   #
-  # Paused until the first production appliance runs strongSwan (FIL-1402).
-  # Until then the only prod site is the staging appliance standing in, and its
-  # tunnels are down outside test runs, so this rule would keep firing. The
-  # pull request that brings a production site live replaces true with
-  # length(module.constants.pandora_sites.prod) == 0, which keeps the rule
-  # paused while prod has no site, since no_data_state would otherwise fire for
+  # Paused while prod has no site, since no_data_state would otherwise fire for
   # as long as the site list stays empty.
   rule {
     name           = "Pandora VPN tunnel down"
@@ -818,7 +813,7 @@ resource "grafana_rule_group" "central" {
     for            = "15m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
-    is_paused      = true
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
@@ -898,18 +893,14 @@ resource "grafana_rule_group" "central" {
   # warning rule above gives, and no data fires about ten minutes after the
   # last sample.
   #
-  # Paused until the first production appliance runs strongSwan (FIL-1402).
-  # Until then the only prod site is the staging appliance standing in, its
-  # tunnels are down outside test runs, and this rule would page on-call for
-  # that. The pull request that brings a production site live replaces true
-  # with the expression the warning rule above gives.
+  # Paused while prod has no site, for the reason the warning rule above gives.
   rule {
     name           = "Pandora VPN both tunnels down"
     condition      = "B"
     for            = "5m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
-    is_paused      = true
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
