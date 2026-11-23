@@ -1,49 +1,130 @@
-# Moving a stage to a new FWSS release
+# Upgrading FWSS
 
-Dev and staging move to a new FilecoinWarmStorageService (FWSS) release by deploying a fresh FWSS
-proxy on Calibration and resetting the stage onto it. The FWSS proxy dev and staging used before
-sc-1077, `0x0c6875983B20901a7C3c86871f43FdEE77946424`, is shared with prod and owned by a key Forge
-does not hold, so it is never upgraded in place. A fresh proxy costs each Piri its stored blobs and
-its old proof set: a proof set cannot move to another FWSS, because PDPVerifier records its FWSS as
-the listener when the set is created.
+Dev, staging and prod run on one FilecoinWarmStorageService (FWSS) proxy on Calibration,
+`0x55325AB46CDAB0FbDef559c810cd6bc95cBFEfFd`. Its owner is `0xDb3b19d1917107A5D2D2fadBa609C9Ac20902D52`, the
+account that deployed it.
 
-Prod is out of scope. `make reset-apps` refuses it.
+A new FWSS release reaches the stages one of two ways:
 
-The run that moved dev to FWSS 1.6.0 is the worked example throughout.
+- **Path A, upgrade in place.** The release's modules are deployed and the proxy is migrated to them. The proxy
+  address stays the same, so no stage changes configuration, nothing is reset and no data is lost. One upgrade moves
+  dev, staging and prod together. This is the path for every release.
+- **Path B, deploy a fresh proxy and reset onto it.** For a release that cannot be applied in place. Every Piri on the
+  stage loses its stored blobs, because a proof set stays bound to the FWSS it was created under. Never use it in
+  production.
 
-## 1. Merge the release into the fork
+FilOzone's [`UPGRADE-CHECKLIST.md`](https://github.com/fil-forge/filecoin-services/blob/main/service_contracts/tools/UPGRADE-CHECKLIST.md)
+also names its paths A and B, for a different split. Forge's path A is its Procedure B, the josuke migration. Forge
+has no use for its Path A, which moves a proxy off the v1.4.0 monolith once.
 
-FWSS is built from [fil-forge/filecoin-services](https://github.com/fil-forge/filecoin-services), a
-fork of FilOzone's repository. Merge the upstream release tag into the fork's `main` in a pull
-request; [#6](https://github.com/fil-forge/filecoin-services/pull/6) merged v1.6.0. Before merging,
-check that the release still accepts the payloads Piri and the signing service send. 1.6.0 accepts
-the five-field `dataSetCreated` payload and the `CreateDataSet` EIP-712 type and maps both to storage
-terms record 0, so neither needed a change.
+The owner is a single account whose keystore is held by one person. Moving ownership to a Safe would remove that
+single key from every announce and migrate below.
 
-The pull request's `smoke-test` jobs build the localdev image and fail if forge compiles at container
-start. Merging to `main` publishes the image as `ghcr.io/fil-forge/filecoin-localdev:<commit>`.
+## Path A: upgrade in place
 
-## 2. Move smelt to the new image
+The steps run in the [fil-forge/filecoin-services](https://github.com/fil-forge/filecoin-services) fork, from
+`service_contracts/`. They need the josuke and evm CLIs at the revisions its `Makefile` pins (`make install-josuke`,
+`make install-evm`) and Foundry at the version its localdev `Dockerfile` names.
 
-Smelt's local chain boots from a baseline the localdev image produced, so the image and the
-baseline move together. `systems/blockchain/README.md` in smelt has the steps. A fresh deploy moves
-the FWSS address, so the configs that name it change in the same pull request
-([smelt#88](https://github.com/fil-forge/smelt/pull/88)).
+### 1. Merge the release into the fork
 
-Recapture `snapshots/3-piri-postgres-s3` from a stack started under a compose project name no other
-stack uses, with `COMPOSE_PROJECT_NAME` exported for both `make up` and `smelt snapshot save`. A stack
-started as `smelt` reuses any `smelt_*` volumes already on the machine, and `snapshot save` looks for
-volumes under the directory name, so a save from a worktree without that variable writes empty
-archives and reports success.
+Merge the upstream release tag into the fork's `main` in a pull request
+([#6](https://github.com/fil-forge/filecoin-services/pull/6) merged v1.6.0). Its `smoke-test` jobs build the localdev
+image, and merging publishes it as `ghcr.io/fil-forge/filecoin-localdev:<commit>`.
 
-## 3. Deploy FWSS on Calibration
+Read the release notes for two things before going further:
 
-Run everything from `service_contracts/` in a checkout of the fork's `main`. Forge reads
-`script/FWSSDeploy.s.sol` relative to the working directory, and from the repository root it fails
-with "contract source info format must be `<path>:<contractname>`".
+- Whether Piri and the signing service still create data sets and add pieces under the release. A release that drops
+  a payload or EIP-712 type they send needs their new versions on every node first. 1.6.0 kept the five-field
+  `dataSetCreated` payload and the `CreateDataSet` type, so neither changed.
+- Steps the release adds to the migration. 1.6.0 wraps the migration of an existing proxy in
+  `FWSSStorageTermsMigration`, which the checklist describes under B1.
 
-Simulate first. The simulation broadcasts nothing and prints the proxy address the deploy will
-produce at the deployer's current nonce:
+### 2. Prove it on smelt
+
+Move smelt to the new localdev image, as `systems/blockchain/README.md` in smelt describes, and run its end-to-end
+tests. A fresh deploy inside the image can move the FWSS address in smelt's configs; that is local and says nothing
+about the shared proxy.
+
+### 3. Deploy the modules
+
+```bash
+export CHAIN=314159
+export ETH_RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+export FWSS_PROXY_ADDRESS=0x55325AB46CDAB0FbDef559c810cd6bc95cBFEfFd
+```
+
+Confirm the proxy runs the dispatcher with the check under "Choose the Upgrade Path" in the checklist, then follow its
+B1. `josuke deploy` builds the modules that changed since the `current` deployment `josuke.json` records for this
+proxy, deploys them, and records them and the migration under `proposed`. `josuke verify` rebuilds them from source
+and checks the migration installs exactly those routes.
+
+Set the signing wallet for `josuke deploy` only. Foundry unlocks a configured keystore even for read-only calls, so
+keep it out of the environment for every other step. Commit the `proposed` entry in a pull request to the fork.
+
+### 4. Announce the migration
+
+The owner announces the migration with a delay in epochs (30 seconds each). The delay gives a second person time to
+check the pending plan before it can run; upstream gives a day (2880 epochs) for a mainnet proxy with outside
+integrators.
+
+```bash
+export MIGRATION=<the migration from step 3>
+export UPGRADE_DELAY_EPOCHS=<delay>
+cast chain-id                         # 314159
+cast call --from 0xDb3b19d1917107A5D2D2fadBa609C9Ac20902D52 "$FWSS_PROXY_ADDRESS" \
+  'announceMigration(address,uint96)' "$MIGRATION" "$UPGRADE_DELAY_EPOCHS"
+cast send --account <owner keystore> "$FWSS_PROXY_ADDRESS" \
+  'announceMigration(address,uint96)' "$MIGRATION" "$UPGRADE_DELAY_EPOCHS"
+```
+
+The `cast call` simulates the announcement as the owner without sending it. Read the pending plan afterwards, as the
+checklist's "Read the pending plan" shows: its target is `$MIGRATION`, and its `afterEpoch` is the announcement's
+block plus the delay.
+
+### 5. Review during the delay
+
+Someone other than the announcer reads the pending plan again and runs `josuke verify` against the committed
+`josuke.json`. A later announcement replaces a pending one, so a plan whose target changed is a reason to stop.
+
+### 6. Run the migration
+
+After `afterEpoch`, rerun the checks, simulate as the owner and send:
+
+```bash
+cast call --from 0xDb3b19d1917107A5D2D2fadBa609C9Ac20902D52 "$FWSS_PROXY_ADDRESS" 'migrate(address)' "$MIGRATION"
+cast send --account <owner keystore> "$FWSS_PROXY_ADDRESS" 'migrate(address)' "$MIGRATION"
+```
+
+Then run the checklist's post-upgrade checks: `VERSION()` returns the release, the owner is unchanged, the
+implementation is still the dispatcher and the pending plan is empty. `josuke accept` confirms on chain that every
+proposed selector routes to its module, and moves `proposed` to `current`. Commit that to the fork.
+
+### 7. Check the stages
+
+Run `make smoke STAGE=dev`, `STAGE=staging` and `STAGE=prod`, and infra-nodes' `test-nodes` workflow for each node.
+A data set that gains pieces and records a proof after an upload shows the full path works. Piri submits pieces only
+once it has buffered `pdp.aggregation.aggregator.min_aggregate_size` (128 MiB by default), and waits
+`pdp.aggregation.commp.delay` (one hour by default) before computing a piece's commitment. Both can be lowered on a
+running Piri for a test with `piri client admin config set`, and set back after.
+
+### Rolling back
+
+A migration that ran cannot be reversed in one call. Announce and run another migration that restores the previous
+`current` routes, under the same delay.
+
+## Path B: deploy a fresh proxy and reset a stage onto it
+
+Not for production. The prod reset tooling refuses it, and prod's data would be lost.
+
+Path B moved dev and staging off the shared proxy prod used before, `0x0c6875983B20901a7C3c86871f43FdEE77946424`,
+which Forge does not own. It applies again only if a release cannot be applied in place, or a stage has to start over
+on a proxy of its own.
+
+### 1. Deploy the proxy
+
+From `service_contracts/` in a checkout of the release commit, simulate first. The simulation broadcasts nothing and
+prints the proxy address the deploy will produce at the deployer's current nonce:
 
 ```bash
 FILECOIN_PAY_ADDRESS=0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0 \
@@ -59,87 +140,51 @@ forge script script/FWSSDeploy.s.sol \
   --sender <deployer address>
 ```
 
-The addresses are the shared Calibration contracts dev and staging already use. The script reuses
-the ERC-8167 dispatcher recorded in `deployments.json`.
+To deploy, add `--account <keystore name> --broadcast --skip-simulation`. Without `--skip-simulation`, forge sets
+each gas limit from its local EVM, and the node rejects the first transaction ("'GasLimit' field cannot be less than
+the cost of storing a message on chain"). The deploy sends one transaction per contract, 19 for 1.6.0. If it stops
+partway, do not run it again: a second run starts at the next nonce and deploys every contract at new addresses.
+Forge reads the script path relative to the working directory, and from the repository root fails with "contract
+source info format must be `<path>:<contractname>`".
 
-To deploy, add `--account <keystore name> --broadcast --skip-simulation`. Without
-`--skip-simulation`, forge sets each gas limit from its local EVM, which charges less than FEVM, and
-the node rejects the first transaction ("'GasLimit' field cannot be less than the cost of storing a
-message on chain"). Nothing is sent in that case and the deployer's nonce does not move.
+Check the new proxy with read-only calls: `VERSION()`, `owner()`, the ERC-1967 implementation slot (the dispatcher),
+`viewContractAddress()` (the proxy itself, so `FWSS_VIEW_ADDRESS` is the proxy address), `getPDPConfig()` and every
+dependency getter. Record the proxy in the fork's `josuke.json`, or path A cannot upgrade it later.
 
-The deploy sends one transaction per contract, 19 for 1.6.0, about two Calibration blocks apart.
-If it stops partway, do not run it again: a second run starts at the next nonce and deploys every
-contract at new addresses.
+### 2. Point central at it
 
-Check the result with read-only calls on the new proxy:
+Change `chain.contracts.fwss` in `terraform/envs/<stage>/platform/terraform.tfvars` and let the stage's apply finish
+before the reset. The apply changes the provision Lambda's `FORGE_FWSS_ADDRESS`, then the delegator's and the signing
+service's.
 
-| Check | Expected |
-|---|---|
-| `VERSION()` | the release, `"1.6.0"` |
-| `owner()` | the deployer |
-| storage slot `0x3608…2bbc` (ERC-1967 implementation) | the dispatcher |
-| `viewContractAddress()` | the proxy itself |
-| `getPDPConfig()` | proving period 20, challenge window 5 |
-| `pdpVerifierAddress()`, `paymentsContractAddress()`, `usdfcTokenAddress()`, `serviceProviderRegistry()`, `sessionKeyRegistry()`, `filBeamBeneficiaryAddress()`, `filBeamControllerAddress()` | the inputs above |
-| `getStorageTerms(bytes32(0))` | USDFC, 18 decimals, 2.5 USDFC per TiB per month, enabled |
-
-The proxy serves the StateView reads itself, so `FWSS_VIEW_ADDRESS` is the proxy address.
-
-A fresh FWSS has no approved providers. Data set creation does not check approval, so the stage
-runs without them.
-
-## 4. Point central at it
-
-Change `chain.contracts.fwss` in `terraform/envs/<stage>/platform/terraform.tfvars`
-([#437](https://github.com/fil-forge/infra-central/pull/437) for dev). The platform plan changes the
-provision Lambda's `FORGE_FWSS_ADDRESS`, and the apps apply that follows changes the delegator's and
-the signing service's. Merge it and let the stage's apply finish before step 6, because a push to
-`main` during the reset can start a service while its database is being dropped.
-
-## 5. Fund the payer for the new operator
+### 3. Approve the new FWSS as the payer's operator
 
 ```bash
-make fund-payer STAGE=dev FUND_ARGS=--force-deposit
+make fund-payer STAGE=<stage> FUND_ARGS="--lockup-allowance <cap> --rate-allowance <cap> --force-deposit"
 ```
 
-Each new proof set locks about 0.9 USDFC, so dev's three Piri need about 2.7 USDFC available. The
-old proof sets keep their lockup, and the fund phase skips the deposit whenever the account's total
-funds exceed the deposit, even when almost none of it is available. Dev held 8 USDFC with 0.9
-available, so the deposit needed `--force-deposit`. The run also approves the new FWSS as the payer's
-operator, which it has to be before any Piri can create a proof set. The script prints the plan and
-asks before it signs. If the payer wallet holds less than the deposit, fund it at the
-[USDFC faucet](https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc) first.
+Copy the caps of the payer's approval for the FWSS it leaves; the defaults (3 USDFC lockup, 0.1 USDFC per epoch)
+suit dev only. Each new proof set locks about 0.9 USDFC. The old proof sets keep their lockup, and the fund phase
+skips the deposit whenever the account's total funds exceed it, so pass `--force-deposit` when little of that total is
+available. The script prints its plan and asks before it signs.
 
-## 6. Reset the node, then central
+### 4. Reset the node, then central
 
-Follow [reset-apps.md](reset-apps.md) steps 1 and 2. On dev, where the node has no SSH, the node's
-reset can run through Systems Manager:
+Follow [reset-apps.md](reset-apps.md) steps 1 and 2. Dev's node has no SSH; run its reset through Systems Manager
+with `aws ssm send-command` and `scripts/host/reset-apps.sh --yes`.
 
-```bash
-aws ssm send-command --region us-east-2 --instance-ids <dev instance id> \
-  --document-name AWS-RunShellScript \
-  --parameters 'commands=["cd /opt/fil-one/infra-nodes && scripts/host/reset-apps.sh --yes"]'
-```
+### 5. Point the node at it
 
-## 7. Point the node at it
+Merge the change to `FWSS_ADDRESS` and `FWSS_VIEW_ADDRESS` in infra-nodes' `nodes/<node>/node.env` as soon as central
+reports the stage up. The reconcile pass that follows starts each Piri against the new FWSS, and `piri init` creates
+its proof set there. Merged before the node reset, it starts Piri against the new FWSS with the old proof set in its
+database. An image bump that merges between the node reset and this change starts Piri on the old FWSS. Keep the
+window short and watch infra-nodes' open pull requests during it.
 
-Merge the node's change to `FWSS_ADDRESS` and `FWSS_VIEW_ADDRESS` in infra-nodes'
-`nodes/<node>/node.env` ([infra-nodes#339](https://github.com/fil-forge/infra-nodes/pull/339) for
-dev) as soon as central's reset reports the stage up. The reconcile pass that follows starts each
-Piri against the new FWSS, and `piri init` creates its proof set there. Merged before the node
-reset, it starts Piri against the new FWSS with the old proof set in its database. An image bump that
-merges between the node reset and this change starts Piri on the old FWSS, where it creates a proof
-set the stage cannot use. Keep that window short and watch infra-nodes' open pull requests during it.
-
-## 8. Onboard and verify
+### 6. Onboard and verify
 
 Continue from step 5 of [reset-apps.md](reset-apps.md): onboard each Piri with the command
-`scripts/host/onboarding-request.sh` prints on the node, reset FilOne's tenants for the region, and
-run `make smoke STAGE=<stage>`. The Piri keep their keys and wallets, so their provider
-registrations are reused and their owner wallets need no funding.
-
-On chain, each Piri's new proof set should have the new FWSS as its listener, gain pieces after
-uploads, and record proofs. Piri submits pieces only once it has buffered
-`pdp.aggregation.aggregator.min_aggregate_size` (128 MiB by default), and waits
-`pdp.aggregation.commp.delay` (one hour by default) before computing a piece's commitment, so a
-small upload shows no pieces for at least an hour.
+`scripts/host/onboarding-request.sh` prints, reset FilOne's tenants for the region with
+`bin/reset-region-provisioning.ts`, and run `make smoke STAGE=<stage>`. Each Piri keeps its keys and wallet, so its
+provider registration is reused and its wallet needs no funding. Check that each new proof set has the new FWSS as its
+listener, then that it gains pieces and records a proof, as in path A step 7.
