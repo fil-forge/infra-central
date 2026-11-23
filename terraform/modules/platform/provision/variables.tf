@@ -109,14 +109,29 @@ variable "log_retention_days" {
   default = 30
 }
 
+variable "delegator_store" {
+  description = "Where the delegator keeps its allow list, \"dynamodb\" or \"postgres\". The onboard phase writes the allow list there."
+  type        = string
+}
+
 variable "allow_list_table_name" {
-  description = "The delegator's allow-list table. Only the onboard phase writes it."
+  description = "The delegator's allow-list table. Only the onboard phase writes it, and only while delegator_store is dynamodb."
   type        = string
 }
 
 variable "allow_list_table_arn" {
   description = "ARN of the same table, which is what the role is granted on."
   type        = string
+}
+
+variable "provider_info_table_name" {
+  description = "The delegator's provider-info table. Only the copy-delegator-records phase reads it."
+  type        = string
+}
+
+variable "delegator_table_arns" {
+  description = "ARNs of both delegator tables, which the copy-delegator-records phase scans."
+  type        = list(string)
 }
 
 variable "backup_replica_region" {

@@ -13,8 +13,8 @@ import (
 // It exists because nothing else pairs the two readably. sprue's provider record
 // carries no region, and hilt keeps only the DID of the routing policy whose
 // candidates are the region's Piri, so a region's set of Piri DIDs is knowable
-// only at onboard time, when one request names both. A node whose Piri key is
-// replaced would otherwise leave a provider row in sprue that no later run can
+// only at onboard time, when one request names both. A node whose Piri is
+// renamed would otherwise leave a provider row in sprue that no later run can
 // attribute to a region. The record is also what hilt is given as the region's
 // node set, since setting nodes replaces them.
 //
@@ -67,16 +67,36 @@ func (r *piriRecords) Record(ctx context.Context, region, piriDID string) error 
 // piriParameterName renders the parameter a DID is recorded under.
 //
 // SSM parameter names allow letters, digits, dot, underscore, hyphen and slash,
-// and a DID has colons, so the did:key's multibase tail is the name and the full
-// DID is the value. Piri's identity is a did:key by design, on the operator's own
-// domain rather than Forge's, so anything else is refused rather than mangled
-// into a name. See docs/decisions/2026-08-region-onboarding.md.
+// and a DID has colons, so the host a Piri's did:web names is the parameter name
+// and the full DID is the value. A Piri is the did:web of its public URL, which
+// is a host on the default port, so a DID of another method, or one with a port
+// or a path, is refused rather than mangled into a name. See
+// docs/decisions/2026-11-piri-did-web.md.
 func piriParameterName(piriDID string) (string, error) {
-	tail, found := strings.CutPrefix(piriDID, "did:key:")
-	if !found || tail == "" {
+	host, found := strings.CutPrefix(piriDID, "did:web:")
+	if !found || !isHostName(host) {
 		return "", fmt.Errorf(
-			"a Piri identity has to be a did:key, and %q is not; central records a region's Piri DIDs under names SSM accepts, which a colon is not",
+			"a Piri identity has to be the did:web of its host, such as did:web:piri-0.example.com, and %q is not; central records a region's Piri DIDs under names SSM accepts, which a colon or a percent sign is not",
 			piriDID)
 	}
-	return piriSubPrefix + "/" + tail, nil
+	return piriSubPrefix + "/" + host, nil
+}
+
+// isHostName reports whether s is a lower-case host name: labels of letters,
+// digits and hyphens, separated by dots.
+func isHostName(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			if c := label[i]; !('a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

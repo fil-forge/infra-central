@@ -230,6 +230,17 @@ variable "backup_replica_region" {
   default     = null
 }
 
+variable "delegator_store" {
+  description = "Where the delegator keeps its allow list and provider registrations, \"dynamodb\" or \"postgres\". The provision Lambda's onboard phase writes the allow list there, and the apps root configures the delegator from this output. Switch a stage only once its delegator image supports Postgres and its seed phase has created the delegator database; see docs/decisions/2026-11-delegator-postgres.md."
+  type        = string
+  default     = "dynamodb"
+
+  validation {
+    condition     = contains(["dynamodb", "postgres"], var.delegator_store)
+    error_message = "delegator_store must be \"dynamodb\" or \"postgres\"."
+  }
+}
+
 variable "seed_trigger" {
   description = "Change to force the seed phase to run again."
   type        = string

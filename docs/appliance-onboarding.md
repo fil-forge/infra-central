@@ -279,7 +279,7 @@ appliance signed with its own Piri key, which central never holds.
 
 ```bash
 make onboard-appliance STAGE=dev REGION=us-east-9 \
-  PIRI_DID=did:key:z6Mk… \
+  PIRI_DID=did:web:piri-0.latest.dev.fil-forge.com \
   PIRI_URL=https://piri-0.latest.dev.fil-forge.com \
   PIRI_PROOF=piri-proof.txt \
   ONBOARD_ARGS="--proof-out ingot-proof.txt"

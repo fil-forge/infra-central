@@ -119,7 +119,7 @@ type Request struct {
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
 	// --- fund, appliance-token, appliance-backup-key, appliance-root-store,
-	// onboard, retire and reset-apps phases ---
+	// onboard, retire, reset-apps and copy-delegator-records phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
@@ -221,6 +221,11 @@ type Response struct {
 	// carry only database names and a count of secrets.
 	ResetAppsPlan   *ResetAppsPlan   `json:"reset_apps_plan,omitempty"`
 	ResetAppsResult *ResetAppsResult `json:"reset_apps_result,omitempty"`
+
+	// DelegatorCopyPlan and DelegatorCopyResult belong to the
+	// copy-delegator-records phase.
+	DelegatorCopyPlan   *DelegatorCopyPlan   `json:"delegator_copy_plan,omitempty"`
+	DelegatorCopyResult *DelegatorCopyResult `json:"delegator_copy_result,omitempty"`
 }
 
 // baseLogger is the logger every invocation's default logger derives from.
@@ -283,9 +288,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.retirePhase(ctx, req)
 	case "reset-apps":
 		return deps.resetAppsPhase(ctx, req)
+	case "copy-delegator-records":
+		return deps.copyDelegatorRecordsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"analyze\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"analyze\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\", \"reset-apps\" or \"copy-delegator-records\"", req.Phase)
 	}
 }
 

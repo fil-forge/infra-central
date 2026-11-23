@@ -145,6 +145,14 @@ data "aws_iam_policy_document" "this" {
     resources = [var.allow_list_table_arn]
   }
 
+  # The copy-delegator-records phase reads both tables to carry the delegator's
+  # records into Postgres. Read-only: the tables stay as they were.
+  statement {
+    sid       = "ReadDelegatorTables"
+    actions   = ["dynamodb:Scan"]
+    resources = var.delegator_table_arns
+  }
+
   # The appliance-backup-key phase mints each region's backup key, so the
   # secret never enters Terraform state. The grant is the three calls it makes
   # and only on the writer users. Creating or deleting the users themselves is

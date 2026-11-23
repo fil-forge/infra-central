@@ -8,9 +8,10 @@
 # runs. docs/reset-apps.md has the whole order, onboarding included.
 #
 # What it wipes:
-#   - the sprue, hilt, swarf and plc databases, dropped and recreated empty
+#   - the sprue, hilt, swarf, plc and delegator databases, dropped and
+#     recreated empty
 #   - hilt's tenant secrets in OpenBao
-#   - the delegator's allow list and provider-info tables, emptied
+#   - the delegator's DynamoDB allow list and provider-info tables, emptied
 #   - sprue's buckets, every object version included
 #   - every Piri DID recorded in SSM, in any region
 #
@@ -61,7 +62,7 @@ while [ $# -gt 0 ]; do
     --stage)   STAGE="$2"; shift 2 ;;
     --yes|-y)  ASSUME_YES=true; shift ;;
     --purge-agent-messages-before) PURGE_BEFORE="$2"; shift 2 ;;
-    -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,53p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done

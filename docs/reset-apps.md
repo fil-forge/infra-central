@@ -27,12 +27,14 @@ services back up.
 
 ## What gets wiped
 
-- The `sprue`, `hilt`, `swarf` and `plc` databases: providers, tenants, buckets,
-  access keys, delegations, revocations and the tenants' did:plc documents.
+- The `sprue`, `hilt`, `swarf`, `plc` and `delegator` databases: providers,
+  tenants, buckets, access keys, delegations, revocations, the tenants' did:plc
+  documents and, on a stage whose delegator runs on Postgres, its allow list and
+  provider registrations.
 - hilt's tenant secrets in OpenBao, under `tenant/` in the `forge-central/hilt`
   mount.
-- Every item in the delegator's allow list and provider-info tables. The tables
-  stay, so staging's deletion protection does not get in the way.
+- Every item in the delegator's DynamoDB allow list and provider-info tables.
+  The tables stay, so staging's deletion protection does not get in the way.
 - Every object version in sprue's `agent-message` and `delegation` buckets
   written before the services were scaled to zero. This is not reversible,
   versioning included.
