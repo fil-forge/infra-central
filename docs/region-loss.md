@@ -49,6 +49,19 @@ OpenBao 2.6.0 uses).
    no change to the OpenBao configuration.
 3. OpenBao starts, decrypts its root key through the replica and unseals with no operator step.
 
+Step 2 cannot run today, for three reasons:
+
+- The platform root's state is in `forge-central-tfstate-811430801166`, which exists only in
+  us-east-2 and has no replica, so `tofu init` cannot read the state while us-east-2 is down.
+  [sc-1154](https://app.shortcut.com/filone/story/1154) replicates the state buckets to eu-central-1
+  and adds the steps for pointing each root at the replica.
+- The root sets `backup_replica_region` to `dr_region`, which is eu-central-1, and the provision
+  module rejects a replica region equal to `region`. The apply in eu-central-1 needs it set to
+  another region or to null. sc-284 covers the change.
+- eu-central-1 has no regional bootstrap root, so the provision Lambda's ECR repository and the
+  `fc-prod-logs` Firehose the log subscription filters ship to do not exist there. sc-284 covers
+  adding the root.
+
 Before relying on a replica, check that it is enabled:
 
 ```bash
@@ -81,7 +94,8 @@ each node's backup snapshots. Without that storage, no appliance can unseal afte
 
 ### What seed and vault rebuild
 
-Run seed and vault as [restore-database.md](restore-database.md#8-re-run-seed-and-vault) describes.
+Run seed and vault as [restore-database.md](restore-database.md#8-re-run-seed-and-vault)
+([#379](https://github.com/fil-forge/infra-central/pull/379)) describes.
 The run writes:
 
 - each service's `identity.did` and each wallet's `.address`, derived from the keys in Secrets
@@ -112,19 +126,21 @@ node holds. Until it is written again, the mint plans a second token for a node 
 one, `make onboard-appliance` refuses the region as never provisioned, and retiring the region
 cannot revoke the node's token.
 
-A node's token expires 72 hours after its last renewal. Which repair applies depends on how long the
-outage lasted:
+A node's token expires 72 hours after its last renewal, so it may expire during an outage shorter
+than 72 hours. With OpenBao's root token, look for a live token created through the role
+`appliance-unseal-<region>`:
 
-- **Under 72 hours.** The token is still live, and the node resumes renewing it on its own. With
-  OpenBao's root token, find the accessor of the token created through the role
-  `appliance-unseal-<region>`, and write it back:
+```bash
+for accessor in $(bao list -format=json auth/token/accessors | jq -r '.[]'); do
+  bao token lookup -format=json -accessor "$accessor" \
+    | jq -r --arg a "$accessor" 'select(.data.role == "appliance-unseal-<region>") | $a'
+done
+```
 
-  ```bash
-  for accessor in $(bao list -format=json auth/token/accessors | jq -r '.[]'); do
-    bao token lookup -format=json -accessor "$accessor" \
-      | jq -r --arg a "$accessor" 'select(.data.role == "appliance-unseal-<region>") | $a'
-  done
-  ```
+Which repair applies depends on what the loop prints:
+
+- **An accessor.** The token is live, and the node resumes renewing it on its own. Write the
+  accessor back:
 
   ```bash
   aws ssm put-parameter --region eu-central-1 --type String \
@@ -133,10 +149,11 @@ outage lasted:
 
   The appliance-token dry run in
   [restore-database.md](restore-database.md#6-check-every-regions-key-and-token-before-any-vault-phase)
-  then reports `token_live: true` and the action `skip`.
+  ([#379](https://github.com/fil-forge/infra-central/pull/379)) then reports `token_live: true` and
+  the action `skip`.
 
-- **Over 72 hours.** The token has expired. The node keeps running, because it holds its key in
-  memory, and fails to unseal at its next restart. Before anything restarts it, mint a new token as
+- **Nothing.** The token has expired. The node keeps running, because it holds its key in memory,
+  and fails to unseal at its next restart. Before anything restarts it, mint a new token as
   [appliance-onboarding.md](appliance-onboarding.md#minting-again) describes. The mint records the
   new accessor.
 
