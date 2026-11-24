@@ -4,7 +4,8 @@
 stored and keeps the platform they run on. Use it when a stage has to forget its
 appliances: a node rebuilt from scratch, a node moving from one Piri to several,
 or test data that is no longer worth keeping. Production refuses it, in the
-script and again in the provision Lambda.
+script and again in the provision Lambda, unless it is asked for by name:
+[Resetting production](#resetting-production) covers that.
 
 Every app service in the stage is down until the stores are wiped. The purge of
 sprue's `agent-message` bucket, which can take many minutes, runs last, with the
@@ -222,3 +223,22 @@ again, each region needs a new unseal token, and hilt's AppRole is reissued.
 5. Mint each region's unseal token again with `make mint-appliance-credentials` (the
    plan says `Action: mint`), rebuild the node, and continue from step 4 of the
    procedure above.
+
+## Resetting production
+
+Only for a production stage that holds nothing worth keeping: no customer
+tenants, and no data on its appliances that anyone needs. The order is the one
+above, with these differences.
+
+- **The node.** Run `scripts/host/reset-apps.sh --production` on the appliance.
+  infra-nodes' runbook says what that leaves alone on a node that keeps Ingot's
+  catalog log on a dataset of its own and Piri's blobs in object storage.
+- **Central.** `make reset-apps STAGE=prod RESET_ARGS=--production`. The script
+  refuses `prod` without the flag, and passes `allow_production` to the
+  provision Lambda, which refuses `prod` without it too. The prompt asks for
+  `reset-prod` and cannot be skipped: `--yes` is refused with `--production`.
+- **The provision Lambda's image** has to be one that knows `allow_production`.
+  An older image refuses the reset at the first step, before anything is
+  changed.
+- **Tests.** Only the smoke test runs against production. Check an upload and a
+  retrieval by hand once the appliance is onboarded again.
