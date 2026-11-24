@@ -168,6 +168,7 @@ retire-region:
 # appliance first; docs/reset-apps.md has the whole order.
 #
 #   make reset-apps STAGE=staging
+#   make reset-apps STAGE=prod RESET_ARGS=--production
 RESET_ARGS ?=
 
 .PHONY: reset-apps

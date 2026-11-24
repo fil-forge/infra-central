@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Wipe the app state central holds for a dev or staging stage, and keep the
 # platform: the RDS instance and its roles, OpenBao, every identity and wallet.
+# The prod stage is refused unless --production is given, for a production
+# stage that holds nothing worth keeping.
 #
 # Run it when a stage has to forget its appliances, for example after a node is
 # rebuilt with new Piris. Reset the node first with infra-nodes'
@@ -45,6 +47,9 @@
 # Options:
 #   --stage    stage to reset, dev or staging             (default: dev)
 #   --yes      skip the interactive prompt
+#   --production
+#              allow --stage prod; the prompt is always shown there, so --yes
+#              is refused with it
 #   --purge-agent-messages-before <UTC time>
 #              only purge the agent-message versions written before this time,
 #              formatted as YYYY-MM-DDTHH:MM:SSZ, and change nothing else
@@ -55,6 +60,7 @@ set -euo pipefail
 
 STAGE="${STAGE:-dev}"
 ASSUME_YES=false
+ALLOW_PRODUCTION=false
 PURGE_BEFORE=""
 
 while [ $# -gt 0 ]; do
@@ -62,7 +68,8 @@ while [ $# -gt 0 ]; do
     --stage)   STAGE="$2"; shift 2 ;;
     --yes|-y)  ASSUME_YES=true; shift ;;
     --purge-agent-messages-before) PURGE_BEFORE="$2"; shift 2 ;;
-    -h|--help) sed -n '2,53p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --production) ALLOW_PRODUCTION=true; shift ;;
+    -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -70,9 +77,22 @@ done
 # The Lambda refuses other stages too. Checking here as well fails before the
 # script scales anything down.
 case "$STAGE" in
-  dev|staging) ;;
-  *) echo "ERROR: refusing to reset stage '$STAGE'; only dev and staging can be reset" >&2; exit 2 ;;
+  dev|staging)
+    [ "$ALLOW_PRODUCTION" != true ] \
+      || { echo "ERROR: --production is for --stage prod, not '$STAGE'" >&2; exit 2; }
+    ;;
+  prod)
+    [ "$ALLOW_PRODUCTION" = true ] \
+      || { echo "ERROR: refusing to reset stage 'prod' without --production" >&2; exit 2; }
+    [ "$ASSUME_YES" != true ] \
+      || { echo "ERROR: --yes is refused with --production; the prompt is always shown for prod" >&2; exit 2; }
+    ;;
+  *) echo "ERROR: refusing to reset stage '$STAGE'; only dev, staging and prod can be reset" >&2; exit 2 ;;
 esac
+
+# What a printed rerun command needs besides the stage.
+PRODUCTION_ARG=""
+[ "$ALLOW_PRODUCTION" != true ] || PRODUCTION_ARG="--production "
 
 # A late cutoff would delete what sprue wrote after it restarted, so the time
 # has to be exact and in the past.
@@ -106,7 +126,8 @@ AGENT_MESSAGE_BUCKET="fc-${STAGE}-agent-message-${ACCOUNT}"
 # command substitution, and the callers read this function through one.
 invoke() {
   local confirm="$1" payload response out
-  payload="$(jq -nc --argjson confirm "$confirm" '{phase:"reset-apps", confirm:$confirm}')"
+  payload="$(jq -nc --argjson confirm "$confirm" --argjson production "$ALLOW_PRODUCTION" \
+    '{phase:"reset-apps", confirm:$confirm, allow_production:$production}')"
 
   out="$(mktemp)" || return 1
   trap 'rm -f "$out"' RETURN
@@ -229,7 +250,7 @@ print_purge_resume() {
   echo "Only the agent-message versions written before ${CUTOFF} remain."
   echo "sprue no longer reads them, so they cost only storage. To delete them, run:"
   echo
-  echo "  make reset-apps STAGE=${STAGE} RESET_ARGS='--purge-agent-messages-before ${CUTOFF}'"
+  echo "  make reset-apps STAGE=${STAGE} RESET_ARGS='${PRODUCTION_ARG}--purge-agent-messages-before ${CUTOFF}'"
   echo
   echo "Do not rerun the whole reset: it drops the databases again."
 }
@@ -285,7 +306,7 @@ trap 'case "$phase" in
   apps)
     echo >&2
     echo "ERROR: the reset stopped partway, and the app services may still be at zero." >&2
-    echo "Rerun make reset-apps STAGE=${STAGE} to finish; make supplies the AWS region." >&2
+    echo "Rerun make reset-apps STAGE=${STAGE}${PRODUCTION_ARG:+ RESET_ARGS=--production} to finish; make supplies the AWS region." >&2
     ;;
   purge) print_purge_resume >&2 ;;
 esac' EXIT

@@ -28,7 +28,7 @@ import (
 // while the services are scaled to zero around this phase. See
 // docs/reset-apps.md.
 func (d *deps) resetAppsPhase(ctx context.Context, req Request) (*Response, error) {
-	if err := checkResettableStage(d.cfg.Stage); err != nil {
+	if err := checkResettableStage(d.cfg.Stage, req.AllowProduction); err != nil {
 		return nil, err
 	}
 	if d.cfg.OpenBaoAddr == "" {
@@ -87,14 +87,23 @@ var appDatabases = []string{
 // resettableStages are the stages whose app state is disposable.
 var resettableStages = []string{"dev", "staging"}
 
-// checkResettableStage refuses every stage but dev and staging. The guard
-// lives in the phase rather than only in the script, because the Lambda can be
-// invoked without the script.
-func checkResettableStage(stage string) error {
-	if !slices.Contains(resettableStages, stage) {
-		return fmt.Errorf("refusing to reset the apps of stage %q; only %v can be reset", stage, resettableStages)
+// productionStage can be reset only by a request that says so.
+const productionStage = "prod"
+
+// checkResettableStage refuses every stage but dev and staging, and prod
+// unless the request allows it. The guard lives in the phase rather than only
+// in the script, because the Lambda can be invoked without the script.
+func checkResettableStage(stage string, allowProduction bool) error {
+	if slices.Contains(resettableStages, stage) {
+		return nil
 	}
-	return nil
+	if stage == productionStage {
+		if allowProduction {
+			return nil
+		}
+		return fmt.Errorf("refusing to reset the apps of stage %q without allow_production", stage)
+	}
+	return fmt.Errorf("refusing to reset the apps of stage %q; only %v and %q can be reset", stage, resettableStages, productionStage)
 }
 
 // ResetAppsPlan is what a confirmed run would wipe.
