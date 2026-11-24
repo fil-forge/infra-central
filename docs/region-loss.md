@@ -180,6 +180,10 @@ the new primaries is part of sc-284.
 everything written in eu-central-1 decrypts there. The keys need no change. Moving Aurora and the
 services back is part of sc-284.
 
+Moving Central to a third region later, such as another US region, needs both keys there: replicas
+of the eu-central-1 keys once those are primaries, or new keys if the us-east-2 primaries are lost
+for good.
+
 ### If the us-east-2 primaries are lost for good
 
 Then the replicas can never be promoted, and neither key rotates again. Once Central is staying in
