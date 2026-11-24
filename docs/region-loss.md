@@ -4,7 +4,7 @@ What becomes of prod's two KMS keys when us-east-2 is lost, how Central uses the
 restored in eu-central-1, what the restore must do about SSM parameters and appliances, and how to
 use the key admin role that guards the keys. The rest of the
 region-loss runbook (restoring Aurora in eu-central-1, rebuilding the services there, moving the
-hostnames) comes with [FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297).
+hostnames) comes with [sc-284](https://app.shortcut.com/filone/story/284).
 
 ## The keys
 
@@ -31,7 +31,7 @@ replica can be promoted and no new linked key can be made. The restore needs nei
 
 The Global Database secondary and the DR copies of the snapshots are already in eu-central-1,
 encrypted under the replica of `alias/fc-prod-aurora`. Restoring from either needs no snapshot copy
-and no re-encryption. FIL-1297 covers the steps.
+and no re-encryption. sc-284 covers the steps.
 
 ### OpenBao
 
@@ -41,7 +41,7 @@ multi-region set can do this, because the ciphertext names the multi-region key 
 seal's `Decrypt` sends no key id of its own (go-kms-wrapping's `awskms` wrapper v2.4.0, which
 OpenBao 2.6.0 uses).
 
-1. Restore Aurora in eu-central-1 (FIL-1297). OpenBao's storage comes with it.
+1. Restore Aurora in eu-central-1 (sc-284). OpenBao's storage comes with it.
 2. Apply `terraform/envs/prod/platform` with `region` set to eu-central-1. It looks up
    `alias/fc-prod-openbao-seal` in its own region, finds the replica and points the seal at it, with
    no change to the OpenBao configuration.
@@ -56,7 +56,7 @@ aws kms describe-key --region eu-central-1 --key-id alias/fc-prod-openbao-seal \
 
 Expect `Enabled` and `REPLICA`, and the same for `alias/fc-prod-aurora`.
 
-This has not been rehearsed yet. It needs Aurora data in the DR region, so it is part of FIL-1297's
+This has not been rehearsed yet. It needs Aurora data in the DR region, so it is part of the sc-284
 rehearsal.
 
 ### Rotation while us-east-2 is down
@@ -171,18 +171,18 @@ aws kms update-primary-region --profile prod-kms-key-admin --region us-east-2 \
 Rotation then runs from eu-central-1. Confirm it is on with `aws kms get-key-rotation-status
 --region eu-central-1 --key-id <mrk-… key id>`. The us-east-2 keys become replicas, so
 `terraform/envs/bootstrap/prod/us-east-2` no longer matches AWS; reworking the bootstrap roots for
-the new primaries is part of FIL-1297.
+the new primaries is part of sc-284.
 
 **Move Central back to us-east-2.** The primaries hold the same key material as the replicas, so
 everything written in eu-central-1 decrypts there. The keys need no change. Moving Aurora and the
-services back is part of FIL-1297.
+services back is part of sc-284.
 
 ### If the us-east-2 primaries are lost for good
 
 Then the replicas can never be promoted, and neither key rotates again. Once Central is staying in
 eu-central-1, migrate OpenBao's seal to a new key created there with OpenBao's seal migration (the
 new seal configured beside the old one marked `disabled`, then `bao operator unseal -migrate`). The
-Aurora key has the same limit; moving Aurora to a new key is part of FIL-1297.
+Aurora key has the same limit; moving Aurora to a new key is part of sc-284.
 
 ## The guard
 
