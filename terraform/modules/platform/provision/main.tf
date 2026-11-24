@@ -71,10 +71,6 @@ resource "aws_lambda_function" "this" {
       FORGE_DELEGATOR_STORE  = var.delegator_store
       FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
 
-      # Read only by the copy-delegator-records phase, which Terraform never
-      # invokes, together with FORGE_ALLOW_LIST_TABLE.
-      FORGE_PROVIDER_INFO_TABLE = var.provider_info_table_name
-
       # Used only by the appliance-backup-key phase, which Terraform never
       # invokes. Empty in a stage that takes no backups: Lambda rejects a null
       # value, and the phase reads the empty bucket as "not applicable".

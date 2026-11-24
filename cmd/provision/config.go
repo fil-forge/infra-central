@@ -66,10 +66,6 @@ type config struct {
 	// every other phase runs without it.
 	AllowListTable string
 
-	// ProviderInfoTable is the delegator's other DynamoDB table. Only the
-	// copy-delegator-records phase reads it.
-	ProviderInfoTable string
-
 	// BackupBucket is the stage's appliance backup bucket, and BackupUserPrefix
 	// the name every region's writer user starts with. Both are empty in a stage
 	// that takes no appliance backups, and the appliance-backup-key phase then
@@ -90,7 +86,6 @@ func loadConfig() (config, error) {
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
 		DelegatorStore:      envOr("FORGE_DELEGATOR_STORE", delegatorStoreDynamoDB),
 		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
-		ProviderInfoTable:   os.Getenv("FORGE_PROVIDER_INFO_TABLE"),
 		BackupReplicaRegion: os.Getenv("FORGE_BACKUP_REPLICA_REGION"),
 		BackupBucket:        os.Getenv("FORGE_BACKUP_BUCKET"),
 		BackupUserPrefix:    os.Getenv("FORGE_BACKUP_USER_PREFIX"),

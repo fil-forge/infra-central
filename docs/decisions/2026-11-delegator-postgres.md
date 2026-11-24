@@ -55,34 +55,20 @@ bumps its `seed_trigger`, and needs two images pinned for that stage:
 Each stage applies its platform root before its apps root. The seed run creates the database and its
 DSN in the platform apply, and the delegator's new task starts on it in the apps apply that follows.
 
-## The provision Lambda copies the existing records
+## The provision Lambda copied the existing records
 
-A stage switched to Postgres keeps every allow-list row and provider registration it had. The
-provision Lambda's `copy-delegator-records` phase scans both DynamoDB tables and inserts their items
-into the delegator's tables, connected as the delegator's role. Without the copy, each region would
-have to be onboarded again, and each Piri would stay unregistered until its next `piri init`
-registered it again.
+Each stage kept every allow-list row and provider registration it had when it switched. The
+provision Lambda's `copy-delegator-records` phase scanned both DynamoDB tables and inserted their
+items into the delegator's tables, connected as the delegator's role. Without the copy, each region
+would have had to be onboarded again, and each Piri would have stayed unregistered until its next
+`piri init` registered it again.
 
-The copy runs after the switch, because the delegator's migrations create the tables when its task
-first starts on Postgres. Until it runs, the allow list is empty, which matters only to a `piri init`
-in that window: the delegator refuses it, and the node keeps serving from its existing
-configuration. Running it is an operator step right after the switch's deploy:
-
-```bash
-aws lambda invoke --function-name fc-<stage>-provision --cli-binary-format raw-in-base64-out \
-  --payload '{"phase":"copy-delegator-records"}' /dev/stdout
-aws lambda invoke --function-name fc-<stage>-provision --cli-binary-format raw-in-base64-out \
-  --payload '{"phase":"copy-delegator-records","confirm":true}' /dev/stdout
-```
-
-The first call is a dry run that lists, per table, the keys Postgres lacks and the keys it already
-holds. The second inserts the missing rows in one transaction. A row already in Postgres was written
-after the switch, so it is kept, which also makes the phase safe to run again. Every column keeps its
-DynamoDB value, timestamps included. An item missing an attribute the delegator always wrote, or
-holding one of the wrong type, fails the phase and names the item.
-
-The Lambda's grant on the tables is `dynamodb:Scan` alone, so the copy cannot change them. They stay
-as they are until every stage has switched.
+The copy ran after each switch, because the delegator's migrations create the tables when its task
+first starts on Postgres. A dry run listed, per table, the keys Postgres lacked and the keys it
+already held; a confirmed run inserted the missing rows in one transaction and kept rows already in
+Postgres, which had been written after the switch. Every column kept its DynamoDB value, timestamps
+included. Once every stage had copied its records, the phase and its read-only grant on the tables
+were removed.
 
 ## The tables go in two applies
 
