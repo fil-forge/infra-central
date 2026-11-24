@@ -90,8 +90,11 @@ resource "aws_iam_service_linked_role" "s2svpn" {
 # from their own AdministratorAccess SSO session, so it needs Identity Center
 # up. Identity Center names a session after the user, so aws:userid ends in
 # their username, and each must name their session after themselves so the
-# role's CloudTrail events name them too. The guard stops CI and mistakes, not
-# an admin set on it: AdministratorAccess can rewrite this trust policy.
+# role's CloudTrail events name them too.
+#
+# The guard stops mistakes and this repository's CI calling the guarded actions
+# directly. Any principal with AdministratorAccess in this account, a person or
+# a pipeline, can rewrite this trust policy and so get past it.
 #
 # AdministratorAccess, because an operator applies the whole regional root as
 # this role whenever a key's policy or replica changes.

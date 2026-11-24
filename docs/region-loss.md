@@ -271,7 +271,28 @@ what you changed.
 Leave `bypass_policy_lockout_safety_check` false. With it false, KMS refuses a policy that would
 stop its caller from editing it again.
 
-If the role cannot be assumed or its ARN in the policy is wrong, recreating the role under the same
-name restores it, because the policy matches the role by ARN rather than by its internal id. The
-root user is also exempt from the guard, but whether prod's root user can sign in and who holds its
-credentials is not settled yet.
+The key policy matches the role by ARN in an `aws:PrincipalArn` condition rather than by its
+internal id, so a role created again under the same ARN passes the guard. If the role was deleted
+or its trust policy broke, recreate it from an `AdministratorAccess` SSO session:
+
+- With us-east-2 up, apply `terraform/envs/bootstrap/prod/account`.
+- With us-east-2 down, that root's state is out of reach too. Create the role with
+  `aws iam create-role` and `aws iam attach-role-policy`: the name comes from
+  `prod_kms_key_admin_role_name` in the constants module, the trust policy from
+  `data.aws_iam_policy_document.kms_key_admin_assume` and the permissions from
+  `aws_iam_role_policy_attachment.kms_key_admin`, all in the account root. Once us-east-2 is back,
+  import the role into that root and apply.
+
+If a key's policy names a wrong ARN, recreating the role under its correct name does not help.
+Create a role at the ARN the policy names, assume it, correct the policy, then delete that role.
+This works only when the wrong ARN is a role in this account. Find the ARN the policy names in the
+`GuardKeyLifecycle` statement of `aws kms get-key-policy`.
+
+The account's root user is also exempt. Reaching it is a break-glass procedure with its own
+owners, described in [sc-286](https://app.shortcut.com/filone/story/286).
+
+#### When Identity Center is down
+
+Identity Center runs in us-east-1, so losing us-east-2 leaves it up, and the restore in
+eu-central-1 needs no guarded action. For an outage of Identity Center itself, see
+[sc-286](https://app.shortcut.com/filone/story/286).
