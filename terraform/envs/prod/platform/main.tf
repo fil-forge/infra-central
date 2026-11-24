@@ -158,7 +158,7 @@ module "platform" {
   }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
-  # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
+  # about 150 of them with OpenBao's 24 per task, 72 across its three, included.
   openbao_max_parallel = 24
 
   # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
@@ -176,12 +176,16 @@ module "platform" {
   backup_replica_region = module.constants.dr_region
 
   # Bumped to create the delegator's database and its password, which the app
-  # reset needs to find. The delegator still reads DynamoDB. The seed phase
-  # re-runs only when its input changes.
+  # reset needs to find. The seed phase re-runs only when its input changes.
   seed_trigger = "3"
 
   # Bumped to make OpenBao audit the X-Correlation-Id header. The vault phase
   # re-runs only when its input changes, so the bump has to land with the
   # provision build that registers the header.
   vault_trigger = "2"
+
+  # The delegator reads its own database. The seed run bumped above creates
+  # it, and the delegator migrates it when its task starts. The records in
+  # DynamoDB are not copied; see docs/decisions/2026-11-delegator-postgres.md.
+  delegator_store = "postgres"
 }
