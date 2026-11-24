@@ -69,28 +69,6 @@ variable "bucket_arns" {
   type = list(string)
 }
 
-variable "allow_list_table_name" {
-  type = string
-}
-
-variable "provider_info_table_name" {
-  type = string
-}
-
-variable "delegator_store" {
-  description = "Where the delegator keeps its allow list and provider registrations, \"dynamodb\" or \"postgres\". Set by the platform root's delegator_store."
-  type        = string
-
-  validation {
-    condition     = contains(["dynamodb", "postgres"], var.delegator_store)
-    error_message = "delegator_store must be \"dynamodb\" or \"postgres\"."
-  }
-}
-
-variable "dynamodb_table_arns" {
-  type = list(string)
-}
-
 variable "openbao_internal_address" {
   type = string
 }

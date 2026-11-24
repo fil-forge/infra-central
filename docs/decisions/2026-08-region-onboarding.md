@@ -327,7 +327,8 @@ The allow list is written directly to DynamoDB rather than through the delegator
 `registrar store allow-did` command. The command needs a shell in the delegator's task, and it runs
 as a Fargate task in a private subnet with ECS Exec off. The table takes a single `did` hash key, so
 the item is unambiguous, and it carries the same `added_by`, `added_at` and `notes` fields the
-delegator's own writer adds.
+delegator's own writer adds. The delegator has since moved to Postgres, and the row goes into its
+`allow_list` table: see [2026-11-delegator-postgres.md](2026-11-delegator-postgres.md).
 
 ## Weights are rewritten on every run
 

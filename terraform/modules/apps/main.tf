@@ -10,7 +10,6 @@
 #   hilt, swarf    default to binding 127.0.0.1, so they need an explicit host
 #   hilt, swarf    accept the identity key only as a file path
 #   delegator      needs its UCAN proofs as files; the inline form panics
-#   delegator      uses DynamoDB or its own Postgres database, per stage
 #   plc            answers on a public hostname so appliance Ingots reach it,
 #                  while the services in the VPC keep calling it over private DNS
 #   health paths   /health, /healthcheck and /_health all appear below
@@ -342,9 +341,12 @@ module "delegator" {
 
   log_forwarding = var.log_forwarding
 
-  environment = merge({
+  environment = {
     REGISTRAR_SERVER_HOST = "0.0.0.0"
     REGISTRAR_SERVER_PORT = "8080"
+
+    # The delegator's own database, whose DSN arrives as a secret below.
+    REGISTRAR_STORE_TYPE = "postgres"
 
     REGISTRAR_DELEGATOR_DID = local.did.delegator
 
@@ -364,27 +366,15 @@ module "delegator" {
     REGISTRAR_CONTRACT_SERVICE_CONTRACT_ADDRESS  = var.chain.contracts.fwss
     REGISTRAR_CONTRACT_REGISTRY_CONTRACT_ADDRESS = var.chain.contracts.service_provider_registry
     REGISTRAR_CONTRACT_TRANSACTOR_CHAIN_ID       = tostring(var.chain.chain_id)
-    },
-    # DynamoDB, reached through the task role, until the stage switches to
-    # the delegator's own database, whose DSN arrives as a secret below. The
-    # delegator defaults to DynamoDB, so the type is set only for Postgres and
-    # a DynamoDB stage's task definition stays as it was.
-    var.delegator_store == "dynamodb" ? {
-      REGISTRAR_STORE_REGION                  = local.region
-      REGISTRAR_STORE_ALLOWLIST_TABLE_NAME    = var.allow_list_table_name
-      REGISTRAR_STORE_PROVIDERINFO_TABLE_NAME = var.provider_info_table_name
-      } : {
-      REGISTRAR_STORE_TYPE = "postgres"
-  })
+  }
 
-  secrets = merge({
+  secrets = {
+    REGISTRAR_STORE_POSTGRES_DSN      = "${local.ssm}/delegator/postgres-dsn"
     REGISTRAR_DELEGATOR_KEY           = local.key["delegator/identity-multibase"]
     REGISTRAR_CONTRACT_TRANSACTOR_KEY = local.key["delegator/transactor-key"]
     DELEGATOR_INDEXING_PROOF          = "${local.ssm}/delegator/indexing-service-proof"
     DELEGATOR_EGRESS_PROOF            = "${local.ssm}/delegator/egress-tracking-proof"
-    }, var.delegator_store == "postgres" ? {
-    REGISTRAR_STORE_POSTGRES_DSN = "${local.ssm}/delegator/postgres-dsn"
-  } : {})
+  }
 
   # Both proofs are bare DAG-CBOR, so they are stored base64-encoded: their raw
   # bytes contain NULs, which an environment variable cannot carry.
@@ -405,35 +395,8 @@ module "delegator" {
   alb_dns_name      = var.alb_dns_name
   alb_zone_id       = var.alb_zone_id
 
-  # On Postgres the delegator needs no AWS permissions at all.
-  task_policies = var.delegator_store == "dynamodb" ? {
-    "service-permissions" = data.aws_iam_policy_document.delegator.json
-  } : {}
-
   cpu    = var.sizes.delegator.cpu
   memory = var.sizes.delegator.memory
-}
-
-data "aws_iam_policy_document" "delegator" {
-  statement {
-    sid = "RegistryTables"
-
-    actions = [
-      # The store describes both tables at startup and refuses to run if it
-      # cannot: with no endpoint override it takes a missing table as a sign
-      # it is pointed at the wrong account, rather than creating one.
-      "dynamodb:DescribeTable",
-
-      "dynamodb:GetItem",
-      "dynamodb:PutItem",
-      "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem",
-      "dynamodb:Query",
-      "dynamodb:Scan",
-    ]
-
-    resources = var.dynamodb_table_arns
-  }
 }
 
 # --- signing service -----------------------------------------------------

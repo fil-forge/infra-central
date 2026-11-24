@@ -23,10 +23,9 @@ import (
 // recreated databases are empty, and each service migrates its schema when it
 // next starts.
 //
-// The delegator's DynamoDB tables, sprue's buckets and the region's Piri
-// records live outside the VPC. scripts/reset-apps.sh empties those itself,
-// while the services are scaled to zero around this phase. See
-// docs/reset-apps.md.
+// sprue's buckets and the region's Piri records live outside the VPC.
+// scripts/reset-apps.sh empties those itself, while the services are scaled to
+// zero around this phase. See docs/reset-apps.md.
 func (d *deps) resetAppsPhase(ctx context.Context, req Request) (*Response, error) {
 	if err := checkResettableStage(d.cfg.Stage, req.AllowProduction); err != nil {
 		return nil, err

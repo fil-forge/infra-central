@@ -36,24 +36,26 @@ The write ties infra-central to the delegator's schema: the `did`, `added_by` an
 `allow_list`, and `added_at`, which the delegator fills in itself. A change to that table in the
 delegator has to keep them, or land together with a change here.
 
-## Each stage switches on its own
+## Each stage switched on its own
 
-`delegator_store` in each stage's platform root names the backend, `dynamodb` or `postgres`. The
-platform passes it to the provision Lambda, which picks the allow list the onboard phase writes, and
-exports it to the apps root, which sets the delegator's environment and its task role's grants from
-it. One value per stage keeps the two from disagreeing.
+During the move, `delegator_store` in each stage's platform root named the backend, `dynamodb` or
+`postgres`. The platform passed it to the provision Lambda, which picked the allow list the onboard
+phase writes, and exported it to the apps root, which set the delegator's environment and its task
+role's grants from it. One value per stage kept the two from disagreeing. Once every stage ran on
+Postgres, the switch was removed and the delegator always uses its database.
 
 Every merge to `main` applies all three stages, so a module-wide switch would move prod in the same
-apply as dev. The stages switch in order, dev, staging, prod. The change that switches a stage also
-bumps its `seed_trigger`, and needs two images pinned for that stage:
+apply as dev. The stages switched in order, dev, staging, prod. The change that switched a stage
+also bumped its `seed_trigger`, and needed two images pinned for that stage:
 
 - a delegator image with the Postgres backend, without which the delegator finds no DynamoDB
   settings and does not start
 - a provision image with the switch, which seeds the database and writes the allow list where
   `delegator_store` says; an older image writes it to DynamoDB without complaint
 
-Each stage applies its platform root before its apps root. The seed run creates the database and its
-DSN in the platform apply, and the delegator's new task starts on it in the apps apply that follows.
+Each stage applies its platform root before its apps root. The seed run created the database and
+its DSN in the platform apply, and the delegator's new task started on it in the apps apply that
+followed.
 
 ## The provision Lambda copied the existing records
 
@@ -72,10 +74,10 @@ were removed.
 
 ## The tables go in two applies
 
-The DynamoDB tables stay, untouched, until every stage runs on Postgres. They are the fallback if
-the switch has to be undone. Staging's and prod's tables
-have deletion protection, so removing them takes two merges: the first takes out every reader,
-writer and grant and turns deletion protection off, the second deletes the tables. DynamoDB keeps a
+The DynamoDB tables stayed, untouched, until every stage ran on Postgres. They were the fallback if
+a switch had to be undone. Staging's and prod's tables have deletion protection, so removing them
+takes two merges: the first takes out every reader, writer and grant and turns deletion protection
+off, the second deletes the tables. DynamoDB keeps a
 system backup of a table deleted with point-in-time recovery on, named
 `<table>$DeletedTableBackup`, for 35 days. Dev's tables have point-in-time recovery off and leave
 none.

@@ -42,37 +42,3 @@ func TestLoadConfigAcceptsABackupReplicaInAnotherRegion(t *testing.T) {
 		t.Errorf("BackupReplicaRegion = %q, want eu-central-1", cfg.BackupReplicaRegion)
 	}
 }
-
-func TestLoadConfigReadsTheDelegatorStore(t *testing.T) {
-	cases := map[string]string{
-		"unset":    "dynamodb",
-		"dynamodb": "dynamodb",
-		"postgres": "postgres",
-	}
-	for value, want := range cases {
-		t.Run("FORGE_DELEGATOR_STORE "+value, func(t *testing.T) {
-			setRequiredEnv(t)
-			if value != "unset" {
-				t.Setenv("FORGE_DELEGATOR_STORE", value)
-			}
-
-			cfg, err := loadConfig()
-			if err != nil {
-				t.Fatalf("loadConfig() error = %v", err)
-			}
-			if cfg.DelegatorStore != want {
-				t.Errorf("DelegatorStore = %q, want %q", cfg.DelegatorStore, want)
-			}
-		})
-	}
-}
-
-func TestLoadConfigRefusesAnUnknownDelegatorStore(t *testing.T) {
-	setRequiredEnv(t)
-	t.Setenv("FORGE_DELEGATOR_STORE", "Postgres")
-
-	_, err := loadConfig()
-	if err == nil || !strings.Contains(err.Error(), `FORGE_DELEGATOR_STORE is "Postgres"`) {
-		t.Errorf("loadConfig() error = %v, want one naming the value", err)
-	}
-}

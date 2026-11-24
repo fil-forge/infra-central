@@ -128,9 +128,4 @@ module "platform" {
   # make OpenBao audit the X-Correlation-Id header.
   seed_trigger  = "8"
   vault_trigger = "8"
-
-  # The delegator reads its own database. The seed run bumped above creates
-  # it, and the delegator migrates it when its task starts. See
-  # docs/decisions/2026-11-delegator-postgres.md.
-  delegator_store = "postgres"
 }

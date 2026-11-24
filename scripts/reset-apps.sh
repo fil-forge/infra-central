@@ -13,7 +13,6 @@
 #   - the sprue, hilt, swarf, plc and delegator databases, dropped and
 #     recreated empty
 #   - hilt's tenant secrets in OpenBao
-#   - the delegator's DynamoDB allow list and provider-info tables, emptied
 #   - sprue's buckets, every object version included
 #   - every Piri DID recorded in SSM, in any region
 #
@@ -24,7 +23,7 @@
 #   1. ask the Lambda what it would wipe, and print it with the AWS stores
 #   2. after you approve it, scale the app services to zero
 #   3. run the reset-apps phase
-#   4. empty the tables, the delegation bucket and the Piri records
+#   4. empty the delegation bucket and the Piri records
 #   5. scale the app services back up and wait until they are stable
 #   6. purge the agent-message bucket
 #
@@ -69,7 +68,7 @@ while [ $# -gt 0 ]; do
     --yes|-y)  ASSUME_YES=true; shift ;;
     --purge-agent-messages-before) PURGE_BEFORE="$2"; shift 2 ;;
     --production) ALLOW_PRODUCTION=true; shift ;;
-    -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -114,7 +113,6 @@ ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 CLUSTER="fc-${STAGE}"
 FUNCTION="fc-${STAGE}-provision"
 SERVICES=(sprue hilt swarf plc delegator)
-TABLES=("fc-${STAGE}-delegator-allow-list" "fc-${STAGE}-delegator-provider-info")
 DELEGATION_BUCKET="fc-${STAGE}-delegation-${ACCOUNT}"
 AGENT_MESSAGE_BUCKET="fc-${STAGE}-agent-message-${ACCOUNT}"
 
@@ -166,31 +164,6 @@ scale() {
 # fixed ten minutes and whose timeout names no service.
 wait_stable() {
   "$ROOT/scripts/wait-services-stable.sh" "$CLUSTER"
-}
-
-# empty_table <table> — delete every item, a page of 25 at a time, which is the
-# most one BatchWriteItem takes. The table itself stays, so this works under
-# deletion protection. Items the batch leaves unprocessed reappear in the next
-# scan. A line after each page shows the running total.
-empty_table() {
-  local table="$1" key page requests deleted=0
-  echo "  emptying ${table}…"
-  key="$(aws dynamodb describe-table --table-name "$table" \
-    --query "Table.KeySchema[?KeyType=='HASH'].AttributeName | [0]" --output text)"
-
-  while :; do
-    page="$(aws dynamodb scan --table-name "$table" \
-      --projection-expression '#k' --expression-attribute-names "{\"#k\":\"$key\"}" \
-      --consistent-read --max-items 25 --output json)"
-    [ "$(jq '.Items | length' <<<"$page")" -gt 0 ] || break
-
-    requests="$(jq -c --arg table "$table" \
-      '{($table): [.Items[] | {DeleteRequest: {Key: .}}]}' <<<"$page")"
-    aws dynamodb batch-write-item --request-items "$requests" >/dev/null
-    deleted=$((deleted + $(jq '.Items | length' <<<"$page")))
-    echo "    deleted $deleted item(s) so far"
-  done
-  echo "  ✓ emptied $table ($deleted item(s))"
 }
 
 # purge_bucket <bucket> <cutoff> — delete every object version and delete
@@ -345,7 +318,6 @@ jq -r '
   "  databases to drop and recreate: \(if ($p.databases | length) == 0 then "none" else ($p.databases | join(", ")) end)",
   "  hilt secrets to destroy:        \($p.hilt_secrets)"
 ' <<<"$plan"
-echo "  tables to empty:                ${TABLES[*]}"
 echo "  buckets to purge:               $DELEGATION_BUCKET"
 echo "                                  $AGENT_MESSAGE_BUCKET (last, with the stage up)"
 piri_records="$(list_piri_records)"
@@ -385,7 +357,6 @@ jq -r '
 ' <<<"$result"
 
 echo "[4/6] Emptying the stores outside the VPC…"
-for table in "${TABLES[@]}"; do empty_table "$table"; done
 purge_bucket "$DELEGATION_BUCKET" "$CUTOFF"
 delete_piri_records
 

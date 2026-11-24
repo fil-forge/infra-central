@@ -51,10 +51,6 @@ var multibaseServices = map[string]bool{
 // database of the same name on the shared instance. openbao is here because it
 // stores its data in Postgres rather than on a volume, which is what lets it
 // survive task replacement.
-//
-// The delegator's database exists before the delegator uses it: a stage reads
-// its allow list and provider info from DynamoDB until its delegator_store
-// switches to postgres. See docs/decisions/2026-11-delegator-postgres.md.
 var databaseConsumers = []string{
 	"sprue",
 	"hilt",
