@@ -156,7 +156,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
-docs/region-loss.md           the prod KMS keys' DR replicas, their guard and the key admin role
+docs/region-loss.md           restoring prod in eu-central-1: KMS replicas, SSM, appliances, key admin role
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration

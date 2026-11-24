@@ -1,7 +1,8 @@
-# Region loss: the prod KMS keys
+# Region loss: restoring Central in eu-central-1
 
 What becomes of prod's two KMS keys when us-east-2 is lost, how Central uses them when it is
-restored in eu-central-1, and how to use the key admin role that guards them. The rest of the
+restored in eu-central-1, what the restore must do about SSM parameters and appliances, and how to
+use the key admin role that guards the keys. The rest of the
 region-loss runbook (restoring Aurora in eu-central-1, rebuilding the services there, moving the
 hostnames) comes with [FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297).
 
@@ -64,6 +65,95 @@ Automatic rotation of a multi-region key runs on the primary, which then shares 
 with its replicas. AWS: "A replica key relies on its primary key only for key rotation and updating
 the primary Region." While the us-east-2 primaries are unreachable, neither key rotates. Encryption
 and decryption are unaffected.
+
+## SSM parameters and appliances
+
+Central's SSM parameters under `/forge-central/prod/` are not replicated, so they are lost with
+us-east-2. The provision Lambda is their only writer; OpenTofu creates none. Once Aurora and OpenBao
+are restored, one seed and vault run rebuilds most of them, and the rest need an operator. None of
+this has been rehearsed yet; it is part of the sc-284 rehearsal.
+
+The appliances depend on OpenBao's storage coming back with Aurora. Each region's transit key
+`appliance-unseal-<region>`, its token role and the unseal tokens live there, and the key also wraps
+each node's backup snapshots. Without that storage, no appliance can unseal after its next restart.
+
+### What seed and vault rebuild
+
+Run seed and vault as [restore-database.md](restore-database.md#8-re-run-seed-and-vault) describes.
+The run writes:
+
+- each service's `identity.did` and each wallet's `.address`, derived from the keys in Secrets
+  Manager, which have replicas in eu-central-1;
+- each service's `postgres-password`, as a new random value that the restored database accepts,
+  because seed sets every role's password on each run;
+- each `postgres-dsn` and `plc/db-creds-json`, from the new host and password;
+- `hilt/vault-role-id` and `hilt/vault-secret-id`, read from the restored OpenBao or issued again;
+- the delegator's and hilt's startup UCAN proofs, issued again under the same keys, with different
+  bytes and CID.
+
+The pandora DSNs are rewritten too, but the appliances get them by hand. Fetch and install each one
+again as [pandora-vpn.md](pandora-vpn.md#getting-the-database-credentials-onto-the-appliance)
+describes.
+
+### hilt's partner key
+
+`hilt/partner-key` is a random bearer token, so seed mints a new one, and every caller of hilt's
+management API needs the new value. No FilOne stage holds prod's key as of 2026-11-24: FilOne
+production links no Forge token, and its staging and ephemeral stages call staging's Central.
+
+### Unseal-token accessors
+
+`appliance/<region>/unseal-token.accessor` is Central's only record of which unseal token a region's
+node holds. Until it is written again, the mint plans a second token for a node that already has
+one, `make onboard-appliance` refuses the region as never provisioned, and retiring the region
+cannot revoke the node's token.
+
+A node's token expires 72 hours after its last renewal. Which repair applies depends on how long the
+outage lasted:
+
+- **Under 72 hours.** The token is still live, and the node resumes renewing it on its own. With
+  OpenBao's root token, find the accessor of the token created through the role
+  `appliance-unseal-<region>`, and write it back:
+
+  ```bash
+  for accessor in $(bao list -format=json auth/token/accessors | jq -r '.[]'); do
+    bao token lookup -format=json -accessor "$accessor" \
+      | jq -r --arg a "$accessor" 'select(.data.role == "appliance-unseal-<region>") | $a'
+  done
+  ```
+
+  ```bash
+  aws ssm put-parameter --region eu-central-1 --type String \
+    --name /forge-central/prod/appliance/<region>/unseal-token.accessor --value <accessor>
+  ```
+
+  The appliance-token dry run in
+  [restore-database.md](restore-database.md#6-check-every-regions-key-and-token-before-any-vault-phase)
+  then reports `token_live: true` and the action `skip`.
+
+- **Over 72 hours.** The token has expired. The node keeps running, because it holds its key in
+  memory, and fails to unseal at its next restart. Before anything restarts it, mint a new token as
+  [appliance-onboarding.md](appliance-onboarding.md#minting-again) describes. The mint records the
+  new accessor.
+
+### Piri records
+
+`appliance/<region>/piri/<host>` lists a region's Piri DIDs, one String parameter per DID, named by
+the host in the Piri's did:web, with the full DID as its value. It is Central's only record of which
+Piri belong to a region, and onboarding sends it to hilt as the region's node set. Setting nodes in
+hilt replaces them, so an onboard run against a partial record may drop the missing Piri from
+routing. Write back the full set before any onboard run for the region:
+
+```bash
+aws ssm put-parameter --region eu-central-1 --type String \
+  --name /forge-central/prod/appliance/<region>/piri/<host> --value did:web:<host>
+```
+
+Take the DIDs from the appliances, and check them against sprue's provider rows and hilt's routing
+policy.
+
+`appliance/<region>/hilt-ingot-s3-proof` and its `.issuer` need nothing. The next onboard run issues
+them again, and the copy on the appliance stays valid because hilt's key and hostname are unchanged.
 
 ## When us-east-2 comes back
 
