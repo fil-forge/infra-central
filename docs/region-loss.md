@@ -8,10 +8,10 @@ hostnames) comes with [sc-284](https://app.shortcut.com/filone/story/284).
 
 ## The keys
 
-| Alias                        | Encrypts                                                  |
-| ---------------------------- | --------------------------------------------------------- |
-| `alias/fc-prod-aurora`       | the Aurora cluster, its snapshots and their DR copies     |
-| `alias/fc-prod-openbao-seal` | OpenBao's seal, and so all of OpenBao's storage in Aurora |
+| Alias                        | Encrypts                                                         |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `alias/fc-prod-aurora`       | the Aurora cluster, its snapshots and, once built, its DR copies |
+| `alias/fc-prod-openbao-seal` | OpenBao's seal, and so all of OpenBao's storage in Aurora        |
 
 Both are multi-region keys created in `terraform/envs/bootstrap/prod/us-east-2`. Each has a
 replica in the DR region (`dr_region` in the constants module, eu-central-1) under the same alias.
@@ -29,9 +29,10 @@ replica can be promoted and no new linked key can be made. The restore needs nei
 
 ### Aurora
 
-The Global Database secondary and the DR copies of the snapshots are already in eu-central-1,
-encrypted under the replica of `alias/fc-prod-aurora`. Restoring from either needs no snapshot copy
-and no re-encryption. sc-284 covers the steps.
+Prod's Aurora data has no copy in eu-central-1 yet, so this restore is not possible today. sc-284
+adds a Global Database secondary there, and the DR copies of the snapshots are not built yet. Both
+will be encrypted under the replica of `alias/fc-prod-aurora`, so restoring from either will need no
+snapshot copy and no re-encryption. sc-284 covers the steps.
 
 ### OpenBao
 
