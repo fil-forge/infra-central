@@ -87,8 +87,8 @@ resource "aws_iam_role" "task" {
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
-# Only sprue (S3) and the delegator (DynamoDB) need anything here. The other
-# four get a role with no permissions at all, which is deliberate.
+# Only sprue (S3) needs anything here among the apps. The other five get a role
+# with no permissions at all, which is deliberate.
 #
 # for_each over the map, rather than count over a nullable string: the keys are
 # known while planning even when a policy body is not, so a service still gets

@@ -30,12 +30,9 @@ services back up.
 
 - The `sprue`, `hilt`, `swarf`, `plc` and `delegator` databases: providers,
   tenants, buckets, access keys, delegations, revocations, the tenants' did:plc
-  documents and, on a stage whose delegator runs on Postgres, its allow list and
-  provider registrations.
+  documents, and the delegator's allow list and provider registrations.
 - hilt's tenant secrets in OpenBao, under `tenant/` in the `forge-central/hilt`
   mount.
-- Every item in the delegator's DynamoDB allow list and provider-info tables.
-  The tables stay, so staging's deletion protection does not get in the way.
 - Every object version in sprue's `agent-message` and `delegation` buckets
   written before the services were scaled to zero. This is not reversible,
   versioning included.
@@ -85,8 +82,8 @@ make reset-apps STAGE=dev
 
 The script prints what the Lambda would wipe and asks for `reset-dev` before it
 changes anything. It then scales sprue, hilt, swarf, plc and the delegator to
-zero, runs the `reset-apps` phase, empties the tables, the `delegation` bucket
-and the Piri records, and scales the services back up. signing-service and
+zero, runs the `reset-apps` phase, empties the `delegation` bucket and the
+Piri records, and scales the services back up. signing-service and
 OpenBao keep running.
 
 Last, with the stage up, it purges the `agent-message` bucket. On staging that

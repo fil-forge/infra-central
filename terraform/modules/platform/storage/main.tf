@@ -114,13 +114,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
   }
 }
 
-# The delegator's two tables. It uses no Postgres at all, and creates neither
-# table itself, so both have to exist before it starts.
+# The delegator's two former tables. Every stage's delegator reads its own
+# Postgres database instead, and nothing reads or writes these. Deletion
+# protection is off so that the next change can delete them; point-in-time
+# recovery stays on, so the delete leaves a system backup for 35 days. See
+# docs/decisions/2026-11-delegator-postgres.md.
 resource "aws_dynamodb_table" "allow_list" {
   name                        = "${local.name}-delegator-allow-list"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "did"
-  deletion_protection_enabled = var.deletion_protection
+  deletion_protection_enabled = false
 
   attribute {
     name = "did"
@@ -139,7 +142,7 @@ resource "aws_dynamodb_table" "provider_info" {
   name                        = "${local.name}-delegator-provider-info"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "provider"
-  deletion_protection_enabled = var.deletion_protection
+  deletion_protection_enabled = false
 
   attribute {
     name = "provider"

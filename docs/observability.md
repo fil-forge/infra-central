@@ -486,12 +486,6 @@ aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 The warning rule reads that minimum, and the critical rule reads `aws_vpn_tunnel_state_maximum`,
 which is 0 only when no tunnel was up during the minute.
 
-Reads against the delegator's tables, on a stage whose delegator still uses DynamoDB, likewise:
-
-```promql
-aws_dynamodb_consumed_read_capacity_units_sum{dimension_TableName=~"fc-dev-delegator-.*"}
-```
-
 Metric names can be browsed in Explore with the metrics browser, or with a regex against the name
 list, `aws_ecs_.*` for example.
 

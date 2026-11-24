@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strings"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/fil-forge/ucantone/did"
 	"github.com/fil-forge/ucantone/multikey"
 	"github.com/fil-forge/ucantone/ucan"
@@ -42,11 +40,6 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load AWS config: %w", err)
-	}
-
 	piriProof, err := decodePiriProof(req)
 	if err != nil {
 		return nil, err
@@ -71,7 +64,7 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	allowList, closeAllowList, err := d.delegatorAllowList(ctx, dynamodb.NewFromConfig(awsCfg))
+	allowList, closeAllowList, err := d.delegatorAllowList(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -201,17 +194,9 @@ func (d *deps) ingotDID(region string) (string, error) {
 	return fmt.Sprintf("did:web:s3.%s.%s", region, d.cfg.IngotHostnameSuffix), nil
 }
 
-// delegatorAllowList returns the allow list in the store the stage's delegator
-// reads, with a function that releases its connection.
-func (d *deps) delegatorAllowList(ctx context.Context, dynamo *dynamodb.Client) (onboard.AllowList, func(), error) {
-	if d.cfg.DelegatorStore == delegatorStoreDynamoDB {
-		table := d.cfg.AllowListTable
-		if table == "" {
-			return nil, nil, fmt.Errorf("FORGE_ALLOW_LIST_TABLE is required for the onboard phase while FORGE_DELEGATOR_STORE is %s", delegatorStoreDynamoDB)
-		}
-		return onboard.NewDynamoAllowList(dynamo, table, d.cfg.Stage), func() {}, nil
-	}
-
+// delegatorAllowList returns the allow list in the delegator's database, with
+// a function that closes its connection.
+func (d *deps) delegatorAllowList(ctx context.Context) (onboard.AllowList, func(), error) {
 	conn, err := d.connectToDelegatorDatabase(ctx)
 	if err != nil {
 		return nil, nil, err

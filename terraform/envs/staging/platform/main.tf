@@ -136,9 +136,4 @@ module "platform" {
   # X-Correlation-Id header. The vault phase re-runs only when its input
   # changes, so each bump has to land with the provision build it needs.
   vault_trigger = "3"
-
-  # The delegator reads its own database. The seed run bumped above creates
-  # it, and the delegator migrates it when its task starts. See
-  # docs/decisions/2026-11-delegator-postgres.md.
-  delegator_store = "postgres"
 }
