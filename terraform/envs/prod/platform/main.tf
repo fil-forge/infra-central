@@ -185,7 +185,8 @@ module "platform" {
   vault_trigger = "2"
 
   # The delegator reads its own database. The seed run bumped above creates
-  # it, and the delegator migrates it when its task starts. The records in
-  # DynamoDB are not copied; see docs/decisions/2026-11-delegator-postgres.md.
+  # it, and the delegator migrates it when its task starts. The provision
+  # Lambda's copy-delegator-records phase then copies the records from
+  # DynamoDB; see docs/decisions/2026-11-delegator-postgres.md.
   delegator_store = "postgres"
 }
