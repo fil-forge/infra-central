@@ -1,9 +1,9 @@
 # Region loss: the prod KMS keys
 
-What becomes of prod's two KMS keys when us-east-2 is lost, how a rebuild uses them, and how to use
-the key admin role that guards them. The rest of the region-loss runbook (restoring Aurora,
-rebuilding the services, moving the hostnames) comes with
-[FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297).
+What becomes of prod's two KMS keys when us-east-2 is lost, how Central uses them when it is
+restored in eu-central-1, and how to use the key admin role that guards them. The rest of the
+region-loss runbook (restoring Aurora in eu-central-1, rebuilding the services there, moving the
+hostnames) comes with [FIL-1297](https://linear.app/filecoin-foundation/issue/FIL-1297).
 
 ## The keys
 
@@ -15,26 +15,22 @@ rebuilding the services, moving the hostnames) comes with
 Both are multi-region keys created in `terraform/envs/bootstrap/prod/us-east-2`. Each has a
 replica in the DR region (`dr_region` in the constants module, eu-central-1) under the same alias.
 A replica shares its primary's key material and works without it, so the replicas are the copies
-that survive losing us-east-2. Central is not run in the DR region; the replicas exist so that a
-rebuild can read what the keys encrypted.
+that survive losing us-east-2. When us-east-2 is lost, Central is restored in eu-central-1 and runs
+on the replicas.
 
-## Rebuilding after losing us-east-2
-
-Central is rebuilt in us-east-2 once it is back, or in another region. Either way, Aurora and
-OpenBao are restored with the eu-central-1 replicas while us-east-2 is still down. No replica is
-made ahead of time in a region Central might move to.
+## Restoring Central in eu-central-1
 
 A replica encrypts and decrypts on its own: it holds the same key material and the same `mrk-…` key
 id as its primary, so whatever the primary encrypted, the replica decrypts, with no call to
 us-east-2. What does need the primary's region is managing the set of keys. Only a primary can be
 replicated, and `UpdatePrimaryRegion` needs the current primary, so while us-east-2 is down no
-replica can be promoted and no new linked key can be made. The rebuild needs neither.
+replica can be promoted and no new linked key can be made. The restore needs neither.
 
 ### Aurora
 
-Data restored from the DR region into the rebuild region is re-encrypted on the way: a snapshot
-copied across regions takes a key in the target region (`--kms-key-id`). In us-east-2 that is
-`alias/fc-prod-aurora`; elsewhere, any new key.
+The Global Database secondary and the DR copies of the snapshots are already in eu-central-1,
+encrypted under the replica of `alias/fc-prod-aurora`. Restoring from either needs no snapshot copy
+and no re-encryption. FIL-1297 covers the steps.
 
 ### OpenBao
 
@@ -44,27 +40,11 @@ multi-region set can do this, because the ciphertext names the multi-region key 
 seal's `Decrypt` sends no key id of its own (go-kms-wrapping's `awskms` wrapper v2.4.0, which
 OpenBao 2.6.0 uses).
 
-If us-east-2 is back with its primary intact, the platform root finds the key by alias as usual and
-nothing changes. Otherwise:
-
-1. Restore Aurora into the rebuild region (FIL-1297). OpenBao's storage comes with it.
-2. Point OpenBao's seal at the eu-central-1 replica, calling KMS there from the rebuild region:
-
-   ```hcl
-   seal "awskms" {
-     region     = "eu-central-1"
-     kms_key_id = "<ARN of the replica of alias/fc-prod-openbao-seal>"
-   }
-   ```
-
-   The task role needs `kms:Encrypt`, `kms:Decrypt` and `kms:DescribeKey` on the replica's ARN.
-   The platform module sets the seal's region to the stage's and finds the key by alias in that
-   region, so this needs the change FIL-1297 makes.
-
-3. OpenBao starts, decrypts its root key through eu-central-1 and unseals with no operator step.
-4. Optionally, move off eu-central-1: migrate the seal to a new key in the rebuild region with
-   OpenBao's seal migration (the new seal configured beside the old one marked `disabled`, then
-   `bao operator unseal -migrate`). Until then, the rebuilt Central depends on KMS in eu-central-1.
+1. Restore Aurora in eu-central-1 (FIL-1297). OpenBao's storage comes with it.
+2. Apply `terraform/envs/prod/platform` with `region` set to eu-central-1. It looks up
+   `alias/fc-prod-openbao-seal` in its own region, finds the replica and points the seal at it, with
+   no change to the OpenBao configuration.
+3. OpenBao starts, decrypts its root key through the replica and unseals with no operator step.
 
 Before relying on a replica, check that it is enabled:
 
@@ -77,6 +57,42 @@ Expect `Enabled` and `REPLICA`, and the same for `alias/fc-prod-aurora`.
 
 This has not been rehearsed yet. It needs Aurora data in the DR region, so it is part of FIL-1297's
 rehearsal.
+
+### Rotation while us-east-2 is down
+
+Automatic rotation of a multi-region key runs on the primary, which then shares the new key material
+with its replicas. AWS: "A replica key relies on its primary key only for key rotation and updating
+the primary Region." While the us-east-2 primaries are unreachable, neither key rotates. Encryption
+and decryption are unaffected.
+
+## When us-east-2 comes back
+
+Once the us-east-2 primaries are reachable again, there are two ways to go on.
+
+**Keep Central in eu-central-1.** Make each eu-central-1 replica the primary of its key. The call
+is guarded, so make it as the key admin role ([by hand](#by-hand)), once per key, in the current
+primary's region and with the key id rather than the alias. Both keys must be `Enabled`.
+
+```bash
+aws kms update-primary-region --profile prod-kms-key-admin --region us-east-2 \
+  --key-id <mrk-… key id> --primary-region eu-central-1
+```
+
+Rotation then runs from eu-central-1. Confirm it is on with `aws kms get-key-rotation-status
+--region eu-central-1 --key-id <mrk-… key id>`. The us-east-2 keys become replicas, so
+`terraform/envs/bootstrap/prod/us-east-2` no longer matches AWS; reworking the bootstrap roots for
+the new primaries is part of FIL-1297.
+
+**Move Central back to us-east-2.** The primaries hold the same key material as the replicas, so
+everything written in eu-central-1 decrypts there. The keys need no change. Moving Aurora and the
+services back is part of FIL-1297.
+
+### If the us-east-2 primaries are lost for good
+
+Then the replicas can never be promoted, and neither key rotates again. Once Central is staying in
+eu-central-1, migrate OpenBao's seal to a new key created there with OpenBao's seal migration (the
+new seal configured beside the old one marked `disabled`, then `bao operator unseal -migrate`). The
+Aurora key has the same limit; moving Aurora to a new key is part of FIL-1297.
 
 ## The guard
 
