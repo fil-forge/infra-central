@@ -86,8 +86,8 @@ module "ecr" {
 # root, taking the final snapshot with it.
 #
 # Multi-region because the flag is fixed when a key is created. Backup copies
-# in the DR region (FIL-1298) and the Global Database secondary (FIL-1297) use
-# its replica there.
+# in the DR region (sc-310) and the Global Database secondary (sc-284) use its
+# replica there.
 resource "aws_kms_key" "aurora" {
   description                        = "Forge prod: the Aurora cluster"
   multi_region                       = true

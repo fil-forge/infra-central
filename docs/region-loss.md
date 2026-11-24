@@ -30,8 +30,9 @@ replica can be promoted and no new linked key can be made. The restore needs nei
 ### Aurora
 
 Prod's Aurora data has no copy in eu-central-1 yet, so this restore is not possible today. sc-284
-adds a Global Database secondary there, and the DR copies of the snapshots are not built yet. Both
-will be encrypted under the replica of `alias/fc-prod-aurora`, so restoring from either will need no
+adds a Global Database secondary there, and
+[sc-310](https://app.shortcut.com/filone/story/310) adds copies of the backups. Both will be
+encrypted under the replica of `alias/fc-prod-aurora`, so restoring from either will need no
 snapshot copy and no re-encryption. sc-284 covers the steps.
 
 ### OpenBao
