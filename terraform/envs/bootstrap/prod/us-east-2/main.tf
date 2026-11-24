@@ -86,8 +86,8 @@ module "ecr" {
 # root, taking the final snapshot with it.
 #
 # Multi-region because the flag is fixed when a key is created. Backup copies
-# in the DR region (FIL-1298) and the Global Database secondary (FIL-1297) use
-# its replica there.
+# in the DR region (sc-310) and the Global Database secondary (sc-284) use its
+# replica there.
 resource "aws_kms_key" "aurora" {
   description                        = "Forge prod: the Aurora cluster"
   multi_region                       = true
@@ -137,9 +137,10 @@ resource "aws_kms_alias" "aurora_dr" {
 # this key.
 #
 # Multi-region because the flag is fixed when a key is created, and changing
-# the key later means migrating a running OpenBao to a new seal. The replica
-# below is the copy that survives losing us-east-2; docs/region-loss.md says
-# how a rebuild uses it.
+# the key later means migrating a running OpenBao to a new seal. After losing
+# us-east-2, the platform root applied in the DR region unseals the Global
+# Database secondary's copy of OpenBao with the replica below; see
+# docs/region-loss.md.
 resource "aws_kms_key" "openbao_seal" {
   description                        = "Forge prod: the OpenBao seal"
   multi_region                       = true

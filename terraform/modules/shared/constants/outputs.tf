@@ -49,7 +49,7 @@ output "prod_stages" {
 }
 
 output "dr_region" {
-  description = "The region that holds a stage's backup replicas, so a lost region can be restored from them. The provision Lambda replicates each key secret here, and the Aurora secondary (FIL-1297) lives here too. Restoring a stage may target a different region, closer to the one it lost."
+  description = "The region that holds a stage's backup replicas, and where a stage is restored after losing its region; see docs/region-loss.md. The provision Lambda replicates each key secret here, and prod's Aurora secondary (sc-284) and backup copies (sc-310) are to live here too."
   value       = "eu-central-1"
 }
 
