@@ -1,4 +1,4 @@
-# Staging platform: VPC, RDS, S3, DynamoDB, ALB, OpenBao and the provision Lambda.
+# Staging platform: VPC, RDS, S3, ALB, OpenBao and the provision Lambda.
 #
 # .github/workflows/check-and-deploy.yml applies this root on every push to main, then
 # applies envs/staging/apps, which reads its state. The two are ordered by a `needs:`
@@ -111,9 +111,8 @@ module "platform" {
   db_multi_az          = false
   pitr_window_days     = 7
 
-  # Staging holds the root of trust for an appliance. Protect its RDS instance,
-  # ALB and DynamoDB tables from deletion, retain a final database snapshot and
-  # enable point-in-time recovery on both tables.
+  # Staging holds the root of trust for an appliance. Protect its RDS instance
+  # and ALB from deletion, and retain a final database snapshot.
   protect_stateful_resources = true
 
   # A db.t4g.small allows roughly 225 connections. OpenBao takes up to 16 per

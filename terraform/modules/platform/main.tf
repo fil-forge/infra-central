@@ -160,11 +160,10 @@ check "pandora_sites_have_a_cluster" {
 module "storage" {
   source = "./storage"
 
-  stage                  = var.stage
-  force_destroy          = !var.protect_stateful_resources
-  point_in_time_recovery = var.protect_stateful_resources
-  versioning             = var.protect_stateful_resources
-  pitr_window_days       = var.pitr_window_days
+  stage            = var.stage
+  force_destroy    = !var.protect_stateful_resources
+  versioning       = var.protect_stateful_resources
+  pitr_window_days = var.pitr_window_days
 }
 
 # The appliances' backup target. Its writer users follow appliance_regions, so
