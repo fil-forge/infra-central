@@ -99,8 +99,10 @@ describes.
 ### hilt's partner key
 
 `hilt/partner-key` is a random bearer token, so seed mints a new one, and every caller of hilt's
-management API needs the new value. No FilOne stage holds prod's key as of 2026-11-24: FilOne
-production links no Forge token, and its staging and ephemeral stages call staging's Central.
+management API needs the new value. The callers are FilOne stages. Each holds one SST secret per
+Forge network it calls. In the fil-one repository, `packages/backend/src/lib/service-orchestrator-registry.ts`
+pairs each secret with its network's management API URL, which `sst.config.ts` sets per stage. Set
+the new value in the secret of every stage whose URL is prod Central's.
 
 ### Unseal-token accessors
 
