@@ -94,8 +94,8 @@ each node's backup snapshots. Without that storage, no appliance can unseal afte
 
 ### What seed and vault rebuild
 
-Run seed and vault as [restore-database.md](restore-database.md#8-re-run-seed-and-vault)
-([#379](https://github.com/fil-forge/infra-central/pull/379)) describes.
+Run seed and vault as the database restore runbook's "Re-run seed and vault" step describes. That
+runbook is not merged yet ([#379](https://github.com/fil-forge/infra-central/pull/379)).
 The run writes:
 
 - each service's `identity.did` and each wallet's `.address`, derived from the keys in Secrets
@@ -147,8 +147,7 @@ Which repair applies depends on what the loop prints:
     --name /forge-central/prod/appliance/<region>/unseal-token.accessor --value <accessor>
   ```
 
-  The appliance-token dry run in
-  [restore-database.md](restore-database.md#6-check-every-regions-key-and-token-before-any-vault-phase)
+  The appliance-token dry run in the database restore runbook
   ([#379](https://github.com/fil-forge/infra-central/pull/379)) then reports `token_live: true` and
   the action `skip`.
 
@@ -285,6 +284,7 @@ or its trust policy broke, recreate it from an `AdministratorAccess` SSO session
 
 If a key's policy names a wrong ARN, recreating the role under its correct name does not help.
 Create a role at the ARN the policy names, assume it, correct the policy, then delete that role.
+If that ARN has a path, such as `role/ops/<name>`, pass it to `aws iam create-role --path /ops/`.
 This works only when the wrong ARN is a role in this account. Find the ARN the policy names in the
 `GuardKeyLifecycle` statement of `aws kms get-key-policy`.
 
