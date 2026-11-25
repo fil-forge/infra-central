@@ -150,8 +150,9 @@ done
 
 The writer and reader endpoints follow the cluster identifier and keep their hostnames, so every DSN
 in SSM reaches the restored data. Check that `fc-prod` has the restored cluster's creation time and
-that its members are `fc-prod-1` and `fc-prod-2`. Then scale OpenBao to 1. It unseals with its KMS
-key, which the restore leaves alone, and `https://ssm.<suffix>/v1/sys/health` returns 200.
+that its members are `fc-prod-1` and `fc-prod-2`. Then scale OpenBao to 3, the count its module
+sets for one active task and two standbys. It unseals with its KMS key, which the restore leaves
+alone, and `https://ssm.<suffix>/v1/sys/health` returns 200.
 
 ## 6. Check every region's key and token before any vault phase
 
