@@ -31,20 +31,17 @@ chain = {
   }
 }
 
-# Appliance region labels. Adding one here creates the transit key its node's
-# OpenBao seals against and the IAM user it writes backups as; moving it to
-# retired_appliance_regions destroys both and revokes the node's unseal token.
-# A retired label stays in that list, and docs/appliance-onboarding.md is the
-# procedure for both.
-appliance_regions = ["us-east-2"]
-
-# The appliances' egress addresses, the only sources the signing service admits,
-# since it signs with the payer key for whoever reaches it. Each key is a label
-# from appliance_regions. Null admits any source and an empty map closes the
-# route; docs/appliance-onboarding.md has the step that adds an address.
+# The appliances this stage serves: each region label and its node's egress
+# IPv4 address. Adding one creates the transit key its node's OpenBao seals
+# against and the IAM user it writes backups as, binds the node's unseal token
+# to the address, and makes the address the only source the signing service
+# admits for that node, since the service signs with the payer key for whoever
+# reaches it. Retiring one moves its label to retired_appliance_regions, which
+# destroys the key and the user and revokes the token; a retired label stays in
+# that list. docs/appliance-onboarding.md is the procedure for both.
 #
 # us-east-2 is the IST-1 host's address behind its provider's NAT, the same
 # public_ip its pandora VPN site uses (modules/shared/constants).
-signer_allowed_sources = {
+appliances = {
   us-east-2 = "162.43.174.98"
 }

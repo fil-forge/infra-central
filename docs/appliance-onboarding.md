@@ -18,10 +18,9 @@ and, in staging and prod, the wrapped backup key, then the S3 delegation that co
 
 | Step                          | Where       | What it needs                              |
 | ----------------------------- | ----------- | ------------------------------------------ |
-| Commit the region label       | this repo   | nothing                                    |
 | Allocate the node's public IP | infra-nodes | nothing                                    |
-| Mint the credentials          | this repo   | that IP                                    |
-| Admit it at the signer        | this repo   | that IP                                    |
+| Commit the region and its IP  | this repo   | that IP                                    |
+| Mint the credentials          | this repo   | the merged region                          |
 | Deliver the wrapping tokens   | a person    | the node operator                          |
 | Boot the node, generate keys  | infra-nodes | the wrapping tokens                        |
 | Back up the root credentials  | this repo   | the root token and recovery key it printed |
@@ -30,12 +29,20 @@ and, in staging and prod, the wrapped backup key, then the S3 delegation that co
 
 ## Adding a region
 
-Add the appliance's region label to `appliance_regions` in the stage's
+Add the appliance's region label and its node's egress address to `appliances` in the stage's
 `terraform/envs/<stage>/platform/terraform.tfvars`, and merge:
 
 ```hcl
-appliance_regions = ["us-east-9"]
+appliances = {
+  us-east-9 = "203.0.113.7"
+}
 ```
+
+The address is the one the node's traffic leaves from: its Elastic IP on AWS, or the host's public
+address or its provider's NAT address on bare metal. It is written here once. The unseal token is
+bound to it, and the signing service admits only it for this node (see
+[Admitting the node to the signing service](#admitting-the-node-to-the-signing-service)). So the node's
+address has to be known before its region is committed.
 
 The region label is the appliance's S3 region. In a non-production stage it is a name that does not
 exist in AWS: `us-east-9` in dev, `eu-central-3` in staging. A production appliance carries a real
@@ -80,12 +87,15 @@ is the appliance's path and not theirs.
 
 ## Minting the credentials
 
-The unseal token is bound to the node's egress address, so this waits until the node's own apply
-has allocated its Elastic IP.
+The unseal token is bound to the region's address in `appliances`, which the script reads from the
+committed `terraform.tfvars`, so this waits until the region is merged.
 
 ```bash
-make mint-appliance-credentials STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7
+make mint-appliance-credentials STAGE=dev REGION=us-east-9
 ```
+
+`MINT_ARGS='--node-ip <address>'` or `MINT_ARGS='--node-cidr <cidr>'` binds the token elsewhere,
+which no stage needs today.
 
 The script mints two credentials: the unseal token, and in staging and prod the access key the node
 writes its backups with. It reads first and prints what it would do for each, as `make fund-payer`
@@ -144,7 +154,7 @@ A region that already holds a credential is skipped, because two standing creden
 is a state nothing can reason about. If the unseal token was never delivered, or leaked:
 
 ```bash
-make mint-appliance-credentials STAGE=dev REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-unseal-token
+make mint-appliance-credentials STAGE=dev REGION=us-east-9 MINT_ARGS=--reissue-unseal-token
 ```
 
 That mints a replacement and then revokes the old token. A node still using it stops being able to
@@ -153,7 +163,7 @@ unseal at its next restart.
 If the backup key was never delivered, or leaked:
 
 ```bash
-make mint-appliance-credentials STAGE=staging REGION=eu-central-3 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-backup-key
+make mint-appliance-credentials STAGE=staging REGION=eu-central-3 MINT_ARGS=--reissue-backup-key
 ```
 
 That deletes the old key first, so the node's uploads fail until it stores the new one with
@@ -276,22 +286,13 @@ locked objects under `<region>/check/` that expire after 36 days.
 ## Admitting the node to the signing service
 
 The signing service signs with the stage's payer key for whoever reaches it, so its route at
-`signer.<hostname suffix>` admits only the addresses in `signer_allowed_sources`, in the same
-`terraform.tfvars` as `appliance_regions`. Add the node's egress address under its region label, the
-same address its unseal token is bound to, and merge:
-
-```hcl
-signer_allowed_sources = {
-  us-east-9 = "203.0.113.7"
-}
-```
+`signer.<hostname suffix>` admits only the addresses in `appliances`. Committing the region admits
+its node once the platform and then the apps root have applied; there is no separate step.
 
 Any other address gets a `403` from the load balancer saying the host does not accept requests from
-it, so a Piri that fails to sign with that error is calling from an address not listed here. The map
-takes only labels in `appliance_regions`, and up to 27 distinct addresses, the most the service's
-listener priorities hold. `null` admits any source, which no stage uses, and an empty map gives the
-service no public route. Between committing the region label and adding its address, every plan of the
-stage's platform root warns that the signing service admits no address for that region.
+it, so a Piri that fails to sign with that error is calling from an address other than its entry in
+`appliances`. The service takes up to 27 distinct addresses, the most its listener priorities hold,
+and a stage with no appliances gives it no public route.
 
 ## Registering the node
 
@@ -428,16 +429,15 @@ the commands it grants until the node swaps it.
 
 ## Retiring a region
 
-Move the label from `appliance_regions` to `retired_appliance_regions` in the same commit, and
-merge:
+Remove the region's entry from `appliances` and add its label to `retired_appliance_regions` in the
+same commit, and merge:
 
 ```hcl
-appliance_regions         = []
+appliances                = {}
 retired_appliance_regions = ["us-east-9"]
 ```
 
-Remove the region's entry from `signer_allowed_sources` in the same commit; the apply refuses an
-address whose label is no longer in `appliance_regions`.
+The plan refuses a label that is in both.
 
 In staging and prod, remove `<stage>-<region>` from `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
@@ -461,7 +461,7 @@ assuming the cleanup completed.
 Keep the retired label in the list. While the key still stands, a key named by neither list fails
 the apply, and that refusal is what protects every other region's key from a typo. Once the key is
 destroyed the check has nothing left to catch, so from then on the label is a note to the next
-reader: dropping it and adding it back to `appliance_regions` creates a fresh key under a name whose
+reader: dropping it and adding it back to `appliances` creates a fresh key under a name whose
 node was retired.
 
 ### Retiring a node you no longer trust
@@ -470,8 +470,8 @@ The apply takes effect at the node's next unseal. Transit unseal happens at boot
 that is already running holds its key in memory and keeps serving traffic until it restarts, which
 an operator you are retiring against has no reason to do.
 
-Its access to the signing service is the exception: removing its address from
-`signer_allowed_sources` takes effect when the apps root applies, without waiting for a restart.
+Its access to the signing service is the exception: removing its entry from `appliances` takes
+effect when the apps root applies, without waiting for a restart.
 
 Evicting such a node starts at sprue, hilt and the delegator, and the apply comes last. None of the
 three has tooling for it yet, so every step is manual:

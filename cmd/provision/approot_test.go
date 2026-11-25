@@ -48,8 +48,8 @@ func TestPlanRootCredentialsRefusesARegionWithNoTransitKey(t *testing.T) {
 	bao := &fakeRootStore{}
 
 	_, err := planRootCredentials(context.Background(), newTokenClient(t, bao), "eu-central-3")
-	if err == nil || !strings.Contains(err.Error(), "appliance_regions") {
-		t.Fatalf("planRootCredentials() = %v, want a refusal naming appliance_regions", err)
+	if err == nil || !strings.Contains(err.Error(), "appliances") {
+		t.Fatalf("planRootCredentials() = %v, want a refusal naming appliances", err)
 	}
 }
 

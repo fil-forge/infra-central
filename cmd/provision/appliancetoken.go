@@ -188,7 +188,7 @@ func requireApplianceKey(ctx context.Context, client *api.Client, region string)
 	}
 	if key == nil {
 		return nil, fmt.Errorf(
-			"no transit key %s: add %q to appliance_regions in the stage's terraform.tfvars and merge, which creates the key and its policy",
+			"no transit key %s: add %q and its node's address to appliances in the stage's terraform.tfvars and merge, which creates the key and its policy",
 			name, region)
 	}
 	return key, nil

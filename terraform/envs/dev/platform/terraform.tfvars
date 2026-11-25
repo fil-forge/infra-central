@@ -35,25 +35,20 @@ chain = {
   }
 }
 
-# Appliance region labels. Adding one here creates the transit key its node's
-# OpenBao seals against; moving it to the retired list destroys that key and
-# revokes the node's unseal token. A retired label stays in the second list, and
-# docs/appliance-onboarding.md is the procedure for both.
+# The appliances this stage serves: each region label and its node's egress
+# IPv4 address. Adding one creates the transit key its node's OpenBao seals
+# against, binds the node's unseal token to the address, and makes the
+# address the only source the signing service admits for that node, since the
+# service signs with the payer key for whoever reaches it. Retiring one moves its
+# label to retired_appliance_regions, which destroys the key and revokes the
+# token; a retired label stays in that list. docs/appliance-onboarding.md is the
+# procedure for both.
 #
 # us-east-9 is the virtual S3 region label of the dev FilOne Appliance running
-# in us-east-2.
-appliance_regions         = ["us-east-9"]
-retired_appliance_regions = []
-
-# The appliances' egress addresses, the only sources the signing service admits,
-# since it signs with the payer key for whoever reaches it. Each key is a label
-# from appliance_regions. Null admits any source and an empty map closes the
-# route; docs/appliance-onboarding.md has the step that adds an address.
-#
-# us-east-9 is the dev node's Elastic IP, which fil-forge/infra-nodes allocates
-# and associates with the instance (terraform/modules/node/main.tf, aws_eip.node),
-# so the node also sends from it. The node's Ingot and Piri DNS records point at
-# the same address.
-signer_allowed_sources = {
+# in us-east-2. Its address is the node's Elastic IP, which fil-forge/infra-nodes
+# allocates and associates with the instance (terraform/modules/node/main.tf,
+# aws_eip.node), so the node also sends from it.
+appliances = {
   us-east-9 = "3.16.7.182"
 }
+retired_appliance_regions = []

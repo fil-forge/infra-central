@@ -58,21 +58,16 @@ variable "chain" {
   })
 }
 
-variable "appliance_regions" {
-  description = "Region labels of the appliances this stage serves, in terraform.tfvars. See docs/appliance-onboarding.md."
-  type        = list(string)
-  default     = []
+variable "appliances" {
+  description = "The appliances this stage serves, each region label with its node's egress IPv4 address, in terraform.tfvars. See docs/appliance-onboarding.md."
+  type        = map(string)
+  default     = {}
 }
 
 variable "retired_appliance_regions" {
   description = "Region labels whose appliance has been retired, in terraform.tfvars. Labels stay here for good: the apply refuses a key that neither list names."
   type        = list(string)
   default     = []
-}
-
-variable "signer_allowed_sources" {
-  description = "The appliances' egress addresses the signing service admits, in terraform.tfvars beside appliance_regions. See docs/appliance-onboarding.md."
-  type        = map(string)
 }
 
 # Written by `make publish` into image.auto.tfvars, so the dev loop is
@@ -97,9 +92,8 @@ module "platform" {
 
   chain = var.chain
 
-  appliance_regions         = var.appliance_regions
+  appliances                = var.appliances
   retired_appliance_regions = var.retired_appliance_regions
-  signer_allowed_sources    = var.signer_allowed_sources
 
   # Dev runs small and single-AZ. The appliance availability argument that
   # justifies multi-AZ in prod does not apply to a stage with no appliances.

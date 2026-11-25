@@ -822,7 +822,7 @@ anything anyone depends on.
 
 ### Onboarding a regional appliance
 
-A stage seals the appliances named in its `appliance_regions`, and
+A stage seals the appliances named in its `appliances`, and
 `make mint-appliance-credentials` issues a node's unseal credential and, in staging and
 prod, the access key it writes its backups with. The ordering across
 both repositories, how the credential is delivered to a node operator, and what

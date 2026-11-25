@@ -113,7 +113,7 @@ appliance label.
 The rules that read absence, "Appliance has stopped reporting" and "Appliance
 OpenBao snapshot is stale", watch only the live appliances listed in
 `live_appliances`: every `<stage>-<region>` in the alert stages'
-`appliance_regions`. A retired appliance and a dead one both stop reporting,
+`appliances`. A retired appliance and a dead one both stop reporting,
 and the list is what tells them apart. A listed appliance with no data alerts
 until it reports or leaves the list, including a new region whose node is not
 up yet. The snapshot rule further keeps to the

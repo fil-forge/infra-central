@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fail if live_appliances in the grafana root disagrees with the
-# appliance_regions of the alert stages' platform roots.
+# appliances of the alert stages' platform roots.
 #
 # The rules that read absence need to know which appliances should be alive:
 # from metrics alone a retired appliance and a dead one look the same, because
@@ -13,10 +13,12 @@
 # Reads files only: no AWS or Grafana credentials, no network.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+. "$(dirname "$0")/lib/appliances.sh"
+
 grafana_tfvars="terraform/envs/grafana/terraform.tfvars"
 
-# The single-line list form the tfvars files use. A missing line is an empty
-# list, which is how a stage states that it has no regions.
+# The single-line list form the grafana tfvars uses.
 read_list() {
   sed -n "s/^$1 *= *\[\(.*\)\]/\1/p" "$2" | tr -d ' "' | tr ',' '\n' | sed '/^$/d'
 }
@@ -39,19 +41,15 @@ for stage in $alert_stages; do
     echo "alert_stages names $stage, but $tfvars does not exist" >&2
     exit 1
   fi
-  if grep '^appliance_regions *=' "$tfvars" | grep -vq '^appliance_regions *= *\[.*\] *$'; then
-    echo "$tfvars sets appliance_regions in a form other than a single-line list" >&2
-    exit 1
-  fi
-  for region in $(read_list appliance_regions "$tfvars"); do
+  while read -r region _; do
     live+="$stage-$region"$'\n'
-  done
+  done < <(read_appliances "$tfvars")
 done
 live="$(printf '%s' "$live" | sed '/^$/d' | sort)"
 
 if [ "$listed" != "$live" ]; then
   printf 'live_appliances in %s: %s\n' "$grafana_tfvars" "$(paste -sd' ' - <<<"$listed")" >&2
-  printf 'appliance_regions of the alert stages: %s\n' "$(paste -sd' ' - <<<"$live")" >&2
+  printf 'appliances of the alert stages: %s\n' "$(paste -sd' ' - <<<"$live")" >&2
   printf '\nEdit live_appliances to match.\n' >&2
   exit 1
 fi

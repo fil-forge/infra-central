@@ -26,7 +26,7 @@ const (
 // applianceBackupKey issues the access key a regional appliance writes its
 // backups with.
 //
-// Each region has its own IAM user, created by Terraform from appliance_regions
+// Each region has its own IAM user, created by Terraform from appliances
 // and allowed to write under its own prefix of the stage's backup bucket. The
 // key is minted here rather than by Terraform so its secret never lands in
 // state, and it is returned wrapped by central OpenBao, the way the unseal
@@ -139,7 +139,7 @@ type backupKeyIAM interface {
 // planBackupKey reads the writer user's keys and decides what to do.
 //
 // A user that does not exist is refused. Terraform creates one per entry in
-// appliance_regions, so a missing user is a region that was never committed or
+// appliances, so a missing user is a region that was never committed or
 // has been retired, and a key for it is not something this phase may invent.
 func planBackupKey(ctx context.Context, client backupKeyIAM, user, region string, reissue bool) (*BackupKeyPlan, error) {
 	out, err := client.ListAccessKeys(ctx, &iam.ListAccessKeysInput{UserName: aws.String(user)})
@@ -147,7 +147,7 @@ func planBackupKey(ctx context.Context, client backupKeyIAM, user, region string
 	switch {
 	case errors.As(err, &noSuchUser):
 		return nil, fmt.Errorf(
-			"no IAM user %s: add %q to appliance_regions in the stage's terraform.tfvars and merge, which creates the user",
+			"no IAM user %s: add %q and its node's address to appliances in the stage's terraform.tfvars and merge, which creates the user",
 			user, region)
 	case err != nil:
 		return nil, fmt.Errorf("list the access keys of %s: %w", user, err)

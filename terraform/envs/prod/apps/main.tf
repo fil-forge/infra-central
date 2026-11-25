@@ -107,7 +107,7 @@ module "apps" {
   # One home per stage: the platform workspace owns it, this one reads it.
   chain = local.platform.chain
 
-  # Held by the platform root beside appliance_regions. try() for the same
+  # The addresses in the platform root's appliances map. try() for the same
   # reason as log_forwarding: a pull request that adds the key plans here before
   # the platform root has applied it. The fallback is an empty map, which closes
   # the route: a missing output must not open the signer to every source.

@@ -52,3 +52,6 @@ terraform.rc
 
 # docker buildx --metadata-file output, read by `make publish`
 /build/metadata.json
+
+# tofu test initialises modules/platform for its own run; only roots pin providers.
+terraform/modules/**/.terraform.lock.hcl

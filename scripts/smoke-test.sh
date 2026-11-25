@@ -13,9 +13,9 @@
 # OpenBao is covered too. It answers at ssm.<suffix> rather than at its own name,
 # because regional appliances authenticate there at boot to unseal.
 #
-# The signing service admits only the addresses in the stage's
-# signer_allowed_sources, so where that is set the check is the reverse: this
-# machine must be refused, or must find no route at all when the map is empty.
+# The signing service admits only the addresses in the stage's appliances, so
+# its check is the reverse: this machine must be refused, or must find no route
+# at all when the stage has no appliances.
 #
 # Usage:
 #   scripts/smoke-test.sh <stage>
@@ -58,17 +58,13 @@ SUFFIX="$(sed -n 's/^hostname_suffix[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]
   exit 1
 }
 
-# null, {} or the opening of a non-empty map, which may run over several lines.
-SIGNER_SOURCES="$(sed -n 's/^signer_allowed_sources[[:space:]]*=[[:space:]]*\([^#]*\).*$/\1/p' "$TFVARS" | tr -d '[:space:]')"
-case "$SIGNER_SOURCES" in
-  null) SIGNER_ACCESS=open ;;
-  "{}") SIGNER_ACCESS=unrouted ;;
-  "{"*) SIGNER_ACCESS=restricted ;;
-  *)
-    echo "ERROR: no signer_allowed_sources in $TFVARS" >&2
-    exit 1
-    ;;
-esac
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/appliances.sh"
+if [ -n "$(read_appliances "$TFVARS")" ]; then
+  SIGNER_ACCESS=restricted
+else
+  SIGNER_ACCESS=unrouted
+fi
 
 # service : hostname label : health path : serves a did:web document
 #
@@ -138,12 +134,12 @@ check_refused() {
   case "$status" in
     403)
       if grep -q "does not accept requests from this address" <<<"$body"; then
-        pass "$url — refused this address, as signer_allowed_sources intends"
+        pass "$url — refused this address, which appliances does not list"
       else
         fail "$url — HTTP 403, but not the load balancer's refusal"
       fi
       ;;
-    200)     fail "$url — answered this address, which signer_allowed_sources does not list" ;;
+    200)     fail "$url — answered this address, which appliances does not list" ;;
     000|"")  fail "$url — no response (DNS, TLS or timeout)" ;;
     *)       fail "$url — HTTP $status, expected the load balancer's 403" ;;
   esac
@@ -156,9 +152,9 @@ check_unrouted() {
 
   # 6 is curl's "could not resolve host".
   if [ "$code" -eq 6 ]; then
-    pass "https://${host} — no public route, as an empty signer_allowed_sources intends"
+    pass "https://${host} — no public route, as a stage with no appliances intends"
   else
-    fail "https://${host} — resolves, though signer_allowed_sources is empty (curl exit $code)"
+    fail "https://${host} — resolves, though the stage has no appliances (curl exit $code)"
   fi
 }
 
@@ -189,7 +185,7 @@ check_did() {
 check_service() {
   local path="$2" serves_did="$3" host="${1}.${SUFFIX}"
 
-  if [ "$1" = signer ] && [ "$SIGNER_ACCESS" != open ]; then
+  if [ "$1" = signer ]; then
     if [ "$SIGNER_ACCESS" = restricted ]; then
       check_refused "$host" "$path"
     else

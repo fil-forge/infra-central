@@ -26,7 +26,7 @@
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
-#   - the region's label committed to appliance_regions and merged
+#   - the region's label committed to appliances and merged
 set -euo pipefail
 
 STAGE="${STAGE:-dev}"

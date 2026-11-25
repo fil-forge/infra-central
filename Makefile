@@ -114,18 +114,19 @@ fund-payer:
 # Mint a regional appliance's unseal credential and, in stages that take
 # backups, its backup key. Each credential the region already holds is skipped,
 # so re-running is safe. The region's transit key and backup writer must already
-# exist, which means its label committed to appliance_regions and merged.
+# exist, which means the region committed to appliances and merged. The unseal
+# token is bound to the region's address there; MINT_ARGS='--node-ip <address>'
+# binds it elsewhere.
 #
-#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7
-#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-unseal-token
-#   make mint-appliance-credentials REGION=us-east-9 NODE_IP=203.0.113.7 MINT_ARGS=--reissue-backup-key
+#   make mint-appliance-credentials STAGE=dev REGION=us-east-9
+#   make mint-appliance-credentials STAGE=dev REGION=us-east-9 MINT_ARGS=--reissue-unseal-token
+#   make mint-appliance-credentials STAGE=dev REGION=us-east-9 MINT_ARGS=--reissue-backup-key
 REGION     ?=
-NODE_IP    ?=
 MINT_ARGS  ?=
 
 .PHONY: mint-appliance-credentials
 mint-appliance-credentials:
-	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-credentials.sh --stage $(STAGE) --region $(REGION) --node-ip $(NODE_IP) $(MINT_ARGS)
+	AWS_REGION=$(AWS_REGION) scripts/mint-appliance-credentials.sh --stage $(STAGE) --region $(REGION) $(MINT_ARGS)
 
 # Keep a second copy of an appliance OpenBao's root token and recovery key in
 # central's OpenBao. The script prompts for both; neither is passed here.
@@ -210,8 +211,13 @@ check:
 	scripts/check-stage-picker.sh
 # The rules that read absence watch the live appliances, which the grafana root
 # lists itself because metrics cannot tell a retired appliance from a dead one.
-# CI compares the list with the stages' appliance_regions.
+# CI compares the list with the keys of the stages' appliances.
 	scripts/check-appliance-regions.sh
+# The appliances map: its validations, planned against a mock AWS, and the
+# scripts that read it from the tfvars.
+	tofu -chdir=terraform/modules/platform init -backend=false -input=false >/dev/null
+	tofu -chdir=terraform/modules/platform test
+	scripts/test-appliance-scripts.sh
 # The stale-snapshot rule watches the alert_stages that take appliance backups,
 # which the grafana root lists itself because it cannot read the platform roots
 # that decide it. CI compares the two.

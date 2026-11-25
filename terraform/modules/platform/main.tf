@@ -158,20 +158,8 @@ check "pandora_sites_have_a_cluster" {
 }
 
 locals {
-  # Active appliances the signing service does not admit yet.
-  signer_unadmitted_regions = var.signer_allowed_sources == null ? [] : [
-    for region in var.appliance_regions : region if !contains(keys(var.signer_allowed_sources), region)
-  ]
-}
-
-# A warning, not a validation: onboarding commits a region's label before its
-# node has an address (docs/appliance-onboarding.md). Until the address is
-# added, every signing call from that node gets the signer's 403.
-check "signer_admits_every_appliance" {
-  assert {
-    condition     = length(local.signer_unadmitted_regions) == 0
-    error_message = "The signing service admits no address for ${join(", ", local.signer_unadmitted_regions)}, so that appliance's signing calls get a 403. Add its egress address to signer_allowed_sources once the node has one."
-  }
+  # keys() returns the labels sorted.
+  appliance_regions = keys(var.appliances)
 }
 
 module "storage" {
@@ -183,7 +171,7 @@ module "storage" {
   pitr_window_days = var.pitr_window_days
 }
 
-# The appliances' backup target. Its writer users follow appliance_regions, so
+# The appliances' backup target. Its writer users follow appliances, so
 # retiring a region also deletes the user and the key its node writes with.
 module "appliance_backups" {
   source = "./appliance-backups"
@@ -191,7 +179,7 @@ module "appliance_backups" {
 
   stage          = var.stage
   account_id     = local.account_id
-  regions        = var.appliance_regions
+  regions        = local.appliance_regions
   retention_days = var.appliance_backups.retention_days
 }
 
@@ -427,7 +415,7 @@ resource "aws_lambda_invocation" "vault" {
   input = jsonencode(merge({
     phase                     = "vault"
     trigger                   = var.vault_trigger
-    appliance_regions         = var.appliance_regions
+    appliance_regions         = local.appliance_regions
     retired_appliance_regions = var.retired_appliance_regions
     }, var.backup_replica_region == null ? {} : {
     backup_replica_region = var.backup_replica_region

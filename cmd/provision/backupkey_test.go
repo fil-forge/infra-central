@@ -54,8 +54,8 @@ func TestPlanBackupKeyReportsTheExistingKeyIDs(t *testing.T) {
 // region label that was never merged, and the error says how to fix that.
 func TestPlanBackupKeyRefusesAMissingUser(t *testing.T) {
 	_, err := planBackupKey(context.Background(), &fakeIAM{missingUser: true}, "u", "eu-central-3", false)
-	if err == nil || !strings.Contains(err.Error(), "appliance_regions") {
-		t.Fatalf("planBackupKey() = %v, want an error pointing at appliance_regions", err)
+	if err == nil || !strings.Contains(err.Error(), "appliances") {
+		t.Fatalf("planBackupKey() = %v, want an error pointing at appliances", err)
 	}
 }
 
