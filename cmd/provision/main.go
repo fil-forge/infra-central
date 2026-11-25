@@ -126,6 +126,12 @@ type Request struct {
 	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
 
+	// --- reset-apps phase only ---
+
+	// AllowProduction lets the reset-apps phase run on the prod stage, which it
+	// otherwise refuses. It has no effect on any other stage.
+	AllowProduction bool `json:"allow_production,omitempty"`
+
 	// --- appliance-root-store phase only ---
 
 	// RootToken and RecoveryKey are what an appliance's OpenBao printed at

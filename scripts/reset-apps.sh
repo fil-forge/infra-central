@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Wipe the app state central holds for a dev or staging stage, and keep the
 # platform: the RDS instance and its roles, OpenBao, every identity and wallet.
+# The prod stage is refused unless --production is given, for a production
+# stage that holds nothing worth keeping.
 #
 # Run it when a stage has to forget its appliances, for example after a node is
 # rebuilt with new Piris. Reset the node first with infra-nodes'
@@ -8,9 +10,9 @@
 # runs. docs/reset-apps.md has the whole order, onboarding included.
 #
 # What it wipes:
-#   - the sprue, hilt, swarf and plc databases, dropped and recreated empty
+#   - the sprue, hilt, swarf, plc and delegator databases, dropped and
+#     recreated empty
 #   - hilt's tenant secrets in OpenBao
-#   - the delegator's allow list and provider-info tables, emptied
 #   - sprue's buckets, every object version included
 #   - every Piri DID recorded in SSM, in any region
 #
@@ -21,7 +23,7 @@
 #   1. ask the Lambda what it would wipe, and print it with the AWS stores
 #   2. after you approve it, scale the app services to zero
 #   3. run the reset-apps phase
-#   4. empty the tables, the delegation bucket and the Piri records
+#   4. empty the delegation bucket and the Piri records
 #   5. scale the app services back up and wait until they are stable
 #   6. purge the agent-message bucket
 #
@@ -44,6 +46,9 @@
 # Options:
 #   --stage    stage to reset, dev or staging             (default: dev)
 #   --yes      skip the interactive prompt
+#   --production
+#              allow --stage prod; the prompt is always shown there, so --yes
+#              is refused with it
 #   --purge-agent-messages-before <UTC time>
 #              only purge the agent-message versions written before this time,
 #              formatted as YYYY-MM-DDTHH:MM:SSZ, and change nothing else
@@ -54,6 +59,7 @@ set -euo pipefail
 
 STAGE="${STAGE:-dev}"
 ASSUME_YES=false
+ALLOW_PRODUCTION=false
 PURGE_BEFORE=""
 
 while [ $# -gt 0 ]; do
@@ -61,7 +67,8 @@ while [ $# -gt 0 ]; do
     --stage)   STAGE="$2"; shift 2 ;;
     --yes|-y)  ASSUME_YES=true; shift ;;
     --purge-agent-messages-before) PURGE_BEFORE="$2"; shift 2 ;;
-    -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --production) ALLOW_PRODUCTION=true; shift ;;
+    -h|--help) sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -69,9 +76,22 @@ done
 # The Lambda refuses other stages too. Checking here as well fails before the
 # script scales anything down.
 case "$STAGE" in
-  dev|staging) ;;
-  *) echo "ERROR: refusing to reset stage '$STAGE'; only dev and staging can be reset" >&2; exit 2 ;;
+  dev|staging)
+    [ "$ALLOW_PRODUCTION" != true ] \
+      || { echo "ERROR: --production is for --stage prod, not '$STAGE'" >&2; exit 2; }
+    ;;
+  prod)
+    [ "$ALLOW_PRODUCTION" = true ] \
+      || { echo "ERROR: refusing to reset stage 'prod' without --production" >&2; exit 2; }
+    [ "$ASSUME_YES" != true ] \
+      || { echo "ERROR: --yes is refused with --production; the prompt is always shown for prod" >&2; exit 2; }
+    ;;
+  *) echo "ERROR: refusing to reset stage '$STAGE'; only dev, staging and prod can be reset" >&2; exit 2 ;;
 esac
+
+# What a printed rerun command needs besides the stage.
+PRODUCTION_ARG=""
+[ "$ALLOW_PRODUCTION" != true ] || PRODUCTION_ARG="--production "
 
 # A late cutoff would delete what sprue wrote after it restarted, so the time
 # has to be exact and in the past.
@@ -93,7 +113,6 @@ ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 CLUSTER="fc-${STAGE}"
 FUNCTION="fc-${STAGE}-provision"
 SERVICES=(sprue hilt swarf plc delegator)
-TABLES=("fc-${STAGE}-delegator-allow-list" "fc-${STAGE}-delegator-provider-info")
 DELEGATION_BUCKET="fc-${STAGE}-delegation-${ACCOUNT}"
 AGENT_MESSAGE_BUCKET="fc-${STAGE}-agent-message-${ACCOUNT}"
 
@@ -105,7 +124,8 @@ AGENT_MESSAGE_BUCKET="fc-${STAGE}-agent-message-${ACCOUNT}"
 # command substitution, and the callers read this function through one.
 invoke() {
   local confirm="$1" payload response out
-  payload="$(jq -nc --argjson confirm "$confirm" '{phase:"reset-apps", confirm:$confirm}')"
+  payload="$(jq -nc --argjson confirm "$confirm" --argjson production "$ALLOW_PRODUCTION" \
+    '{phase:"reset-apps", confirm:$confirm, allow_production:$production}')"
 
   out="$(mktemp)" || return 1
   trap 'rm -f "$out"' RETURN
@@ -144,31 +164,6 @@ scale() {
 # fixed ten minutes and whose timeout names no service.
 wait_stable() {
   "$ROOT/scripts/wait-services-stable.sh" "$CLUSTER"
-}
-
-# empty_table <table> — delete every item, a page of 25 at a time, which is the
-# most one BatchWriteItem takes. The table itself stays, so this works under
-# deletion protection. Items the batch leaves unprocessed reappear in the next
-# scan. A line after each page shows the running total.
-empty_table() {
-  local table="$1" key page requests deleted=0
-  echo "  emptying ${table}…"
-  key="$(aws dynamodb describe-table --table-name "$table" \
-    --query "Table.KeySchema[?KeyType=='HASH'].AttributeName | [0]" --output text)"
-
-  while :; do
-    page="$(aws dynamodb scan --table-name "$table" \
-      --projection-expression '#k' --expression-attribute-names "{\"#k\":\"$key\"}" \
-      --consistent-read --max-items 25 --output json)"
-    [ "$(jq '.Items | length' <<<"$page")" -gt 0 ] || break
-
-    requests="$(jq -c --arg table "$table" \
-      '{($table): [.Items[] | {DeleteRequest: {Key: .}}]}' <<<"$page")"
-    aws dynamodb batch-write-item --request-items "$requests" >/dev/null
-    deleted=$((deleted + $(jq '.Items | length' <<<"$page")))
-    echo "    deleted $deleted item(s) so far"
-  done
-  echo "  ✓ emptied $table ($deleted item(s))"
 }
 
 # purge_bucket <bucket> <cutoff> — delete every object version and delete
@@ -228,7 +223,7 @@ print_purge_resume() {
   echo "Only the agent-message versions written before ${CUTOFF} remain."
   echo "sprue no longer reads them, so they cost only storage. To delete them, run:"
   echo
-  echo "  make reset-apps STAGE=${STAGE} RESET_ARGS='--purge-agent-messages-before ${CUTOFF}'"
+  echo "  make reset-apps STAGE=${STAGE} RESET_ARGS='${PRODUCTION_ARG}--purge-agent-messages-before ${CUTOFF}'"
   echo
   echo "Do not rerun the whole reset: it drops the databases again."
 }
@@ -284,7 +279,7 @@ trap 'case "$phase" in
   apps)
     echo >&2
     echo "ERROR: the reset stopped partway, and the app services may still be at zero." >&2
-    echo "Rerun make reset-apps STAGE=${STAGE} to finish; make supplies the AWS region." >&2
+    echo "Rerun make reset-apps STAGE=${STAGE}${PRODUCTION_ARG:+ RESET_ARGS=--production} to finish; make supplies the AWS region." >&2
     ;;
   purge) print_purge_resume >&2 ;;
 esac' EXIT
@@ -323,7 +318,6 @@ jq -r '
   "  databases to drop and recreate: \(if ($p.databases | length) == 0 then "none" else ($p.databases | join(", ")) end)",
   "  hilt secrets to destroy:        \($p.hilt_secrets)"
 ' <<<"$plan"
-echo "  tables to empty:                ${TABLES[*]}"
 echo "  buckets to purge:               $DELEGATION_BUCKET"
 echo "                                  $AGENT_MESSAGE_BUCKET (last, with the stage up)"
 piri_records="$(list_piri_records)"
@@ -363,7 +357,6 @@ jq -r '
 ' <<<"$result"
 
 echo "[4/6] Emptying the stores outside the VPC…"
-for table in "${TABLES[@]}"; do empty_table "$table"; done
 purge_bucket "$DELEGATION_BUCKET" "$CUTOFF"
 delete_piri_records
 

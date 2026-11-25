@@ -56,6 +56,7 @@ var databaseConsumers = []string{
 	"hilt",
 	"swarf",
 	"plc",
+	"delegator",
 	"openbao",
 }
 

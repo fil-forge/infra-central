@@ -177,12 +177,10 @@ check "signer_admits_every_appliance" {
 module "storage" {
   source = "./storage"
 
-  stage                  = var.stage
-  force_destroy          = !var.protect_stateful_resources
-  point_in_time_recovery = var.protect_stateful_resources
-  deletion_protection    = var.protect_stateful_resources
-  versioning             = var.protect_stateful_resources
-  pitr_window_days       = var.pitr_window_days
+  stage            = var.stage
+  force_destroy    = !var.protect_stateful_resources
+  versioning       = var.protect_stateful_resources
+  pitr_window_days = var.pitr_window_days
 }
 
 # The appliances' backup target. Its writer users follow appliance_regions, so
@@ -271,8 +269,6 @@ module "provision" {
   openbao_address = "http://openbao.${module.network.namespace_name}:8200"
   private_cidrs   = module.network.private_subnet_cidrs
 
-  allow_list_table_name = module.storage.allow_list_table_name
-  allow_list_table_arn  = module.storage.allow_list_table_arn
 
   backup_replica_region = var.backup_replica_region
 

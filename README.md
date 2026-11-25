@@ -38,8 +38,8 @@ Lambda rather than on an operator's laptop.
    │       └── AppRole ─┼─────────┼─────────┼───────────────┼───────────┘
    │       │            │         │         │
    ├──────── RDS Postgres (one database per service) ───────┤
-   │                                        │
-   S3                                   DynamoDB
+   │
+   S3
 ```
 
 Regional appliances reach OpenBao at `ssm.<hostname_suffix>` to unseal at boot,
@@ -67,7 +67,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
 | **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
+| **S3 through task roles**                       | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -76,14 +76,14 @@ registration writes central performs on its behalf.
 
 ## What each service needs
 
-| Service              | Port | Health         | Postgres | Other                        |
-| -------------------- | ---- | -------------- | -------- | ---------------------------- |
-| sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
-| hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
-| swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
-| delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
-| piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
-| plc                  | 3000 | `/_health`     | yes      | nothing else                 |
+| Service              | Port | Health         | Postgres  | Other                                                 |
+| -------------------- | ---- | -------------- | --------- | ----------------------------------------------------- |
+| sprue                | 8080 | `/health`      | yes       | 3 S3 buckets, plc                                     |
+| hilt                 | 8080 | `/health`      | yes       | OpenBao, plc, calls sprue                             |
+| swarf                | 8080 | `/health`      | yes       | plc, serves an SSE stream                             |
+| delegator            | 8080 | `/healthcheck` | yes       | chain RPC                                             |
+| piri-signing-service | 7446 | `/healthcheck` | no        | chain RPC                                             |
+| plc                  | 3000 | `/_health`     | yes       | nothing else                                          |
 
 Two more names appear among the stage's keys: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
@@ -106,7 +106,8 @@ These each cost an afternoon to rediscover.
   injects secrets as environment variables, so the `ecs-service` module wraps
   the entrypoint to write them out before exec'ing the process.
 - **Health paths disagree**: `/health`, `/healthcheck` and `/_health` all appear.
-- **Migrations run in-process** via goose for sprue, hilt, swarf and plc.
+- **Migrations run in-process** via goose for sprue, hilt, swarf, plc and the
+  delegator.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on
@@ -155,6 +156,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 
 # Documentation beyond this file
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
+docs/jump-host.md             the static-IP SSH jump host, and how to connect through it
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
 docs/decisions/               why a thing is the way it is, one file per subject
@@ -168,6 +170,7 @@ terraform/
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  applied on every push to main
+    jump-host/                                     static-IP SSH relay to appliances; applied by hand
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -193,7 +196,7 @@ forge-central out, since nothing there is close to a length limit.
 Files:
 
 ```
-terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+terraform/envs/<stage>/platform/   VPC, RDS, S3, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps root

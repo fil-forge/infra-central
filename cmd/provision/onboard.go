@@ -5,13 +5,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/fil-forge/ucantone/did"
 	"github.com/fil-forge/ucantone/multikey"
 	"github.com/fil-forge/ucantone/ucan"
 	"github.com/fil-forge/ucantool/pkg/identity"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/fil-forge/infra-central/internal/keygen"
 	"github.com/fil-forge/infra-central/internal/onboard"
@@ -39,11 +40,6 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load AWS config: %w", err)
-	}
-
 	piriProof, err := decodePiriProof(req)
 	if err != nil {
 		return nil, err
@@ -68,7 +64,13 @@ func (d *deps) onboardPhase(ctx context.Context, req Request) (*Response, error)
 		return nil, err
 	}
 
-	onboardDeps, err := d.onboardDeps(ctx, awsCfg.Region, dynamodb.NewFromConfig(awsCfg))
+	allowList, closeAllowList, err := d.delegatorAllowList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeAllowList()
+
+	onboardDeps, err := d.onboardDeps(ctx, allowList)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +166,19 @@ func validateOnboardRequest(req Request) error {
 		return fmt.Errorf("the onboard phase needs %v; all of it comes from the appliance", missing)
 	}
 
-	if _, err := piriParameterName(req.PiriDID); err != nil {
+	host, err := piriParameterName(req.PiriDID)
+	if err != nil {
 		return fmt.Errorf("piri_did: %w", err)
+	}
+	// A Piri derives its DID from its public URL, so a request whose two do
+	// not agree names a DID no node answers to.
+	piriURL, err := url.Parse(req.PiriURL)
+	if err != nil {
+		return fmt.Errorf("piri_url: %w", err)
+	}
+	if want := strings.TrimPrefix(host, piriSubPrefix+"/"); piriURL.Scheme != "https" || strings.ToLower(piriURL.Host) != want {
+		return fmt.Errorf("piri_did %s is not the did:web of piri_url %s: a Piri at that URL is did:web:%s",
+			req.PiriDID, req.PiriURL, strings.ToLower(piriURL.Host))
 	}
 	return nil
 }
@@ -181,14 +194,35 @@ func (d *deps) ingotDID(region string) (string, error) {
 	return fmt.Sprintf("did:web:s3.%s.%s", region, d.cfg.IngotHostnameSuffix), nil
 }
 
-// onboardDeps assembles the three clients, the proof issuer and the region's
-// Piri record.
-func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.Client) (onboard.Deps, error) {
-	table := d.cfg.AllowListTable
-	if table == "" {
-		return onboard.Deps{}, fmt.Errorf("FORGE_ALLOW_LIST_TABLE is required for the onboard phase")
+// delegatorAllowList returns the allow list in the delegator's database, with
+// a function that closes its connection.
+func (d *deps) delegatorAllowList(ctx context.Context) (onboard.AllowList, func(), error) {
+	conn, err := d.connectToDelegatorDatabase(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
+	return onboard.NewPostgresAllowList(conn, d.cfg.Stage), func() { _ = conn.Close(ctx) }, nil
+}
 
+// connectToDelegatorDatabase connects with the delegator's own DSN, stored by
+// the seed phase, so rows are written by the role that owns the tables.
+func (d *deps) connectToDelegatorDatabase(ctx context.Context) (*pgx.Conn, error) {
+	dsn, err := d.store.GetSecret(ctx, "delegator", "postgres-dsn")
+	if err != nil {
+		return nil, fmt.Errorf("read the delegator's postgres DSN: %w", err)
+	}
+	slog.Info("connecting to the delegator's database", "host", d.cfg.DBHost, "database", "delegator")
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		// pgx leaves the password out of its connection errors.
+		return nil, fmt.Errorf("connect to the delegator's database: %w", err)
+	}
+	return conn, nil
+}
+
+// onboardDeps assembles the three clients, the proof issuer and the region's
+// Piri record around the delegator's allow list.
+func (d *deps) onboardDeps(ctx context.Context, allowList onboard.AllowList) (onboard.Deps, error) {
 	sprueIssuer, sprueDIDWeb, err := d.serviceIssuer(ctx, "sprue")
 	if err != nil {
 		return onboard.Deps{}, err
@@ -208,7 +242,7 @@ func (d *deps) onboardDeps(ctx context.Context, region string, dynamo *dynamodb.
 	}
 
 	return onboard.Deps{
-		AllowList:  onboard.NewDynamoAllowList(dynamo, table, d.cfg.Stage),
+		AllowList:  allowList,
 		Sprue:      sprueClient,
 		Hilt:       hiltClient,
 		IssueProof: d.applianceProofIssuer(hiltDIDWeb),

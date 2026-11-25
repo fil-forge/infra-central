@@ -7,23 +7,34 @@ import (
 )
 
 // The reset drops databases. A stage outside this list must never reach the
-// drop, whatever the script in front of it checks.
+// drop, whatever the script in front of it checks, and prod only when the
+// request asks for it.
 func TestCheckResettableStage(t *testing.T) {
 	cases := []struct {
-		stage   string
-		allowed bool
+		stage           string
+		allowProduction bool
+		allowed         bool
 	}{
 		{stage: "dev", allowed: true},
 		{stage: "staging", allowed: true},
-		{stage: "production"},
+		{stage: "dev", allowProduction: true, allowed: true},
 		{stage: "prod"},
+		{stage: "prod", allowProduction: true, allowed: true},
+		{stage: "production"},
+		{stage: "production", allowProduction: true},
 		{stage: ""},
+		{stage: "", allowProduction: true},
 		{stage: "Dev"},
+		{stage: "Prod", allowProduction: true},
 	}
 
 	for _, c := range cases {
-		t.Run("stage "+c.stage, func(t *testing.T) {
-			err := checkResettableStage(c.stage)
+		name := "stage " + c.stage
+		if c.allowProduction {
+			name += " with allow_production"
+		}
+		t.Run(name, func(t *testing.T) {
+			err := checkResettableStage(c.stage, c.allowProduction)
 			switch {
 			case c.allowed && err != nil:
 				t.Errorf("checkResettableStage(%q) = %v, want nil", c.stage, err)
@@ -48,6 +59,16 @@ func TestAppDatabasesAreSeededDatabases(t *testing.T) {
 	for _, name := range appDatabases {
 		if !slices.Contains(databaseConsumers, name) {
 			t.Errorf("appDatabases has %q, which databaseConsumers %v does not create", name, databaseConsumers)
+		}
+	}
+}
+
+// An app database the reset skips keeps its rows across a reset, so the stage
+// comes back half-forgotten. Every seeded database but openbao's is an app's.
+func TestAppDatabasesCoverEverySeededApp(t *testing.T) {
+	for _, name := range databaseConsumers {
+		if name != "openbao" && !slices.Contains(appDatabases, name) {
+			t.Errorf("databaseConsumers has %q, which appDatabases %v does not reset", name, appDatabases)
 		}
 	}
 }

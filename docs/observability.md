@@ -14,9 +14,9 @@ about a minute of being written. The CloudWatch groups stay as they are, thirty 
 `scripts/tail-logs.sh` and the deploy workflow's diagnose jobs.
 
 **Metrics.** Everything AWS publishes for the stage's ECS services, load balancer, RDS instance,
-NAT gateway and the telemetry Firehoses themselves. The provision Lambda's and the DynamoDB tables'
-metrics arrive too, through the metric stream
-[fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs in the same account.
+NAT gateway and the telemetry Firehoses themselves. The provision Lambda's metrics arrive too,
+through the metric stream [fil-one/infra](https://github.com/fil-one/fil-one/tree/main/infra) runs
+in the same account.
 
 **Not shipped.** Application metrics, since not all services expose a `/metrics` endpoint yet;
 traces; VPC flow logs; ALB access logs. The last two stay in CloudWatch and S3 respectively. Follow-up work:
@@ -129,6 +129,12 @@ the rule counts any stage and service seen in the last day but silent now as 0
 healthy hosts. It fires about ten minutes after the last sample. A service or
 stage removed or renamed on purpose alerts until a day has passed, so silence it
 on `stage` and `service` for that long.
+
+The delegator's Postgres store needs no rule of its own. A delegator that cannot
+reach or migrate its database exits at startup and never passes its health
+check, which "Service has no healthy hosts" reports, and a failed query returns
+a 5xx. An onboard run that cannot write the allow list fails its invocation,
+which "Provision Lambda errors" reports.
 
 | Rule                                                 | Group                    | Source                        | Ticket   |
 | ---------------------------------------------------- | ------------------------ | ----------------------------- | -------- |
@@ -480,12 +486,6 @@ aws_vpn_tunnel_state_minimum{dimension_VpnId!="", dimension_TunnelIpAddress=""}
 The warning rule reads that minimum, and the critical rule reads `aws_vpn_tunnel_state_maximum`,
 which is 0 only when no tunnel was up during the minute.
 
-Reads against the delegator's tables, likewise:
-
-```promql
-aws_dynamodb_consumed_read_capacity_units_sum{dimension_TableName=~"fc-dev-delegator-.*"}
-```
-
 Metric names can be browsed in Explore with the metrics browser, or with a regex against the name
 list, `aws_ecs_.*` for example.
 
@@ -498,7 +498,6 @@ list, `aws_ecs_.*` for example.
 | `AWS/RDS`            | `dimension_DBInstanceIdentifier=~"fc-<stage>(-[0-9]+)?"`              |
 | `AWS/NATGateway`     | `dimension_NatGatewayId`; the id is in the platform root's state      |
 | `AWS/Lambda`         | `dimension_FunctionName="fc-<stage>-provision"`                       |
-| `AWS/DynamoDB`       | `dimension_TableName=~"fc-<stage>-.*"`                                |
 | `AWS/Firehose`       | `dimension_DeliveryStreamName="fc-<stage>-logs"`                      |
 
 ## Is the pipeline itself healthy

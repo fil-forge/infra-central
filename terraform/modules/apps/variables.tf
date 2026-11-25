@@ -69,18 +69,6 @@ variable "bucket_arns" {
   type = list(string)
 }
 
-variable "allow_list_table_name" {
-  type = string
-}
-
-variable "provider_info_table_name" {
-  type = string
-}
-
-variable "dynamodb_table_arns" {
-  type = list(string)
-}
-
 variable "openbao_internal_address" {
   type = string
 }

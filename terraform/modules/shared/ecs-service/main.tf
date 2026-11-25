@@ -176,8 +176,8 @@ resource "aws_ecs_service" "this" {
 
   availability_zone_rebalancing = var.availability_zone_rebalancing
 
-  # Migrations run in-process via goose for sprue, hilt, swarf and plc, and
-  # concurrent starts race on the goose advisory lock. At desired_count 1 that
+  # Migrations run in-process via goose for sprue, hilt, swarf, plc and the
+  # delegator, and concurrent starts race on the goose advisory lock. At desired_count 1 that
   # cannot happen; above it, set the service's *_SKIP_MIGRATIONS and run them
   # deliberately.
   deployment_minimum_healthy_percent = var.desired_count > 1 ? 100 : 0

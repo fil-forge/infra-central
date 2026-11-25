@@ -23,15 +23,6 @@ data "aws_iam_policy_document" "apply" {
     actions = [
       "acm:*",
       "application-autoscaling:*",
-      "dynamodb:CreateTable",
-      "dynamodb:DeleteTable",
-      "dynamodb:Describe*",
-      "dynamodb:List*",
-      "dynamodb:TagResource",
-      "dynamodb:UntagResource",
-      "dynamodb:UpdateContinuousBackups",
-      "dynamodb:UpdateTable",
-      "dynamodb:UpdateTimeToLive",
       "ec2:*",
       "ecr:Describe*",
       "ecr:GetAuthorizationToken",
@@ -49,13 +40,9 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
-  # No dynamodb:GetItem, Query, Scan, PutItem or DeleteItem: Terraform creates
-  # the delegator's two tables but never touches a row in them, and an apply that
-  # could read the allow list could read every tenant in the region.
-  #
-  # No ecr:BatchGetImage either, and no ecr:SetRepositoryPolicy. Lambda pulls
-  # the provision image under the repository policy the bootstrap root sets;
-  # the apply only pins a digest.
+  # No ecr:BatchGetImage, and no ecr:SetRepositoryPolicy. Lambda pulls the
+  # provision image under the repository policy the bootstrap root sets; the
+  # apply only pins a digest.
 
   statement {
     sid       = "ManageStageRoles"

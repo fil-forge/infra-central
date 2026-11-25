@@ -261,7 +261,7 @@ variable "namespace_name" {
 }
 
 variable "task_policies" {
-  description = "Extra permissions for the running process, keyed by policy name. Only sprue, the delegator and OpenBao need any. Keyed rather than one nullable string because a policy usually names resources created in the same apply: with a single string, whether the policy exists depends on knowing what is in it, and Terraform cannot count instances it has to wait until apply to evaluate."
+  description = "Extra permissions for the running process, keyed by policy name. Only sprue and OpenBao need any. Keyed rather than one nullable string because a policy usually names resources created in the same apply: with a single string, whether the policy exists depends on knowing what is in it, and Terraform cannot count instances it has to wait until apply to evaluate."
   type        = map(string)
   default     = {}
 }

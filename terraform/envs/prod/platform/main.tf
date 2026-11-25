@@ -164,7 +164,7 @@ module "platform" {
   }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
-  # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
+  # about 150 of them with OpenBao's 24 per task, 72 across its three, included.
   openbao_max_parallel = 24
 
   # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
@@ -181,10 +181,9 @@ module "platform" {
   # pinned provision image must include replication, or the seed fails the apply.
   backup_replica_region = module.constants.dr_region
 
-  # Bumped to move the identity and wallet keys from SSM to Secrets Manager. The
-  # seed phase re-runs only when its input changes, so the bump has to land with
-  # the provision build that does the move.
-  seed_trigger = "2"
+  # Bumped to create the delegator's database and its password, which the app
+  # reset needs to find. The seed phase re-runs only when its input changes.
+  seed_trigger = "3"
 
   # Bumped to make OpenBao audit the X-Correlation-Id header. The vault phase
   # re-runs only when its input changes, so the bump has to land with the

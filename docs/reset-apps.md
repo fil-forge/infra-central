@@ -4,7 +4,8 @@
 stored and keeps the platform they run on. Use it when a stage has to forget its
 appliances: a node rebuilt from scratch, a node moving from one Piri to several,
 or test data that is no longer worth keeping. Production refuses it, in the
-script and again in the provision Lambda.
+script and again in the provision Lambda, unless it is asked for by name:
+[Resetting production](#resetting-production) covers that.
 
 Every app service in the stage is down until the stores are wiped. The purge of
 sprue's `agent-message` bucket, which can take many minutes, runs last, with the
@@ -27,12 +28,11 @@ services back up.
 
 ## What gets wiped
 
-- The `sprue`, `hilt`, `swarf` and `plc` databases: providers, tenants, buckets,
-  access keys, delegations, revocations and the tenants' did:plc documents.
+- The `sprue`, `hilt`, `swarf`, `plc` and `delegator` databases: providers,
+  tenants, buckets, access keys, delegations, revocations, the tenants' did:plc
+  documents, and the delegator's allow list and provider registrations.
 - hilt's tenant secrets in OpenBao, under `tenant/` in the `forge-central/hilt`
   mount.
-- Every item in the delegator's allow list and provider-info tables. The tables
-  stay, so staging's deletion protection does not get in the way.
 - Every object version in sprue's `agent-message` and `delegation` buckets
   written before the services were scaled to zero. This is not reversible,
   versioning included.
@@ -43,11 +43,22 @@ with about 0.9 USDFC of the payer's lockup stranded in it. `piri init` then
 creates a fresh proof set, because it looks proof sets up in its own database.
 Its provider registration is found on chain by wallet address and reused.
 
+The stranded lockup still counts against the payer's lockup allowance, which
+caps how much warm storage may lock up in total. After a reset or two the
+allowance runs out, and a Piri fails to create its proof set with
+`InsufficientLockupAllowance`. Step 5 has the fix.
+
 ## Procedure
 
 Keep pushes to `main` out of the window. An apply sets each service's
 `desired_count` back to 1, which can bring a service up while its database is
 being dropped.
+
+Onboarding runs in the provision Lambda, and merging a change does not roll its
+image. If the onboard phase has changed since the stage's image was published,
+publish a new one and wait for its deploy before starting; "Iterating on the
+provision Lambda" in the [README](../README.md) has the steps. A Lambda on the
+old image applies the old rules in step 5.
 
 ### 1. Reset the node
 
@@ -71,8 +82,8 @@ make reset-apps STAGE=dev
 
 The script prints what the Lambda would wipe and asks for `reset-dev` before it
 changes anything. It then scales sprue, hilt, swarf, plc and the delegator to
-zero, runs the `reset-apps` phase, empties the tables, the `delegation` bucket
-and the Piri records, and scales the services back up. signing-service and
+zero, runs the `reset-apps` phase, empties the `delegation` bucket and the
+Piri records, and scales the services back up. signing-service and
 OpenBao keep running.
 
 Last, with the stage up, it purges the `agent-message` bucket. On staging that
@@ -99,15 +110,22 @@ Leaving the old versions in place costs only storage.
 
 ### 3. Bring the node back
 
-On the appliance host, deploy the apps and turn reconcile back on:
+On the appliance host, run keygen, deploy the apps and turn reconcile back on:
 
 ```bash
+scripts/host/keygen.sh
 scripts/host/deploy-apps.sh
 systemctl enable --now filone-reconcile.timer
 ```
 
+keygen reissues a Piri's delegation to sprue when the Piri's DID, sprue's DID or
+the delegated commands differ from the stored delegation's, and leaves
+everything else alone. The deploy does not do this, and step 5 hands sprue the
+stored delegation.
+
 Each Piri runs `piri init`, which the registrar refuses with a 403 until its DID
-is onboarded; the container restarts until then.
+is onboarded; the container restarts until then, and the deploy ends by
+reporting every Piri as not healthy.
 
 ### 4. Fund new Piri wallets
 
@@ -131,12 +149,30 @@ delegation survived. The node already holds it, so there is nothing to hand
 over. [appliance-onboarding.md](appliance-onboarding.md#registering-the-node)
 covers refusals and the proof.
 
+Each Piri registers on its next restart, within about a minute. One that then
+fails to create its proof set with `InsufficientLockupAllowance` has reached the
+payer's lockup allowance. Raise it, and the Piri gets through on a later
+restart:
+
+```bash
+make fund-payer STAGE=dev FUND_ARGS="--lockup-allowance 10"
+```
+
+The script prints what it would send and asks before signing. It skips the
+deposit when the payer's account already holds enough.
+
+It first checks that the payer's wallet holds the deposit amount, 3 USDFC unless
+`DEPOSIT` says otherwise, and stops if it does not, even when the deposit would
+be skipped. Top the wallet up from the faucet the error names, or pass a
+`DEPOSIT` the wallet can cover.
+
 ### 6. Reset FilOne's tenants for the region
 
 FilOne still records the tenant IDs central no longer has. From the fil-one
 repository, run the script against every FilOne stage that provisions tenants in
-the region. `--stage` is FilOne's stage name, which is not central's; for
-staging's `eu-central-3`:
+the region. `--stage` is FilOne's stage name, which is not central's. FilOne
+has no dev stage, and its `staging` stage serves dev's `us-east-9` as well as
+staging's `eu-central-3`. For `eu-central-3`:
 
 ```bash
 ./bin/reset-region-provisioning.ts --stage staging --region eu-central-3 --dry-run
@@ -184,3 +220,22 @@ again, each region needs a new unseal token, and hilt's AppRole is reissued.
 5. Mint each region's unseal token again with `make mint-appliance-credentials` (the
    plan says `Action: mint`), rebuild the node, and continue from step 4 of the
    procedure above.
+
+## Resetting production
+
+Only for a production stage that holds nothing worth keeping: no customer
+tenants, and no data on its appliances that anyone needs. The order is the one
+above, with these differences.
+
+- **The node.** Run `scripts/host/reset-apps.sh --production` on the appliance.
+  infra-nodes' runbook says what that leaves alone on a node that keeps Ingot's
+  catalog log on a dataset of its own and Piri's blobs in object storage.
+- **Central.** `make reset-apps STAGE=prod RESET_ARGS=--production`. The script
+  refuses `prod` without the flag, and passes `allow_production` to the
+  provision Lambda, which refuses `prod` without it too. The prompt asks for
+  `reset-prod` and cannot be skipped: `--yes` is refused with `--production`.
+- **The provision Lambda's image** has to be one that knows `allow_production`.
+  An older image refuses the reset at the first step, before anything is
+  changed.
+- **Tests.** Only the smoke test runs against production. Check an upload and a
+  retrieval by hand once the appliance is onboarded again.

@@ -109,16 +109,6 @@ variable "log_retention_days" {
   default = 30
 }
 
-variable "allow_list_table_name" {
-  description = "The delegator's allow-list table. Only the onboard phase writes it."
-  type        = string
-}
-
-variable "allow_list_table_arn" {
-  description = "ARN of the same table, which is what the role is granted on."
-  type        = string
-}
-
 variable "backup_replica_region" {
   description = "Region the seed and vault phases replicate the key secrets and OpenBao's credentials to. Null keeps no replicas, and the role gets no grant in any other region."
   type        = string
