@@ -112,6 +112,19 @@ module "apps" {
 
   log_level = "info"
 
+  # At 512 CPU units sprue sat at 100% serving 60 requests/s, which held the
+  # appliance to 12 catalog segments/s in the load test (sc-104). Every other
+  # service keeps the module default, restated here because a map passed in
+  # replaces the default whole.
+  sizes = {
+    sprue           = { cpu = 2048, memory = 4096 }
+    hilt            = { cpu = 512, memory = 1024 }
+    swarf           = { cpu = 256, memory = 512 }
+    delegator       = { cpu = 256, memory = 512 }
+    signing_service = { cpu = 256, memory = 512 }
+    plc             = { cpu = 256, memory = 512 }
+  }
+
   # ucantone runs up to 100 invocations of one request at once, so a single
   # batch can exhaust swarf's default pool of 10.
   swarf_postgres_max_conns = 20
