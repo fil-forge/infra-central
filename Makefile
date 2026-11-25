@@ -213,11 +213,11 @@ check:
 # lists itself because metrics cannot tell a retired appliance from a dead one.
 # CI compares the list with the keys of the stages' appliances.
 	scripts/check-appliance-regions.sh
-# The appliances map: its validations, planned against a mock AWS, and the
-# scripts that read it from the tfvars.
+# The appliances map's validations, planned against a mock AWS.
 	tofu -chdir=terraform/modules/platform init -backend=false -input=false >/dev/null
 	tofu -chdir=terraform/modules/platform test
-	scripts/test-appliance-scripts.sh
+# Bash script tests are discovered like the scripts above: every scripts/*.test.sh.
+	set -euo pipefail; git ls-files -z 'scripts/*.test.sh' | xargs -0 -r -n1 bash
 # The stale-snapshot rule watches the alert_stages that take appliance backups,
 # which the grafana root lists itself because it cannot read the platform roots
 # that decide it. CI compares the two.
