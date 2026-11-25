@@ -1,6 +1,6 @@
 # Restoring a stage's database to a point in time
 
-A stage's database holds the data of sprue, hilt, swarf and plc, and OpenBao's storage. Restoring
+A stage's database holds the data of sprue, hilt, swarf, delegator and plc, and OpenBao's storage. Restoring
 it to a time T rolls all of them back together. The services lose what they wrote after T. OpenBao
 loses the tokens, keys and credentials it issued after T, and the ones it revoked after T work
 again. This runbook restores the database beside the live one, swaps the names, and repairs what the
@@ -21,7 +21,7 @@ restore in step 3, and continue from there.
 
 ## What a restore takes back to T
 
-Everything inside the cluster returns to T. SSM, Secrets Manager, S3, DynamoDB, the chain, the
+Everything inside the cluster returns to T. SSM, Secrets Manager, S3, the chain, the
 appliances and FilOne stay as they are. Steps 6, 8, 10 and 11 repair the difference.
 
 Never restore to a time before OpenBao was initialised. The next vault phase would initialise it
@@ -252,7 +252,8 @@ from FilOne.
 
 Appliances onboarded after T are unknown to sprue. Run `make onboard-appliance` for each.
 
-The delegator's DynamoDB tables stay as they are unless restored to T separately.
+The delegator's database returns to T with the rest of the cluster. Onboarding an appliance again
+also puts its Piri back on the delegator's allow list.
 
 ## 12. Lift the freeze and clean up
 
