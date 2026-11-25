@@ -3,9 +3,13 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
+
+	"github.com/aws/smithy-go"
 )
 
 // replicator is the part of secretstore.Store that replicating the keys needs.
@@ -37,8 +41,9 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 	resp.BackupReplicaRegion = region
 
 	order := replicationOrder(resp.Secrets)
+	retry := grantRetry{interval: grantRetryInterval, deadline: time.Now().Add(grantRetryBudget)}
 	for _, key := range order {
-		added, err := keys.EnsureReplica(ctx, resp.Secrets[key.service][key.name], region)
+		added, err := ensureReplicaOnceGranted(ctx, keys, resp.Secrets[key.service][key.name], region, retry)
 		if err != nil {
 			return fmt.Errorf("replicate %s/%s: %w", key.service, key.name, err)
 		}
@@ -55,6 +60,53 @@ func replicateKeys(ctx context.Context, keys replicator, region string, resp *Re
 		}
 	}
 	return nil
+}
+
+// The apply that sets a replica region adds the ReplicateStageKeys grant and
+// invokes the seed seconds later. IAM is eventually consistent, so the first
+// calls can still be denied: staging's first such apply was denied 7.6 s after
+// the grant was written, and a re-run passed. Denials are retried until
+// grantRetryBudget after the first key, shared by all the keys. A seed without
+// denials takes seconds, so the budget plus replicaWait leaves about three
+// minutes of the Lambda's ten. A grant that is really missing still fails the
+// apply, five minutes later than it would without the retry.
+const (
+	grantRetryInterval = 5 * time.Second
+	grantRetryBudget   = 5 * time.Minute
+)
+
+type grantRetry struct {
+	interval time.Duration
+	deadline time.Time
+}
+
+// ensureReplicaOnceGranted calls EnsureReplica and retries it while the call
+// is denied, until retry.deadline. Any other error is returned at once. Every
+// key is retried on its own, because IAM propagates per host and one call can
+// pass while the next is denied, but all keys share the one deadline.
+func ensureReplicaOnceGranted(ctx context.Context, keys replicator, secretARN, region string, retry grantRetry) (bool, error) {
+	for attempt := 1; ; attempt++ {
+		added, err := keys.EnsureReplica(ctx, secretARN, region)
+		if err == nil || !isAccessDenied(err) {
+			return added, err
+		}
+		if time.Now().Add(retry.interval).After(retry.deadline) {
+			return false, fmt.Errorf("still denied after %d attempts, and the %s retry budget for all keys is spent: %w", attempt, grantRetryBudget, err)
+		}
+
+		slog.Warn("replication denied, retrying while the grant propagates",
+			"secret", secretARN, "replica_region", region, "attempt", attempt, "retry_in", retry.interval, "error", err)
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("%w (stopped retrying: %w)", err, ctx.Err())
+		case <-time.After(retry.interval):
+		}
+	}
+}
+
+func isAccessDenied(err error) bool {
+	var apiErr smithy.APIError
+	return errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException"
 }
 
 type secretKey struct{ service, name string }

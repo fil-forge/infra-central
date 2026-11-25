@@ -1,5 +1,4 @@
-# The object and key-value stores two services need, replacing smelt's MinIO
-# and local DynamoDB.
+# The object store sprue needs, replacing smelt's MinIO.
 #
 # Sprue reaches S3 through its task role rather than static credentials: the
 # apps module sets its storage.s3.endpoint empty, so the AWS default credential
@@ -112,44 +111,4 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
       days_after_initiation = 7
     }
   }
-}
-
-# The delegator's two tables. It uses no Postgres at all, and creates neither
-# table itself, so both have to exist before it starts.
-resource "aws_dynamodb_table" "allow_list" {
-  name                        = "${local.name}-delegator-allow-list"
-  billing_mode                = "PAY_PER_REQUEST"
-  hash_key                    = "did"
-  deletion_protection_enabled = var.deletion_protection
-
-  attribute {
-    name = "did"
-    type = "S"
-  }
-
-  point_in_time_recovery {
-    enabled                 = var.point_in_time_recovery
-    recovery_period_in_days = var.point_in_time_recovery ? var.pitr_window_days : null
-  }
-
-  tags = { Name = "${local.name}-delegator-allow-list" }
-}
-
-resource "aws_dynamodb_table" "provider_info" {
-  name                        = "${local.name}-delegator-provider-info"
-  billing_mode                = "PAY_PER_REQUEST"
-  hash_key                    = "provider"
-  deletion_protection_enabled = var.deletion_protection
-
-  attribute {
-    name = "provider"
-    type = "S"
-  }
-
-  point_in_time_recovery {
-    enabled                 = var.point_in_time_recovery
-    recovery_period_in_days = var.point_in_time_recovery ? var.pitr_window_days : null
-  }
-
-  tags = { Name = "${local.name}-delegator-provider-info" }
 }

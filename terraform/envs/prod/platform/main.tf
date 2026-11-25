@@ -128,10 +128,16 @@ module "platform" {
   # so it has the same class. docs/decisions/2026-10-prod-first-stack.md has the
   # arithmetic and the costs.
   db_engine         = "aurora"
+  db_engine_version = "18.6"
   db_instance_class = "db.r8g.large"
   db_instance_count = 2
   pitr_window_days  = 35
   db_kms_key_arn    = data.aws_kms_alias.aurora.target_key_arn
+
+  # db_allow_major_version_upgrade and db_apply_immediately stay off here. A
+  # major upgrade turns both on in the pull request that changes
+  # db_engine_version, and the next pull request turns them off; see
+  # docs/decisions/2026-11-database-major-upgrades.md.
 
   # Regional appliances cannot boot while OpenBao is unreachable, and OpenBao's
   # storage is this database.
@@ -142,14 +148,17 @@ module "platform" {
   # backup retention, and no deletion protection or final snapshot, so dropping
   # it leaves nothing behind. Setting this to null drops the cluster and keeps
   # the VPN; docs/pandora-vpn.md has the steps.
+  #
+  # It holds the pack ledger for the import service.
   pandora_db = {
+    engine_version        = "18.6"
     instance_count        = 1
     backup_retention_days = 1
     protect               = false
   }
 
   # A db.r8g.large allows at most about 1,800 connections, and the stage needs
-  # about 140 of them with OpenBao's 24 per task, 72 across its three, included.
+  # about 150 of them with OpenBao's 24 per task, 72 across its three, included.
   openbao_max_parallel = 24
 
   # Created by the regional bootstrap, like the cluster's key: OpenBao's storage
@@ -162,8 +171,16 @@ module "platform" {
   # that takes a flood before the load balancer does. Dev has neither need.
   enable_global_accelerator = true
 
-  # Bumped to move the identity and wallet keys from SSM to Secrets Manager. The
-  # seed phase re-runs only when its input changes, so the bump has to land with
-  # the provision build that does the move.
-  seed_trigger = "2"
+  # Keep a replica of every identity and wallet key in the DR region. The
+  # pinned provision image must include replication, or the seed fails the apply.
+  backup_replica_region = module.constants.dr_region
+
+  # Bumped to create the delegator's database and its password, which the app
+  # reset needs to find. The seed phase re-runs only when its input changes.
+  seed_trigger = "3"
+
+  # Bumped to make OpenBao audit the X-Correlation-Id header. The vault phase
+  # re-runs only when its input changes, so the bump has to land with the
+  # provision build that registers the header.
+  vault_trigger = "2"
 }

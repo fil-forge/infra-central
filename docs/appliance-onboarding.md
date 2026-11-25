@@ -23,6 +23,7 @@ and, in staging and prod, the wrapped backup key, then the S3 delegation that co
 | Mint the credentials          | this repo   | that IP                                    |
 | Deliver the wrapping tokens   | a person    | the node operator                          |
 | Boot the node, generate keys  | infra-nodes | the wrapping tokens                        |
+| Back up the root credentials  | this repo   | the root token and recovery key it printed |
 | Register the node             | this repo   | the node's Piri DID, its URL and its proof |
 | Install the returned proof    | infra-nodes | the delegation registration returns        |
 
@@ -35,8 +36,10 @@ Add the appliance's region label to `appliance_regions` in the stage's
 appliance_regions = ["us-east-9"]
 ```
 
-The region label is the appliance's virtual S3 region, not an AWS one. It has to match the node's
-Ingot `region:` config and what clients sign with, or requests fail without naming the cause.
+The region label is the appliance's S3 region. In a non-production stage it is a name that does not
+exist in AWS: `us-east-9` in dev, `eu-central-3` in staging. A production appliance carries a real
+AWS region name, as `prod/us-east-2` does. In every stage it has to match the node's Ingot `region:`
+config and what clients sign with, or requests fail without naming the cause.
 
 In staging and prod, add `<stage>-<region>` to `live_appliances` in
 `terraform/envs/grafana/terraform.tfvars` in the same commit; `make check` fails until you do.
@@ -172,6 +175,58 @@ decrypts, and warns when that is above 1. Run it and answer anything but `mint` 
 check the key without minting anything. The node side is in infra-nodes'
 [restore runbook](https://github.com/fil-forge/infra-nodes/blob/main/docs/runbook/restore-openbao-from-snapshot.md).
 
+## Backing up the node's root credentials
+
+The node's OpenBao prints a root token and a recovery key once, when `provision-platform.sh`
+initialises it. The root token creates the node's host token and region-key token again after a
+restore from a snapshot older than their 72-hour period, or after a rebuild. The recovery key is how
+a new root token is generated. Both go in 1Password, and a second copy goes in central's OpenBao:
+
+```bash
+make store-appliance-root-credentials STAGE=staging REGION=us-east-9
+```
+
+The script reports whether central already holds a copy, asks for both values at a prompt that does
+not echo, and stores them once you type `store`. Neither value reaches a command line or a log.
+Run it again whenever either value changes: a rebuilt node prints new ones, and so does
+`bao operator generate-root`. Each run adds a version, and both values are required every time.
+
+The copy lives in the KV mount `forge-central/appliance-root`, one secret per region label. No
+policy names the mount, so only central's root token reads it.
+
+### Reading them back
+
+Reading is break-glass. Use the stage's AWS account and region to fetch central's root token
+from Secrets Manager. CloudTrail records the `GetSecretValue` call, and OpenBao's audit log
+records the read of the region's secret. To find who stored a copy, see
+[Who invoked the provision Lambda](observability.md#who-invoked-the-provision-lambda).
+
+```bash
+export BAO_ADDR=https://ssm.<hostname_suffix>
+```
+
+```bash
+BAO_TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id 'forge-central/<stage>/openbao/root-token' \
+  --query SecretString --output text)" && export BAO_TOKEN
+```
+
+```bash
+bao kv get -mount=forge-central/appliance-root -field=root_token <region>
+```
+
+```bash
+unset BAO_TOKEN
+```
+
+Use `-field=recovery_key` for the other value. The value is printed to your terminal, so paste it
+straight into the node's prompt and clear the scrollback. The read shows up in the audit log within
+about a minute:
+
+```logql
+{aws_log_group="/forge-central/<stage>/openbao"} | json | type="response" | request_path="forge-central/appliance-root/data/<region>"
+```
+
 ## What the node does with the backup key
 
 Staging and prod keep each appliance's backups in `forge-nodes-backups-<stage>-<account id>`, under
@@ -224,7 +279,7 @@ appliance signed with its own Piri key, which central never holds.
 
 ```bash
 make onboard-appliance STAGE=dev REGION=us-east-9 \
-  PIRI_DID=did:key:z6Mk… \
+  PIRI_DID=did:web:piri-0.latest.dev.fil-forge.com \
   PIRI_URL=https://piri-0.latest.dev.fil-forge.com \
   PIRI_PROOF=piri-proof.txt \
   ONBOARD_ARGS="--proof-out ingot-proof.txt"
@@ -365,8 +420,9 @@ In staging and prod, remove `<stage>-<region>` from `live_appliances` in
 Metrics cannot tell a retired appliance from a dead one, since both stop reporting, so that list is
 what keeps "Appliance has stopped reporting" from paging when the retired node goes dark.
 
-The apply revokes the node's unseal token, deletes its token role, deletes its parameters and
-destroys its transit key. **This is not reversible.** The node behind that key can never unseal
+The apply revokes the node's unseal token, deletes its token role, deletes its parameters, deletes
+central's copy of its root credentials and destroys its transit key. Delete the region's root token
+and recovery key from 1Password yourself. **This is not reversible.** The node behind that key can never unseal
 again, and everything on its disks stays encrypted with a key that no longer exists.
 
 In staging and prod the same apply deletes the region's backup writer user and its access key, so

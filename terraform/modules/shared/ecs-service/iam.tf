@@ -36,8 +36,10 @@ data "aws_iam_policy_document" "execution_secrets" {
     resources = [local.ssm_prefix_arn]
   }
 
-  # Identity and wallet keys, which the provision Lambda keeps in Secrets
-  # Manager.
+  # Identity and wallet keys, and OpenBao's root token and recovery keys,
+  # which the provision Lambda keeps in Secrets Manager. The openbao
+  # service's own execution role can read the last two, as it could while
+  # they were SSM parameters under its prefix.
   statement {
     sid       = "ReadOwnKeys"
     actions   = ["secretsmanager:GetSecretValue"]
@@ -85,8 +87,8 @@ resource "aws_iam_role" "task" {
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
-# Only sprue (S3) and the delegator (DynamoDB) need anything here. The other
-# four get a role with no permissions at all, which is deliberate.
+# Only sprue (S3) needs anything here among the apps. The other five get a role
+# with no permissions at all, which is deliberate.
 #
 # for_each over the map, rather than count over a nullable string: the keys are
 # known while planning even when a policy body is not, so a service still gets

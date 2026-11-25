@@ -145,6 +145,11 @@ locals {
   # reused: its service_name is the host exporter's.
   piri_metric_matcher = "appliance=~\"(${local.stages})-.*\", job=\"forge/piri\""
 
+  # Piri's container log stream, same scheme as Postgres's below. Each Piri on
+  # a node has its own stream, and its instance label, <node>/piri-<n>, is the
+  # one Piri's metrics carry.
+  piri_log_matcher = "appliance=~\"(${local.stages})-.*\", service_name=~\"appliance-.*-piri\""
+
   # Postgres's container log stream. Alloy names each container's stream
   # appliance-<stage>-<region>-<service> from the Compose service and stamps
   # appliance, region and node on it (infra-nodes
@@ -800,12 +805,7 @@ resource "grafana_rule_group" "central" {
   # site, so the whole-query no data covers it; a second site needs a check of
   # the series count against pandora_sites.
   #
-  # Paused until the first production appliance runs strongSwan (FIL-1402).
-  # Until then the only prod site is the staging appliance standing in, and its
-  # tunnels are down outside test runs, so this rule would keep firing. The
-  # pull request that brings a production site live replaces true with
-  # length(module.constants.pandora_sites.prod) == 0, which keeps the rule
-  # paused while prod has no site, since no_data_state would otherwise fire for
+  # Paused while prod has no site, since no_data_state would otherwise fire for
   # as long as the site list stays empty.
   rule {
     name           = "Pandora VPN tunnel down"
@@ -813,7 +813,7 @@ resource "grafana_rule_group" "central" {
     for            = "15m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
-    is_paused      = true
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has a tunnel down"
@@ -893,18 +893,14 @@ resource "grafana_rule_group" "central" {
   # warning rule above gives, and no data fires about ten minutes after the
   # last sample.
   #
-  # Paused until the first production appliance runs strongSwan (FIL-1402).
-  # Until then the only prod site is the staging appliance standing in, its
-  # tunnels are down outside test runs, and this rule would page on-call for
-  # that. The pull request that brings a production site live replaces true
-  # with the expression the warning rule above gives.
+  # Paused while prod has no site, for the reason the warning rule above gives.
   rule {
     name           = "Pandora VPN both tunnels down"
     condition      = "B"
     for            = "5m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
-    is_paused      = true
+    is_paused      = length(module.constants.pandora_sites.prod) == 0
 
     annotations = {
       summary     = "VPN connection {{ $labels.dimension_VpnId }} in AWS account {{ $labels.account_id }} has both tunnels down"
@@ -3060,11 +3056,14 @@ resource "grafana_rule_group" "appliance" {
   # segment holding them ships to Forge, so a copy of the database holds the
   # catalog that exists nowhere but the host's disk (fil-forge/ingot's
   # logstore/README.md). Segments seal within seconds and ship right after, so
-  # the oldest journaled block is normally seconds old. A ship that fails is
-  # retried, a few times at once and then by a sweep each minute until it
-  # lands, so half an hour means shipping is failing, not slow. Nothing is
-  # lost while a segment waits, since its blocks are on disk and in Postgres:
-  # a warning. The age is measured, not inferred from a rate, so for = 5m only
+  # the oldest journaled block is normally seconds old. A ship is a
+  # queue-bucket.ship task. One that fails is retried with a backoff that
+  # doubles from a second to five minutes, until it lands, so half an hour
+  # means shipping is failing, not slow. A ship that finds no authority is
+  # the exception: Ingot fails that task for good, and the bucket's next
+  # write queues it again. Nothing is lost while a segment waits, since its
+  # blocks are on disk and in Postgres: a warning. The age is measured, not
+  # inferred from a rate, so for = 5m only
   # rides out a slow scrape.
   #
   # A restart is the wrong way to retry. Ingot signs a ship with authority it
@@ -3072,14 +3071,16 @@ resource "grafana_rule_group" "appliance" {
   # an idle bucket's segments then wait for its next write. After an outage
   # longer than that authority's hour, every idle bucket with a backlog waits
   # the same way, so the alert can outlast its cause by days with nothing to do.
+  # A bucket that gets no further write, such as one a test run left behind,
+  # holds the alert until it is deleted: DeleteBucket drops its journal rows.
   # If that ever matters, the fix is in hilt, which holds the tenant's keys and
   # could mint Ingot a narrow ship-only delegation when it has none; it has no
   # endpoint for that yet. A restart is the remedy for two cases. One is a
   # segment whose file is gone from disk: its blocks are safe in the journal,
   # and at startup Ingot rebuilds the segment from them (FIL-1601) before it
   # retires or deletes the lost row. The other is a ship that hangs (its HTTP
-  # clients set no timeout), which blocks the bucket's queue and sweep alike
-  # and logs nothing. Either way the bucket then waits for its next write, like
+  # clients set no timeout), which holds the bucket's ship task and logs
+  # nothing. Either way the bucket then waits for its next write, like
   # any idle bucket after a restart, and a rebuilt segment keeps its blocks'
   # journal age, so the alert stays until that write. One case needs Ingot's
   # maintainers: a ship that fails on its own every time. An Ingot configured
@@ -3089,10 +3090,17 @@ resource "grafana_rule_group" "appliance" {
   # but the delete dropped its journal rows when it emptied the bucket's root,
   # so it neither holds the gauge nor appears in the runbook's query.
   #
-  # A ship that succeeds logs nothing, and the sweep ships a whole backlog in
-  # one pass while the queue waits, so a draining backlog and a hung ship both
-  # log nothing but 'flush queue full'. The runbook tells them apart by
-  # progress: whether the bucket's oldest seq moves on.
+  # A ship that succeeds logs nothing, and one task ships a bucket's whole
+  # backlog, so a draining backlog and a hung ship both log nothing. The
+  # runbook tells them apart by progress: whether the bucket's oldest seq
+  # moves on.
+  #
+  # The task runner logs a ship's failures ('task will be retried', 'task
+  # failed') with the bucket's name only inside the error text, and the log's
+  # own lines ('logstore: tick seal') carry it as a `bucket` field, so the
+  # runbook's query filters on the name as text. A ship without authority
+  # logs one 'task failed' line when it gives up, which can be as old as the
+  # bucket's oldest block, so the runbook reads the log back that far.
   #
   # The gauge is the oldest block across every bucket, and several buckets can
   # be stuck at once for different reasons, so the runbook lists every bucket
@@ -3113,7 +3121,7 @@ resource "grafana_rule_group" "appliance" {
 
     annotations = {
       summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has catalog blocks waiting over 30 minutes to ship to Forge"
-      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost, and Ingot retries every minute on its own. Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its last ten minutes of lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" | json | bucket=\"<bucket>\"`. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'logstore: ship attempt failed' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. It ships within a minute of its next write, however long that takes. Nothing to do. 3) 'ship attempt failed' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within a couple of minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) Nothing but 'flush queue full', and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
+      description      = "The oldest catalog block journaled in Postgres has waited over 30 minutes for its log segment to ship to Forge. Nothing is lost. Ingot retries a failed ship on its own, backing off to every five minutes, except in 2). Don't restart it to retry: that drops the ship authority Ingot holds in memory, and idle buckets then wait for their next write. List each bucket with unshipped segments on the box with `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT bucket, min(seq) AS oldest_seq, now() - min(created_at) AS age, array_agg(DISTINCT seq ORDER BY seq) AS seqs FROM ingot.catalog_journal GROUP BY 1 ORDER BY age DESC'`. Work through every bucket whose age is over 30 minutes (one bucket in 2) can hide another's problem), reading its lines in `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"logstore:\" |= \"<bucket>\"` over a time range that goes back as far as the bucket's age: a failure can be logged once, when the oldest block was written. A ship's failures are the task runner's 'task will be retried' and 'task failed' lines, which name the bucket only in their error text. 'uploader: index publication failed' lines, and 'blob add failed' lines with `publishShardIndex` in their stack trace, come after a ship that succeeded and are unrelated to a stall. Take the first case that fits. 1) A segment file is gone: `docker exec filone-ingot ls /data/segments/<bucket>/catalog` doesn't list a file for every seq in the bucket's seqs (`printf 'seg-%020d.car' <seq>` gives the name), or a 'task will be retried' or 'logstore: tick seal' line says 'no such file or directory' for a `.car` file. Its blocks are safe in the journal. `docker restart filone-ingot`, but not while another bucket's oldest_seq is moving, for the reason 6) gives; at startup Ingot rebuilds the segment from the journal. The bucket then ships as in 2), at its next write, and the alert stays until then, so don't restart again. 2) 'no ship authority' or 'no /blob/add authority': the bucket's authority lapsed (an hour after its last write, or at a restart) or was revoked. Ingot gives that ship up, logging one 'task failed' line, and the bucket's next write queues it again. It ships within a minute of that write, however long that takes. Nothing to do for a bucket still in use. A bucket nobody will write to again, such as a test's leftover, holds the alert for good: have its owner empty it and delete it with an S3 DeleteBucket, which drops its journal rows. 3) 'task will be retried' with an outage (connection refused, timeout, 5xx) at the upload service or a storage provider: fix that. Buckets written in the last hour then start shipping within five minutes, oldest segment first; the longer the outage, the longer the drain, and 6) tells you whether it is moving. The rest move to 2). 4) 'mark catalog segment <seq> shipped' or 'mark sealed': Postgres isn't taking the ship's or the seal's stamp; Ingot retries both. Check Postgres, and escalate if it repeats while Postgres is healthy. 5) Any other error repeating for that bucket: escalate to Ingot's maintainers. 6) No line for the bucket, or 'task will be retried' lines that stopped over ten minutes ago with no 'task failed' after them, and the bucket's oldest_seq unchanged when you re-run the query ten minutes later: a ship has hung. `docker restart filone-ingot`; the bucket then ships as in 2). If 6) comes back for the same bucket after a restart, escalate rather than restarting again. A bucket whose backlog is shipping logs the same, but its oldest_seq moves on; don't restart while any bucket's oldest_seq is moving, since the restart costs every bucket its authority and the hung bucket's blocks are safe in Postgres."
       dashboard_url    = "${local.regions_dashboard}&viewPanel=34"
       __dashboardUid__ = "forge-regions"
       __panelId__      = "34"
@@ -3772,6 +3780,751 @@ resource "grafana_rule_group" "appliance" {
           query     = { params = ["B"] }
           reducer   = { type = "last", params = [] }
           evaluator = { type = "gt", params = [600] }
+        }]
+      })
+    }
+  }
+
+  # The rules from here to the ZFS pool rules watch Piri's chain RPC
+  # endpoint (FIL-1553). Piri reaches
+  # it through two clients, go-jsonrpc for the Lotus API and go-ethereum for
+  # the eth API, and counts every call through either by method and outcome
+  # (piri_chain_rpc_calls), each ChainNotify subscription that closes under
+  # it (piri_chain_rpc_subscriptions_closed), and whether a probe call through
+  # each client succeeded (piri_chain_rpc_reachable, every 30 seconds), from
+  # fil-forge/piri#222. Piri's docs/content/concepts/telemetry.md lists the
+  # outcomes. A Piri older than that exports none of these series, so its
+  # rules stay quiet rather than fire.
+  #
+  # The probes are what make a refused key visible on an idle Piri. A
+  # WebSocket endpoint checks the key only when a connection opens, so every
+  # five minutes Piri also opens a fresh one with its credentials and counts
+  # it as client "endpoint", method "Handshake": a key revoked since start-up
+  # shows there while Piri's open connections still work. A refused reconnect
+  # of the Lotus WebSocket counts as unavailable rather than unauthorized,
+  # since go-jsonrpc does not report its status.
+  #
+  # Grouped by instance, as the other Piri rules are, so the alert names the
+  # Piri.
+  # no_data_state is OK throughout: each query returns a series only for a
+  # Piri with something to report, so an empty result is the healthy state,
+  # and "Appliance has stopped reporting" covers a silent node.
+
+  # The endpoint answered 401 or 403: the key is wrong, revoked or expired. It
+  # stays that way until somebody changes it, so one call is enough, and the
+  # handshake probe makes one every five minutes. The ten-minute window is
+  # twice the evaluation interval, so one refused call holds the rule across
+  # the two evaluations `for` needs. Critical: Piri cannot read the chain or
+  # submit proofs once its connections drop.
+  rule {
+    name           = "Piri's chain RPC is rejecting its credentials"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being refused by its chain RPC endpoint (401)"
+      description = "Piri's chain RPC endpoint (Chain.Love) refused its API key, so Piri cannot read the chain or submit proofs. Check the key in Chain.Love's dashboard and the LOTUS_RPC_URL Piri is given, then restart Piri. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            increase(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="unauthorized"}[10m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # Piri could not open either connection at start-up, so it exits and the
+  # container restarts it. A Piri that never starts exports no metrics, so
+  # this one rule reads Piri's log: the lines start "providing lotus client"
+  # or "providing eth client", for any cause, a refused key included. It drops
+  # fx/echo, Piri's HTTP access log, whose lines quote request paths anyone on
+  # the internet chooses. No annotation quotes the line: Piri versions before
+  # fil-forge/piri#221 print the endpoint, key included, when a dial fails.
+  # Critical, for the reason the credentials rule gives.
+  rule {
+    name           = "Piri cannot connect to its chain RPC"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} cannot connect to its chain RPC endpoint"
+      description = "Piri failed to open its connection to the chain RPC endpoint (Chain.Love) at start-up, so it exits and restarts without reading the chain or submitting proofs. The Piri container log says why: an HTTP status (401 is a bad key, 429 a rate limit), a DNS or TLS error, or a timeout. Check Chain.Love's status page and the LOTUS_RPC_URL Piri is given. Act within about three hours: after that, Piri gives up on the pieces it was adding to its data set until they are freed by hand."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.loki_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "A"
+        editorMode    = "code"
+        queryType     = "instant"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        expr          = <<-LOGQL
+          sum by (appliance, region, node, instance) (
+            count_over_time(
+              {${local.piri_log_matcher}}
+                != "fx/echo"
+                |~ "providing (lotus|eth) client"
+              [10m]
+            )
+          )
+        LOGQL
+      })
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # No probe call through a client has succeeded for five minutes: the
+  # endpoint is down, unreachable from the node, or refusing every call. Per
+  # client, since the two connections fail apart. For the Lotus client the
+  # chain head rules say so too, sooner and louder; for the eth client nothing
+  # else does until proofs stop landing. A warning: Piri resumes when the
+  # endpoint answers, and a refused key already pages above.
+  rule {
+    name           = "Piri cannot reach its chain RPC"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} cannot reach its chain RPC endpoint ({{ $labels.client }})"
+      description = "Every probe call through Piri's {{ $labels.client }} client to its chain RPC endpoint (Chain.Love) has failed for five minutes, so Piri cannot read the chain or submit proofs through it. piri_chain_rpc_calls_total by outcome says why: unavailable (down or unreachable), timeout, rate_limited or unauthorized. Check Chain.Love's status page and whether every Piri is affected (the endpoint) or only this node (its network)."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, instance, client) (
+            max_over_time(piri_chain_rpc_reachable{${local.piri_metric_matcher}}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "lt", params = [1] }
+        }]
+      })
+    }
+  }
+
+  # More than one call in twenty refused as over a limit: HTTP 429, JSON-RPC
+  # error -32005, or an error that names a rate limit. Chain.Love documents
+  # 429 for a key over its own limit or the account over its plan's.
+  # Cancelled calls are left out of the share, since they say nothing about
+  # the endpoint. Calls are retried, so this is a warning: it is a delay, and
+  # a limit that blocks Piri for long shows as a stale chain head.
+  #
+  # The window is five minutes, the evaluation interval, so each evaluation
+  # sees calls the last did not, and `for` = 10m needs three windows in a row
+  # over the threshold, ten to fifteen minutes of rate limiting. A longer
+  # window would not do: a single minute of refusals stays in a fifteen-minute
+  # one, above 5% of it, for three evaluations, and would fire ten minutes
+  # after the endpoint recovered. Going over a per-minute limit refuses the
+  # rest of that minute, so such bursts are expected.
+  rule {
+    name           = "Piri's chain RPC is rate limiting it"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }} is being rate limited by its chain RPC endpoint"
+      description = "More than one in twenty of Piri's calls to its chain RPC endpoint (Chain.Love) have been refused as over a rate limit in each of three five-minute windows in a row. Calls are retried, so Piri falls behind rather than failing, but proofs and piece additions are delayed. Check the key's request limit and the account's credits in Chain.Love's dashboard, and whether something else shares the key."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome="rate_limited"}[5m])
+          )
+          /
+          sum by (appliance, region, node, instance) (
+            rate(piri_chain_rpc_calls_total{${local.piri_metric_matcher}, outcome!="canceled"}[5m])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0.05] }
+        }]
+      })
+    }
+  }
+
+  # The Lotus WebSocket closed under Piri's ChainNotify subscription more than
+  # five times in an hour. Drops happen on Chain.Love's side, to every Piri at
+  # once, about ten times a week each, and recover within seconds; the busiest
+  # hour in a week of staging and dev logs had three. More than five is a
+  # connection that keeps failing. A drop that does not recover is "Piri's
+  # chain head is stale". A warning: Piri resubscribes after each drop.
+  rule {
+    name           = "Piri's chain RPC WebSocket keeps dropping"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Piri {{ $labels.instance }}'s chain RPC WebSocket keeps dropping"
+      description = "Piri's WebSocket to its chain RPC endpoint (Chain.Love) has dropped more than five times in the last hour. Piri resubscribes each time, but chain notifications are missed while it does. Check Chain.Love's status page and whether every Piri is affected (an endpoint problem) or only this one (its host or network)."
+      runbook_url = "https://github.com/fil-forge/infra-nodes/blob/main/docs/RUNBOOK.md#when-something-is-wrong"
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, instance) (
+            increase(piri_chain_rpc_subscriptions_closed_total{${local.piri_metric_matcher}, method="ChainNotify"}[1h])
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [5] }
+        }]
+      })
+    }
+  }
+
+  # The appliance's ZFS pool. prod/us-east-2 keeps all its state on one pool,
+  # a mirror of two drives. One drive failing leaves the pool DEGRADED and
+  # every container serving, so nothing else says it happened, and a second
+  # failure loses the pool (infra-nodes docs/decisions/2026-11-ist1-appliance-
+  # storage.md, "Left to the node's deployment"). The state comes from the node
+  # exporter's zfs collector as node_zfs_zpool_state, 1 for the state the pool
+  # is in; what the last scrub found comes from the node's textfile report
+  # (infra-nodes docs/observability.md, "The ZFS pool").
+  #
+  # Critical: on-call has to get the drive replaced before the second one goes.
+  # `for` is 5m so a device that drops and returns within one evaluation does
+  # not page. FAULTED, SUSPENDED and UNAVAIL fire this too, though those
+  # usually take the node's telemetry down and "Appliance has stopped
+  # reporting" with it.
+  #
+  # no_data_state is OK: a healthy pool has every non-online series at 0, which
+  # the threshold drops, and a node without ZFS has none at all.
+  #
+  # Paused until prod-us-east-2 is a live appliance; the PR that lists it in
+  # live_appliances unpauses these three rules with no edit here.
+  rule {
+    name           = "Appliance ZFS pool is not online"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "ZFS pool {{ $labels.zpool }} on {{ $labels.node }} is {{ $labels.state }}"
+      description = "The pool is not ONLINE. On a mirror, DEGRADED means one drive has failed or gone missing and the node is running on the other; a second failure loses the pool. `zpool status -x {{ $labels.zpool }}` on the host names the drive. Get it replaced, then `zpool replace`; the alert clears when the resilver finishes."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "critical"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          max by (appliance, region, node, zpool, state) (
+            node_zfs_zpool_state{${local.appliance_matcher}, state!="online"}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # A scrub that found blocks neither drive could repair, or a pool that lists
+  # files with permanent errors. The data is already damaged, so paging at
+  # night recovers nothing: a warning. The two series are summed per pool so
+  # one instance covers both. Scan errors are blocks no copy could supply;
+  # only a scrub's are read here, and a resilver's land in the pool's data
+  # error count, so this still catches them. `for` is 5m: neither value
+  # moves until the next scrub or a `zpool clear`.
+  #
+  # no_data_state is OK: a pool with no errors fails the threshold, and a node
+  # without the report has no series.
+  rule {
+    name           = "Appliance ZFS pool has data errors"
+    condition      = "B"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "ZFS pool {{ $labels.zpool }} on {{ $labels.node }} has data errors"
+      description = "The last scrub found errors it could not repair, or the pool lists files with permanent errors. `zpool status -v {{ $labels.zpool }}` on the host lists the files; the dataset each is in says which service owns it. Restore them, then `zpool clear` and `zpool scrub` to confirm."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId      = "A"
+        instant    = true
+        range      = false
+        intervalMs = 1000
+        expr       = <<-PROMQL
+          sum by (appliance, region, node, zpool) (
+            zfs_pool_data_errors{${local.appliance_matcher}}
+            or
+            zfs_pool_scan_errors{${local.appliance_matcher}, function="scrub"}
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
+        }]
+      })
+    }
+  }
+
+  # One or both of the pool's two sources has stopped. Four cases:
+  # - The report has stopped moving. The textfile collector re-exports the
+  #   last file on every scrape, so its series stay present with stale
+  #   values, and the file's modification time is the signal, as the
+  #   reconcile stamp's age is for "Appliance has stopped reconciling". The
+  #   timer runs every five minutes; thirty without a write is six missed runs.
+  # - The node sends the pool state but no report: the timer was never
+  #   enabled, so a stale-age check has nothing to read.
+  # - The node sends the report but no pool state: the zfs collector is
+  #   failing, and the "not online" rule above has nothing to read, so a
+  #   degraded pool would not page.
+  # - prod-us-east-2 reconciles but sends neither: the rollout that ships both
+  #   was missed or both collectors are off. That appliance is the one these
+  #   rules expect a pool on, so its reconcile stamp, which every reporting
+  #   node sends, stands in for the missing sources there. "Appliance has stopped reporting" covers a
+  #   node that sends no stamp either.
+  # A warning: the pool itself is probably fine, and on-call can read its
+  # state on the host with `zpool status -x`.
+  #
+  # no_data_state is OK: a healthy node fails every branch, and a node
+  # without ZFS has neither source and is not prod-us-east-2.
+  rule {
+    name           = "Appliance ZFS pool health is not reporting"
+    condition      = "B"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    is_paused      = !contains(var.live_appliances, "prod-us-east-2")
+
+    annotations = {
+      summary     = "The ZFS pool's health on {{ $labels.node }} is not reaching Grafana"
+      description = "Either zfs_pool.prom is missing or 30 minutes old (filone-pool-health.timer stopped or was never enabled; `systemctl list-timers filone-pool-health.timer` and `journalctl -u filone-pool-health.service` say why), or the report arrives without node_zfs_zpool_state (Alloy's zfs collector is failing; `docker logs filone-platform-alloy-1`), or the node reconciles but sends neither (check both). Until fixed, `zpool status -x` on the host shows the pool's state."
+      runbook_url = local.appliance_runbook
+    }
+
+    labels = {
+      team_name = "forge"
+      component = "appliance"
+      stage     = local.appliance_stage_label
+      severity  = "warning"
+    }
+
+    notification_settings {
+      policy = local.forge_policy
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode(merge(local.query_defaults, {
+        refId        = "A"
+        instant      = true
+        range        = false
+        legendFormat = "{{appliance}}"
+        expr         = <<-PROMQL
+          (
+            max by (node, region, appliance) (
+              time() - node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"}
+            ) > 1800
+          )
+          or
+          (
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+          )
+          or
+          (
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+          )
+          or
+          (
+            count by (node, region, appliance) (deploy_last_success_timestamp{project="reconcile", appliance="prod-us-east-2", service_name=~"appliance-.*-host"})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_zfs_zpool_state{${local.appliance_matcher}})
+            unless on (node, region, appliance)
+            count by (node, region, appliance) (node_textfile_mtime_seconds{${local.appliance_matcher}, file="/metrics/zfs_pool.prom"})
+          )
+        PROMQL
+      }))
+    }
+
+    data {
+      ref_id         = "B"
+      query_type     = "expression"
+      datasource_uid = "__expr__"
+
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "A"
+        datasource    = { type = "__expr__", uid = "__expr__" }
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          type      = "query"
+          operator  = { type = "and" }
+          query     = { params = ["B"] }
+          reducer   = { type = "last", params = [] }
+          evaluator = { type = "gt", params = [0] }
         }]
       })
     }

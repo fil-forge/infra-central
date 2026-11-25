@@ -11,7 +11,7 @@ import (
 func testRequest() Request {
 	return Request{
 		Region:            "us-east-9",
-		PiriDID:           "did:key:zPiri",
+		PiriDID:           "did:web:piri-0.example",
 		IngotDID:          "did:key:zIngot",
 		PiriURL:           "https://piri.dev.forge-sandbox.fil.one",
 		PiriProof:         []byte("proof-bytes"),
@@ -37,11 +37,11 @@ func TestPlanFromListsEveryWriteInApplyOrderForAFreshAppliance(t *testing.T) {
 	plan := PlanFrom(&State{Region: "us-east-9"}, testRequest())
 
 	want := []string{
-		"add did:key:zPiri to the delegator's allow list",
-		"register did:key:zPiri with sprue at https://piri.dev.forge-sandbox.fil.one",
-		"set did:key:zPiri's weights to 100 and 100",
+		"add did:web:piri-0.example to the delegator's allow list",
+		"register did:web:piri-0.example with sprue at https://piri.dev.forge-sandbox.fil.one",
+		"set did:web:piri-0.example's weights to 100 and 100",
 		"register did:key:zIngot with hilt for region us-east-9",
-		"record did:key:zPiri as a Piri of region us-east-9",
+		"record did:web:piri-0.example as a Piri of region us-east-9",
 	}
 	if !reflect.DeepEqual(plan.Actions, want) {
 		t.Errorf("actions = %v, want %v", plan.Actions, want)
@@ -83,7 +83,7 @@ func TestPlanFromReplacesTheDelegationOfARegisteredProvider(t *testing.T) {
 
 	plan := PlanFrom(state, req)
 
-	want := []string{"replace did:key:zPiri's delegation in sprue with the one in the request"}
+	want := []string{"replace did:web:piri-0.example's delegation in sprue with the one in the request"}
 	if !reflect.DeepEqual(plan.Actions, want) || len(plan.Blockers) != 0 {
 		t.Errorf("plan = %+v, want actions %v and no blockers", plan, want)
 	}
@@ -111,7 +111,7 @@ func TestApplyReplacesTheDelegationOfARegisteredProvider(t *testing.T) {
 	if fakes.sprue.registeredDID != "" {
 		t.Errorf("registered %s again, want only the delegation replaced", fakes.sprue.registeredDID)
 	}
-	if !slices.Contains(result.Performed, "replaced did:key:zPiri's delegation in sprue") {
+	if !slices.Contains(result.Performed, "replaced did:web:piri-0.example's delegation in sprue") {
 		t.Errorf("performed = %v, want the replacement reported", result.Performed)
 	}
 }
@@ -195,21 +195,21 @@ func TestPlanFromBlocksASprueEndpointMismatch(t *testing.T) {
 func TestPlanFromAddsASecondPiriToHiltsNodes(t *testing.T) {
 	req := testRequest()
 	req.PiriProof = nil // a registered provider given a delegation also has it replaced
-	req.PiriDID = "did:key:zPiri2"
+	req.PiriDID = "did:web:piri-1.example"
 	state := &State{
 		Region:        req.Region,
 		AllowListed:   true,
 		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
 		HiltRegion:    req.Region,
 		HiltPolicy:    "did:key:zPolicy",
-		RecordedPiris: []string{"did:key:zPiri"},
+		RecordedPiris: []string{"did:web:piri-0.example"},
 	}
 
 	plan := PlanFrom(state, req)
 
 	want := []string{
-		"add did:key:zPiri2 to did:key:zIngot's storage nodes in hilt",
-		"record did:key:zPiri2 as a Piri of region us-east-9",
+		"add did:web:piri-1.example to did:key:zIngot's storage nodes in hilt",
+		"record did:web:piri-1.example as a Piri of region us-east-9",
 	}
 	if !reflect.DeepEqual(plan.Actions, want) {
 		t.Errorf("actions = %v, want %v", plan.Actions, want)
@@ -220,14 +220,14 @@ func TestApplySendsHiltTheWholeNodeSetForASecondPiri(t *testing.T) {
 	fakes := newFakes()
 	fakes.hilt.region = "us-east-9"
 	req := testRequest()
-	req.PiriDID = "did:key:zPiri2"
+	req.PiriDID = "did:web:piri-1.example"
 	state := &State{
 		Region:        req.Region,
 		AllowListed:   true,
 		Sprue:         &Provider{Endpoint: req.PiriURL, Weight: 100, ReplicationWeight: 100},
 		HiltRegion:    req.Region,
 		HiltPolicy:    "did:key:zPolicy",
-		RecordedPiris: []string{"did:key:zPiri"},
+		RecordedPiris: []string{"did:web:piri-0.example"},
 	}
 
 	if _, err := Apply(context.Background(), fakes.deps(), req, PlanFrom(state, req)); err != nil {
@@ -237,10 +237,10 @@ func TestApplySendsHiltTheWholeNodeSetForASecondPiri(t *testing.T) {
 	if fakes.hilt.added {
 		t.Error("Apply() re-registered a provider hilt already holds")
 	}
-	if want := []string{"did:key:zPiri", "did:key:zPiri2"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
+	if want := []string{"did:web:piri-0.example", "did:web:piri-1.example"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
 		t.Errorf("hilt nodes = %v, want %v", fakes.hilt.nodes, want)
 	}
-	if fakes.piri.added != "us-east-9 did:key:zPiri2" {
+	if fakes.piri.added != "us-east-9 did:web:piri-1.example" {
 		t.Errorf("piri record = %q, want the second Piri recorded", fakes.piri.added)
 	}
 }
@@ -262,7 +262,7 @@ func TestPlanFromSetsNodesForAProviderWithoutAPolicy(t *testing.T) {
 
 	plan := PlanFrom(state, req)
 
-	want := []string{"set did:key:zIngot's storage nodes in hilt to did:key:zPiri"}
+	want := []string{"set did:key:zIngot's storage nodes in hilt to did:web:piri-0.example"}
 	if !reflect.DeepEqual(plan.Actions, want) {
 		t.Errorf("actions = %v, want %v", plan.Actions, want)
 	}
@@ -290,7 +290,7 @@ func TestApplySetsNodesForAProviderWithoutAPolicy(t *testing.T) {
 	if fakes.hilt.added {
 		t.Error("Apply() re-registered a provider hilt already holds")
 	}
-	if want := []string{"did:key:zPiri"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
+	if want := []string{"did:web:piri-0.example"}; !reflect.DeepEqual(fakes.hilt.nodes, want) {
 		t.Errorf("hilt nodes = %v, want %v", fakes.hilt.nodes, want)
 	}
 	if fakes.piri.added != "" {
@@ -357,13 +357,13 @@ func TestApplyPerformsEveryWriteForAFreshAppliance(t *testing.T) {
 		"proofReturns": result.HiltIngotS3Proof,
 	}
 	want := map[string]any{
-		"allowListed":  "did:key:zPiri",
-		"sprueDID":     "did:key:zPiri",
+		"allowListed":  "did:web:piri-0.example",
+		"sprueDID":     "did:web:piri-0.example",
 		"sprueProof":   "proof-bytes",
 		"hiltRegion":   "us-east-9",
-		"hiltNodes":    []string{"did:key:zPiri"},
+		"hiltNodes":    []string{"did:web:piri-0.example"},
 		"weight":       100,
-		"piriRecord":   "us-east-9 did:key:zPiri",
+		"piriRecord":   "us-east-9 did:web:piri-0.example",
 		"proofReturns": "the-proof",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -570,4 +570,23 @@ func (h *fakeHilt) AddProvider(ctx context.Context, did, region string, nodes []
 func (h *fakeHilt) SetProviderNodes(ctx context.Context, did string, nodes []string) error {
 	h.nodes = nodes
 	return nil
+}
+
+// A region that still has a Piri recorded under another DID method would hand
+// it to hilt beside the new one, so onboarding stops until it is cleared.
+func TestPlanFromBlocksARegionWithANonWebPiriRecorded(t *testing.T) {
+	req := testRequest()
+	state := &State{
+		Region:        req.Region,
+		RecordedPiris: []string{"did:key:zOldPiri", "did:web:piri-9.example"},
+	}
+
+	plan := PlanFrom(state, req)
+
+	if len(plan.Blockers) != 1 || !strings.Contains(plan.Blockers[0], "did:key:zOldPiri") {
+		t.Fatalf("blockers = %v, want one naming the did:key record", plan.Blockers)
+	}
+	if strings.Contains(plan.Blockers[0], "piri-9.example") {
+		t.Errorf("the did:web record is named as a blocker: %v", plan.Blockers)
+	}
 }

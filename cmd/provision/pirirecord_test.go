@@ -7,33 +7,36 @@ import (
 	"testing"
 )
 
-// A DID cannot be a parameter name, so the did:key's tail is the name and the
-// DID is the value.
+// A DID cannot be a parameter name, so the host the did:web names is the name
+// and the DID is the value.
 func TestPiriParameterName(t *testing.T) {
-	got, err := piriParameterName("did:key:z6MkExample")
+	got, err := piriParameterName("did:web:piri-0.eu-central-3.staging.example.com")
 	if err != nil {
 		t.Fatalf("piriParameterName: %v", err)
 	}
-	if want := "piri/z6MkExample"; got != want {
+	if want := "piri/piri-0.eu-central-3.staging.example.com"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
-// Anything but a did:key carries characters SSM rejects, so it is refused rather
-// than mangled into a name.
+// Anything but the did:web of a host carries characters SSM rejects, so it is
+// refused rather than mangled into a name.
 func TestPiriParameterNameRefusesWhatSSMCannotHold(t *testing.T) {
 	cases := map[string]string{
-		"a did:web":         "did:web:piri.example",
-		"a bare did:key":    "did:key:",
-		"not a DID at all":  "z6MkExample",
-		"an empty argument": "",
+		"a did:key":             "did:key:z6MkExample",
+		"a did:web with a port": "did:web:piri.example%3A8443",
+		"a did:web with a path": "did:web:piri.example:nodes:one",
+		"an upper-case host":    "did:web:Piri.Example",
+		"a bare did:web":        "did:web:",
+		"not a DID at all":      "piri.example",
+		"an empty argument":     "",
 	}
 
 	for desc, did := range cases {
 		t.Run(desc, func(t *testing.T) {
 			_, err := piriParameterName(did)
-			if err == nil || !strings.Contains(err.Error(), "did:key") {
-				t.Errorf("err = %v, want one naming the did:key requirement", err)
+			if err == nil || !strings.Contains(err.Error(), "did:web") {
+				t.Errorf("err = %v, want one naming the did:web requirement", err)
 			}
 		})
 	}
@@ -41,15 +44,15 @@ func TestPiriParameterNameRefusesWhatSSMCannotHold(t *testing.T) {
 
 func TestRecordedReturnsEveryPiriTheRegionHolds(t *testing.T) {
 	store := &fakePublicStore{params: map[string]string{
-		"piri/z6MkOne": "did:key:z6MkOne",
-		"piri/z6MkTwo": "did:key:z6MkTwo",
+		"piri/one.example": "did:web:one.example",
+		"piri/two.example": "did:web:two.example",
 	}}
 
 	got, err := (&piriRecords{store: store}).Recorded(context.Background(), "us-east-9")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"did:key:z6MkOne", "did:key:z6MkTwo"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"did:web:one.example", "did:web:two.example"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Recorded() = %v, want %v", got, want)
 	}
 }
@@ -69,10 +72,10 @@ func TestRecordedReturnsNothingForAnUnrecordedRegion(t *testing.T) {
 func TestRecordWritesTheDIDUnderItsTail(t *testing.T) {
 	store := &fakePublicStore{params: map[string]string{}}
 
-	if err := (&piriRecords{store: store}).Record(context.Background(), "us-east-9", "did:key:z6MkOne"); err != nil {
+	if err := (&piriRecords{store: store}).Record(context.Background(), "us-east-9", "did:web:one.example"); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"piri/z6MkOne": "did:key:z6MkOne"}
+	want := map[string]string{"piri/one.example": "did:web:one.example"}
 	if !reflect.DeepEqual(store.params, want) {
 		t.Errorf("params = %v, want %v", store.params, want)
 	}

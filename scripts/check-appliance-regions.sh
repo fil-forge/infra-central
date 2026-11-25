@@ -16,7 +16,7 @@ set -euo pipefail
 grafana_tfvars="terraform/envs/grafana/terraform.tfvars"
 
 # The single-line list form the tfvars files use. A missing line is an empty
-# list, which is how prod states that it has no regions yet.
+# list, which is how a stage states that it has no regions.
 read_list() {
   sed -n "s/^$1 *= *\[\(.*\)\]/\1/p" "$2" | tr -d ' "' | tr ',' '\n' | sed '/^$/d'
 }
