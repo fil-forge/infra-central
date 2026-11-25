@@ -11,9 +11,9 @@ The steps are written for prod's Aurora cluster. Dev and staging run an RDS inst
 
 | Stage | Engine | Point-in-time window | Final snapshot on delete |
 |---|---|---|---|
-| prod | Aurora PostgreSQL 16, cluster `fc-prod`, members `fc-prod-1` and `fc-prod-2` | 35 days | `fc-prod-final` |
-| staging | RDS PostgreSQL 16, instance `fc-staging` | 7 days | `fc-staging-final` |
-| dev | RDS PostgreSQL 16, instance `fc-dev` | 1 day | none |
+| prod | Aurora PostgreSQL 18, cluster `fc-prod`, members `fc-prod-1` and `fc-prod-2` | 35 days | `fc-prod-final` |
+| staging | RDS PostgreSQL 18, instance `fc-staging` | 7 days | `fc-staging-final` |
+| dev | RDS PostgreSQL 18, instance `fc-dev` | 1 day | none |
 
 When the cluster was deleted, its automated backups went with it. Restore its final snapshot with
 `restore-db-cluster-from-snapshot --snapshot-identifier fc-prod-final` in place of the point-in-time
@@ -91,7 +91,7 @@ aws rds restore-db-cluster-to-point-in-time \
   --source-db-cluster-identifier fc-prod --db-cluster-identifier fc-prod-restore-$TS \
   --restore-to-time $T --kms-key-id "$key" \
   --db-subnet-group-name fc-prod --vpc-security-group-ids "$sg" \
-  --db-cluster-parameter-group-name fc-prod-aurora-postgresql16 \
+  --db-cluster-parameter-group-name fc-prod-aurora-postgresql18 \
   --copy-tags-to-snapshot --deletion-protection
 aws rds wait db-cluster-available --db-cluster-identifier fc-prod-restore-$TS
 for n in 1 2; do
@@ -195,11 +195,10 @@ member, or changes an identifier, means a step went wrong: stop and roll back.
 
 ## 8. Re-run seed and vault
 
-Open a pull request that bumps `seed_trigger` and adds `vault_trigger = "2"` in
-`terraform/envs/prod/platform/main.tf`; prod has not set `vault_trigger` before, and the module's
-default is `"1"`. Re-enable `check-and-deploy.yml` so the pull request gets its plans; the ruleset
-still blocks `main`. Read `plan-prod-platform`, then merge with the admin bypass. The apply does
-three things:
+Open a pull request that bumps `seed_trigger` and `vault_trigger` in
+`terraform/envs/prod/platform/main.tf`. Re-enable `check-and-deploy.yml` so the pull request gets
+its plans; the ruleset still blocks `main`. Read `plan-prod-platform`, then merge with the admin
+bypass. The apply does three things:
 
 - Seed re-applies every role password from SSM, connecting with the new master secret.
 - Vault finds hilt's stored `secret_id` unknown to the restored OpenBao and issues a new one.
@@ -282,8 +281,7 @@ the vault phase has run against the restored data, and going back takes a second
 ## Dev and staging (RDS)
 
 Dev and staging run one RDS instance, `fc-$S`, with no members to rename. Steps 2, 4, 6 and 8 to 11
-are the same with `$S` in place of `prod`. In step 8, dev bumps both triggers, and staging, which
-sets no `vault_trigger` either, adds `vault_trigger = "2"` as prod does.
+are the same with `$S` in place of `prod`.
 
 In step 1, read the window from the instance:
 
@@ -335,8 +333,9 @@ tofu plan
 ```
 
 On dev the plan then turned Performance Insights back on, added the stage tags, and showed three
-lines that change nothing: `engine_version` `16.13` to `16`, which RDS resolves to 16.13,
-`manage_master_user_password`, and `password_wo`.
+lines that change nothing: `engine_version` from the full release RDS reports to the major version
+the module sets, which RDS resolves to the same release (`16.13` to `16` when dev ran PostgreSQL
+16), `manage_master_user_password`, and `password_wo`.
 
 In step 12, delete `fc-$S-pre-restore-$TS` with `delete-db-instance --final-db-snapshot-identifier
 fc-$S-pre-restore-$TS-final`.
