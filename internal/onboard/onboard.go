@@ -195,6 +195,18 @@ func PlanFrom(state *State, req Request) *Plan {
 			fmt.Sprintf("add %s to the delegator's allow list", req.PiriDID))
 	}
 
+	// A Piri is the did:web of its public URL. A recorded DID of any other
+	// method names an identity no node answers to, and onboarding beside it
+	// would hand it to hilt as one of the region's nodes and leave its
+	// provider in sprue.
+	for _, recorded := range state.RecordedPiris {
+		if !strings.HasPrefix(recorded, "did:web:") {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf(
+				"region %s has %s recorded as a Piri, which is not a did:web, so no node answers to it; deregister it from sprue and remove its record from the region before onboarding (make reset-apps does both for a whole dev or staging stage)",
+				req.Region, recorded))
+		}
+	}
+
 	switch {
 	case state.Sprue == nil && len(req.PiriProof) == 0:
 		// Central cannot produce this proof, so no run can get past sprue

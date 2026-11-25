@@ -7,10 +7,13 @@
 // private key ever enters Terraform state, and nothing is written to a local
 // disk anywhere in the flow.
 //
-// Terraform drives two phases, because the ordering is circular otherwise.
-// OpenBao stores its data in Postgres, so its database must exist before it
-// starts; but OpenBao must be running before it can be configured. Phase seed
-// runs after RDS and before OpenBao; phase vault runs once OpenBao is serving.
+// Terraform drives seed and vault as two phases, because the ordering is
+// circular otherwise. OpenBao stores its data in Postgres, so its database
+// must exist before it starts; but OpenBao must be running before it can be
+// configured. Phase seed runs after RDS and before OpenBao; phase vault runs
+// once OpenBao is serving. Terraform also drives phase analyze on a stage that
+// allows a major version upgrade and applies it at once, after the database
+// changes version; it only reads data.
 //
 // Every other phase is for an operator, and Terraform must never invoke it: an
 // apply must not move money, issue a credential or delete a registration. An
@@ -26,6 +29,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-lambda-go/lambdacontext"
 	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -45,6 +49,12 @@ type Request struct {
 	// re-invocation by changing the input, which is how aws_lambda_invocation
 	// decides whether to call again.
 	Trigger string `json:"trigger,omitempty"`
+
+	// --- analyze phase only ---
+
+	// Target names the cluster to analyze: "central", the default, or
+	// "pandora".
+	Target string `json:"target,omitempty"`
 
 	// --- vault phase only ---
 
@@ -108,13 +118,28 @@ type Request struct {
 	Weight            int `json:"weight,omitempty"`
 	ReplicationWeight int `json:"replication_weight,omitempty"`
 
-	// --- fund, appliance-token, appliance-backup-key, onboard, retire and
-	// reset-apps phases ---
+	// --- fund, appliance-token, appliance-backup-key, appliance-root-store,
+	// onboard, retire and reset-apps phases ---
 
 	// Confirm must be true before a phase signs or mints anything. Without it
 	// the phase reports its plan and stops, so no invocation moves money or
 	// issues a credential by accident.
 	Confirm bool `json:"confirm,omitempty"`
+
+	// --- reset-apps phase only ---
+
+	// AllowProduction lets the reset-apps phase run on the prod stage, which it
+	// otherwise refuses. It has no effect on any other stage.
+	AllowProduction bool `json:"allow_production,omitempty"`
+
+	// --- appliance-root-store phase only ---
+
+	// RootToken and RecoveryKey are what an appliance's OpenBao printed at
+	// init. They are secret: the phase stores them and never logs or returns
+	// them, and scripts/store-appliance-root-credentials.sh keeps them off
+	// every command line.
+	RootToken   string `json:"root_token,omitempty"`
+	RecoveryKey string `json:"recovery_key,omitempty"`
 
 	// --- fund phase only ---
 
@@ -142,6 +167,8 @@ type Response struct {
 	Secrets map[string]map[string]string `json:"secrets,omitempty"`
 	// Databases lists the Postgres databases now present.
 	Databases []string `json:"databases,omitempty"`
+	// Analyzed lists the databases the analyze phase ran ANALYZE in.
+	Analyzed []string `json:"analyzed,omitempty"`
 	// BackupReplicaRegion is the region the seed phase replicated the keys to.
 	// Terraform checks it against the region it configured, so an image that
 	// predates replication fails the apply rather than skipping it.
@@ -180,6 +207,11 @@ type Response struct {
 	BackupKeyPlan   *BackupKeyPlan   `json:"backup_key_plan,omitempty"`
 	BackupKeyResult *BackupKeyResult `json:"backup_key_result,omitempty"`
 
+	// RootCredentialsPlan and RootCredentialsResult belong to the
+	// appliance-root-store phase, and carry only a region and version numbers.
+	RootCredentialsPlan   *RootCredentialsPlan   `json:"root_credentials_plan,omitempty"`
+	RootCredentialsResult *RootCredentialsResult `json:"root_credentials_result,omitempty"`
+
 	// OnboardPlan and OnboardResult belong to the onboard phase. Both are
 	// public: the result's proof is a delegation, which is useless without the
 	// audience's own key.
@@ -197,12 +229,17 @@ type Response struct {
 	ResetAppsResult *ResetAppsResult `json:"reset_apps_result,omitempty"`
 }
 
+// baseLogger is the logger every invocation's default logger derives from.
+var baseLogger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	slog.SetDefault(baseLogger)
 	lambda.Start(handle)
 }
 
 func handle(ctx context.Context, req Request) (*Response, error) {
+	requestID := beginInvocation(ctx, baseLogger)
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -215,10 +252,11 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 
 	secretsClient := secretsmanager.NewFromConfig(awsCfg)
 	deps := &deps{
-		cfg:     cfg,
-		store:   ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
-		keys:    secretstore.New(secretsClient, cfg.Stage),
-		secrets: secretsClient,
+		cfg:       cfg,
+		store:     ssmstore.New(ssm.NewFromConfig(awsCfg, throttleTolerantRetries), cfg.Stage),
+		keys:      secretstore.New(secretsClient, cfg.Stage),
+		secrets:   secretsClient,
+		requestID: requestID,
 	}
 
 	// Every log line here announces the step about to start, never the one
@@ -235,12 +273,16 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.seed(ctx)
 	case "vault":
 		return deps.vault(ctx, req)
+	case "analyze":
+		return deps.analyze(ctx, req)
 	case "fund":
 		return deps.fund(ctx, req)
 	case "appliance-token":
 		return deps.applianceToken(ctx, req)
 	case "appliance-backup-key":
 		return deps.applianceBackupKey(ctx, req)
+	case "appliance-root-store":
+		return deps.applianceRootStore(ctx, req)
 	case "onboard":
 		return deps.onboardPhase(ctx, req)
 	case "retire":
@@ -249,8 +291,29 @@ func handle(ctx context.Context, req Request) (*Response, error) {
 		return deps.resetAppsPhase(ctx, req)
 	default:
 		return nil, fmt.Errorf(
-			"unknown phase %q; want \"seed\", \"vault\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
+			"unknown phase %q; want \"seed\", \"vault\", \"analyze\", \"fund\", \"appliance-token\", \"appliance-backup-key\", \"appliance-root-store\", \"onboard\", \"retire\" or \"reset-apps\"", req.Phase)
 	}
+}
+
+// beginInvocation tags every log line of this invocation with the Lambda
+// request ID and returns it. CloudTrail records the same ID for the Invoke,
+// and the OpenBao client sends it as X-Correlation-Id, so one value finds the
+// caller, the function's log and OpenBao's audit entries; docs/observability.md
+// has the lookup. Outside Lambda there is no ID, and the lines go untagged.
+//
+// It replaces the default logger rather than threading a logger through every
+// phase. An execution environment runs one invocation at a time and nothing
+// here starts a goroutine, so the default logger belongs to the invocation in
+// progress. It derives from base every time, so a warm environment does not
+// carry the previous invocation's ID along.
+func beginInvocation(ctx context.Context, base *slog.Logger) string {
+	lc, ok := lambdacontext.FromContext(ctx)
+	if !ok || lc.AwsRequestID == "" {
+		slog.SetDefault(base)
+		return ""
+	}
+	slog.SetDefault(base.With("request_id", lc.AwsRequestID))
+	return lc.AwsRequestID
 }
 
 // throttleTolerantRetries slows the SSM client down to the write quota instead
@@ -284,6 +347,9 @@ type deps struct {
 	// keys holds the service identities and the wallets.
 	keys    *secretstore.Store
 	secrets *secretsmanager.Client
+	// requestID is the Lambda request ID, empty outside Lambda. The OpenBao
+	// client sends it with every request; see beginInvocation.
+	requestID string
 }
 
 // addSecret records the ARN of a secret the seed phase ensured.

@@ -34,9 +34,9 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("FORGE_PRIVATE_CIDRS is required for the vault phase")
 	}
 
-	client, err := api.NewClient(&api.Config{Address: d.cfg.OpenBaoAddr})
+	client, err := d.openBaoClient()
 	if err != nil {
-		return nil, fmt.Errorf("build openbao client: %w", err)
+		return nil, err
 	}
 
 	slog.Info("waiting for openbao to serve",
@@ -68,6 +68,13 @@ func (d *deps) vault(ctx context.Context, req Request) (*Response, error) {
 		if err := vaultinit.WaitForUnsealed(unsealCtx, client); err != nil {
 			return nil, err
 		}
+	}
+
+	// First of the writes, so every request after it lands in the audit log
+	// with this invocation's ID.
+	slog.Info("auditing the correlation header", "header", vaultinit.CorrelationHeader)
+	if err := vaultinit.EnsureCorrelationHeaderAudited(ctx, client); err != nil {
+		return nil, err
 	}
 
 	slog.Info("ensuring mounts", "hilt_mount", vaultinit.HiltMount, "transit_mount", vaultinit.TransitMount)
@@ -156,7 +163,8 @@ func (d *deps) reconcileApplianceKeys(ctx context.Context, client *api.Client, r
 }
 
 // retireAppliance revokes a retired region's unseal token, removes the
-// parameters describing it and destroys its transit key.
+// parameters describing it and the copy of its root credentials, and destroys
+// its transit key.
 //
 // Both ends of the order carry weight. Revoking first means the node loses its
 // unseal ability even if a later step fails, so a half-finished retirement still
@@ -187,6 +195,12 @@ func (d *deps) retireAppliance(ctx context.Context, client *api.Client, region s
 
 	deleted, err := d.store.DeletePrefix(ctx, service)
 	if err != nil {
+		return err
+	}
+
+	// A retired region's OpenBao never unseals again, so its root credentials
+	// open nothing. The 1Password entry is the operator's to delete.
+	if err := vaultinit.RemoveApplianceRootCredentials(ctx, client, region); err != nil {
 		return err
 	}
 

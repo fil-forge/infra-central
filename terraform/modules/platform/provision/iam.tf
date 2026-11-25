@@ -131,20 +131,6 @@ data "aws_iam_policy_document" "this" {
     }
   }
 
-  # The delegator's allow list, written by the onboard phase. An appliance whose
-  # DID is absent from it is refused at `piri init` with a 403, and the
-  # delegator's own CLI needs a shell in its task that no service exposes.
-  statement {
-    sid = "WriteDelegatorAllowList"
-
-    actions = [
-      "dynamodb:GetItem",
-      "dynamodb:PutItem",
-    ]
-
-    resources = [var.allow_list_table_arn]
-  }
-
   # The appliance-backup-key phase mints each region's backup key, so the
   # secret never enters Terraform state. The grant is the three calls it makes
   # and only on the writer users. Creating or deleting the users themselves is

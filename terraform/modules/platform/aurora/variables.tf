@@ -33,9 +33,8 @@ variable "kms_key_arn" {
 }
 
 variable "engine_version" {
-  description = "Aurora PostgreSQL release, pinned to a minor version. 16 matches the RDS instances in dev and staging."
+  description = "Aurora PostgreSQL release, pinned to a minor version and set by each caller for its own cluster. The parameter group's name carries the major version. Moving to a new major version needs allow_major_version_upgrade; see docs/decisions/2026-11-database-major-upgrades.md."
   type        = string
-  default     = "16.15"
 
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+$", var.engine_version))
@@ -81,6 +80,18 @@ variable "backup_retention_days" {
   description = "Point-in-time recovery window. Aurora allows up to 35 days."
   type        = number
   default     = 35
+}
+
+variable "allow_major_version_upgrade" {
+  description = "Lets a change of engine_version cross a major version. Off by default; see docs/decisions/2026-11-database-major-upgrades.md."
+  type        = bool
+  default     = false
+}
+
+variable "apply_immediately" {
+  description = "Applies every cluster change at once. Off, AWS holds a change that needs an outage, such as a version change, until the next maintenance window."
+  type        = bool
+  default     = false
 }
 
 variable "deletion_protection" {

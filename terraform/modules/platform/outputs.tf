@@ -74,18 +74,6 @@ output "bucket_arns" {
   value = module.storage.bucket_arns
 }
 
-output "allow_list_table_name" {
-  value = module.storage.allow_list_table_name
-}
-
-output "provider_info_table_name" {
-  value = module.storage.provider_info_table_name
-}
-
-output "dynamodb_table_arns" {
-  value = module.storage.table_arns
-}
-
 output "appliance_backup_bucket" {
   description = "The bucket appliances push their backups to, or null in a stage that takes none."
   value       = one(module.appliance_backups[*].bucket_name)

@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
 
@@ -701,27 +701,33 @@ jobs:
 
   # Ask infra-nodes to test the nodes of every stage whose central services
   # passed smoke-<stage> on this commit. The node tests run in infra-nodes:
-  # a smoke test of each node, then an end-to-end test of the write path
-  # through Hilt, with an alert that names this commit. One dispatch for both
-  # stages, so a push starts one run there and gets at most one alert. It
-  # goes out once central's smoke-staging has finished too; central's deploys
-  # and smoke tests are quick, so dev's nodes wait only briefly. Prod stays
-  # out until FIL-1491 gives the test a credential that cannot reach customer
-  # tenants.
+  # a smoke test of each node, then, in dev and staging, an end-to-end test
+  # of the write path through Hilt, with an alert that names this commit.
+  # Prod nodes get only the smoke test until FIL-1491 gives the end-to-end
+  # test a credential that cannot reach customer tenants. One dispatch for
+  # all stages, so a push starts one run there and gets at most one alert.
+  # It goes out once every central smoke test has finished; the stages
+  # deploy in parallel and their smoke tests are quick, so no stage's nodes
+  # wait long.
   start-node-tests:
     if: >-
       !cancelled() && github.event_name == 'push'
-      && (needs.smoke-dev.result == 'success' || needs.smoke-staging.result == 'success')
-    needs: [smoke-dev, smoke-staging]
+      && (needs.smoke-dev.result == 'success'
+        || needs.smoke-staging.result == 'success'
+        || needs.smoke-prod.result == 'success')
+    needs: [smoke-dev, smoke-staging, smoke-prod]
     permissions:
       contents: read
     uses: ./.github/workflows/start-node-tests.yml
     with:
+      # A comma goes before a stage only when an earlier stage is listed.
       stages: >-
-        ${{ format('{0}{1}{2}',
+        ${{ format('{0}{1}{2}{3}{4}',
           needs.smoke-dev.result == 'success' && 'dev' || '',
           needs.smoke-dev.result == 'success' && needs.smoke-staging.result == 'success' && ',' || '',
-          needs.smoke-staging.result == 'success' && 'staging' || '') }}
+          needs.smoke-staging.result == 'success' && 'staging' || '',
+          (needs.smoke-dev.result == 'success' || needs.smoke-staging.result == 'success') && needs.smoke-prod.result == 'success' && ',' || '',
+          needs.smoke-prod.result == 'success' && 'prod' || '') }}
     secrets:
       FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
 
@@ -856,7 +862,7 @@ jobs:
           fi
 
           stages=$(jq -r --argjson needs "$NEEDS" '
-            def node_test_stages: ["dev", "staging"][] | select($needs["smoke-" + .].result == "success");
+            def node_test_stages: ["dev", "staging", "prod"][] | select($needs["smoke-" + .].result == "success");
             map(if . == "start-node-tests" then node_test_stages
                 else sub("^apply-(?<s>.+?)(-platform|-apps)?$"; "\(.s)") | sub("^smoke-"; "") end)
             | unique | join(", ")' <<<"$failed")

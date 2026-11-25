@@ -74,8 +74,9 @@ The cost is a second list to keep, and one that only grows. A retired label stay
 forever, because dropping it is what the refusal is there to catch.
 
 Retirement fires the kill lever in a fixed order: revoke the node's unseal token, delete its token
-role, delete its parameters, destroy the transit key. Revoking first means a retirement that fails
-halfway has still contained the node it was meant to contain. Destroying the key last makes it the
+role, delete its parameters, delete the copy of its root credentials, destroy the transit key.
+Revoking first means a retirement that fails halfway has still contained the node it was meant to
+contain. Destroying the key last makes it the
 record of whether the sequence finished, since the key's presence is what puts the region back in
 front of the next apply; deleting it earlier would strand every step after it with nothing left to
 notice.
@@ -239,9 +240,8 @@ The [Forge service identity RFC] settled Ingot's identity as
 `did:web:s3.<REGION>.filonecontent.com` in production. This repository's dev
 stage uses the `latest` stage label, so its `us-east-9` appliance is
 `did:web:s3.us-east-9.latest.dev.filonecontent.com`. Central derives that value
-from the onboarding region and `ingot_hostname_suffix`. Piri keeps its
-`did:key` and provider URL; Forge owns the Ingot hostname while the operator
-owns Piri's key and endpoint.
+from the onboarding region and `ingot_hostname_suffix`. Piri's identity is
+decided in [Piri is the did:web of its public URL](2026-11-piri-did-web.md).
 
 Two things follow. An appliance can rotate its Ingot key without telling anyone,
 because its DID document publishes the current key and the DID does not move. And
@@ -327,7 +327,8 @@ The allow list is written directly to DynamoDB rather than through the delegator
 `registrar store allow-did` command. The command needs a shell in the delegator's task, and it runs
 as a Fargate task in a private subnet with ECS Exec off. The table takes a single `did` hash key, so
 the item is unambiguous, and it carries the same `added_by`, `added_at` and `notes` fields the
-delegator's own writer adds.
+delegator's own writer adds. The delegator has since moved to Postgres, and the row goes into its
+`allow_list` table: see [2026-11-delegator-postgres.md](2026-11-delegator-postgres.md).
 
 ## Weights are rewritten on every run
 

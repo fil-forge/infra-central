@@ -64,12 +64,6 @@ resource "aws_lambda_function" "this" {
       FORGE_OPENBAO_ADDR          = var.openbao_address
       FORGE_PRIVATE_CIDRS         = join(",", var.private_cidrs)
 
-      # Used only by the onboard phase, which Terraform never invokes. The phase
-      # reaches sprue and hilt at their public hostnames, built from
-      # FORGE_HOSTNAME_SUFFIX above, out through the NAT gateway — the same path
-      # hilt already takes to resolve sprue's did:web document.
-      FORGE_ALLOW_LIST_TABLE = var.allow_list_table_name
-
       # Used only by the appliance-backup-key phase, which Terraform never
       # invokes. Empty in a stage that takes no backups: Lambda rejects a null
       # value, and the phase reads the empty bucket as "not applicable".

@@ -50,10 +50,6 @@ type config struct {
 	// replicas.
 	BackupReplicaRegion string
 
-	// AllowListTable is the delegator's DynamoDB table, written by the onboard
-	// phase. Not validated at startup, because every other phase runs without it.
-	AllowListTable string
-
 	// BackupBucket is the stage's appliance backup bucket, and BackupUserPrefix
 	// the name every region's writer user starts with. Both are empty in a stage
 	// that takes no appliance backups, and the appliance-backup-key phase then
@@ -72,7 +68,6 @@ func loadConfig() (config, error) {
 		DBAdminDatabase:     envOr("FORGE_DB_ADMIN_DATABASE", "postgres"),
 		DBMasterSecret:      os.Getenv("FORGE_DB_MASTER_SECRET_ARN"),
 		OpenBaoAddr:         os.Getenv("FORGE_OPENBAO_ADDR"),
-		AllowListTable:      os.Getenv("FORGE_ALLOW_LIST_TABLE"),
 		BackupReplicaRegion: os.Getenv("FORGE_BACKUP_REPLICA_REGION"),
 		BackupBucket:        os.Getenv("FORGE_BACKUP_BUCKET"),
 		BackupUserPrefix:    os.Getenv("FORGE_BACKUP_USER_PREFIX"),

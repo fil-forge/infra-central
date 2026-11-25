@@ -38,8 +38,8 @@ Lambda rather than on an operator's laptop.
    │       └── AppRole ─┼─────────┼─────────┼───────────────┼───────────┘
    │       │            │         │         │
    ├──────── RDS Postgres (one database per service) ───────┤
-   │                                        │
-   S3                                   DynamoDB
+   │
+   S3
 ```
 
 Regional appliances reach OpenBao at `ssm.<hostname_suffix>` to unseal at boot,
@@ -67,7 +67,7 @@ at `upload`, `auth` and `revoke`, as specified by the
 | **State in S3, one bucket per account**         | The state lives in the account it describes, locked by S3 conditional writes rather than a DynamoDB table. Nothing outside AWS has to be reachable for a deploy to work.                                                                                                                                                             |
 | **OpenTofu, and Terraform refused outright**    | A `versions.tofu` / `versions.tf` pair per root. Terraform stamps a version marker OpenTofu then reads as being from the future, so one stray `terraform apply` would lock OpenTofu out of that state.                                                                                                                               |
 | **Images pinned by digest**                     | A git SHA names the last commit, not the code you just built, so it collides with itself against a dirty tree. A manifest digest is content-derived and cannot move underneath a deploy.                                                                                                                                             |
-| **S3 and DynamoDB through task roles**          | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
+| **S3 through task roles**                       | No static access keys anywhere central runs. This is what replaces MinIO's root user and password. Appliances run outside AWS and write their backups with a static key per region: [docs/decisions/2026-11-appliance-backup-target.md](docs/decisions/2026-11-appliance-backup-target.md).                                          |
 
 How a regional appliance is admitted to a stage is decided in
 [docs/decisions/2026-08-region-onboarding.md](docs/decisions/2026-08-region-onboarding.md): the
@@ -76,14 +76,14 @@ registration writes central performs on its behalf.
 
 ## What each service needs
 
-| Service              | Port | Health         | Postgres | Other                        |
-| -------------------- | ---- | -------------- | -------- | ---------------------------- |
-| sprue                | 8080 | `/health`      | yes      | 3 S3 buckets, plc            |
-| hilt                 | 8080 | `/health`      | yes      | OpenBao, plc, calls sprue    |
-| swarf                | 8080 | `/health`      | yes      | plc, serves an SSE stream    |
-| delegator            | 8080 | `/healthcheck` | **no**   | 2 DynamoDB tables, chain RPC |
-| piri-signing-service | 7446 | `/healthcheck` | no       | chain RPC                    |
-| plc                  | 3000 | `/_health`     | yes      | nothing else                 |
+| Service              | Port | Health         | Postgres  | Other                                                 |
+| -------------------- | ---- | -------------- | --------- | ----------------------------------------------------- |
+| sprue                | 8080 | `/health`      | yes       | 3 S3 buckets, plc                                     |
+| hilt                 | 8080 | `/health`      | yes       | OpenBao, plc, calls sprue                             |
+| swarf                | 8080 | `/health`      | yes       | plc, serves an SSE stream                             |
+| delegator            | 8080 | `/healthcheck` | yes       | chain RPC                                             |
+| piri-signing-service | 7446 | `/healthcheck` | no        | chain RPC                                             |
+| plc                  | 3000 | `/_health`     | yes       | nothing else                                          |
 
 Two more names appear among the stage's keys: **indexer** and **etracker**. They
 are not deployed, and they get identities anyway, because the delegator
@@ -106,7 +106,8 @@ These each cost an afternoon to rediscover.
   injects secrets as environment variables, so the `ecs-service` module wraps
   the entrypoint to write them out before exec'ing the process.
 - **Health paths disagree**: `/health`, `/healthcheck` and `/_health` all appear.
-- **Migrations run in-process** via goose for sprue, hilt, swarf and plc.
+- **Migrations run in-process** via goose for sprue, hilt, swarf, plc and the
+  delegator.
   Concurrent starts race on the goose lock, so services run at
   `desired_count = 1` until someone sets the relevant `*_SKIP_MIGRATIONS`.
 - **No service exposes Prometheus metrics.** Observability is JSON logs on
@@ -145,6 +146,7 @@ scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and ba
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
 scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
+scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
 scripts/set-pin.sh            pins one service of one stage at one image digest
@@ -154,6 +156,7 @@ scripts/wait-services-stable.sh  waits for a cluster's ECS services to reach ste
 
 # Documentation beyond this file
 docs/appliance-onboarding.md  the runbook for admitting a regional appliance
+docs/jump-host.md             the static-IP SSH jump host, and how to connect through it
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
 docs/region-loss.md           restoring prod in eu-central-1: KMS replicas, SSM, appliances, key admin role
@@ -164,10 +167,11 @@ terraform/
   modules/                                         the wiring; see Stages below
   envs/                                            one directory per root module
     bootstrap/<account>/account/                   state bucket, CI roles
-    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana
+    bootstrap/<account>/<region>/                  the image registry, telemetry egress to Grafana, the provision Lambda's invocation trail
     dev/platform/      dev/apps/                   applied on every push to main
     staging/platform/  staging/apps/               applied on every push to main
     prod/platform/     prod/apps/                  applied on every push to main
+    jump-host/                                     static-IP SSH relay to appliances; applied by hand
 
 # Deployment
 .github/workflows/check-and-deploy.yml    check, then plan on a PR or apply and smoke-test on main
@@ -193,7 +197,7 @@ forge-central out, since nothing there is close to a length limit.
 Files:
 
 ```
-terraform/envs/<stage>/platform/   VPC, RDS, S3, DynamoDB, ALB, OpenBao, provision Lambda
+terraform/envs/<stage>/platform/   VPC, RDS, S3, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps root
@@ -230,6 +234,7 @@ terraform/modules/
     constants/             every root, bootstrap included
   ecr/                     regional bootstrap only: the image registry
   telemetry/               regional bootstrap only: the Firehoses and metric stream to Grafana
+  provision-invocations/   regional bootstrap only: the trail of who invoked the provision Lambdas
   tfstate/                 account bootstrap only: the state bucket
   github-actions-iam/      account bootstrap only: the two CI roles
 ```
@@ -477,23 +482,25 @@ names the services it is still waiting on as it polls, and every two minutes
 prints their task counts, their deployments and their recent ECS events, so a
 long wait says whether a rollout is slow or has stopped moving.
 
-`smoke-dev` and `smoke-staging` then call `make smoke` for their stage and retry
-for four minutes. Steady state covers the task; a newly created Route53 record
-or listener rule in front of it can take a moment longer. The smoke checks need
-no credentials because every request goes over public HTTPS. See
-[Smoke-testing a stage](#smoke-testing-a-stage).
+`smoke-dev`, `smoke-staging` and `smoke-prod` then call `make smoke` for their
+stage and retry for four minutes. Steady state covers the task; a newly created
+Route53 record or listener rule in front of it can take a moment longer. The
+smoke checks need no credentials because every request goes over public HTTPS.
+See [Smoke-testing a stage](#smoke-testing-a-stage).
 
-Once `smoke-dev` and `smoke-staging` have finished, `start-node-tests` asks
-infra-nodes to test the nodes of every stage whose central smoke test passed,
-through `.github/workflows/start-node-tests.yml`. The node tests run there, in
-`test-nodes.yml`: a smoke test of each node, then an end-to-end test that creates
-a tenant through Hilt and stores and reads back objects on the node, so it covers
-the write path through central that `make smoke` does not. One push starts one
+Once `smoke-dev`, `smoke-staging` and `smoke-prod` have finished,
+`start-node-tests` asks infra-nodes to test the nodes of every stage whose
+central smoke test passed, through `.github/workflows/start-node-tests.yml`. The
+node tests run there, in `test-nodes.yml`: a smoke test of each node, then, on
+dev and staging nodes, an end-to-end test that creates a tenant through Hilt and
+stores and reads back objects on the node, so it covers the write path through
+central that `make smoke` does not. One push starts one
 run there, which alerts from infra-nodes at most once, naming this repository's
 commit; nothing here waits for it. The job sends a `central-deployed`
 repository dispatch with a fil-forge-bot token scoped to infra-nodes with
-Contents write, a permission the App already has. Prod is not tested until the
-test has a credential that cannot reach customer tenants.
+Contents write, a permission the App already has. Prod nodes get only the smoke
+test until the end-to-end test has a credential that cannot reach customer
+tenants (FIL-1491).
 
 When either the wait or the smoke test fails, `scripts/tail-logs.sh` prints the
 tail of every log group the stage owns into the run, so the diagnosis is where
@@ -625,7 +632,7 @@ bucket that now exists. The regional root beside it comes next.
 
 ### Setting up an AWS region
 
-The regional root, `bootstrap/<account>/<region>/`, holds two things:
+The regional root, `bootstrap/<account>/<region>/`, holds three things:
 
 - `forge-central/provision`, the **ECR repository** for the provision Lambda
   image. Lambda pulls an image only from ECR in the same region as the
@@ -636,6 +643,10 @@ The regional root, `bootstrap/<account>/<region>/`, holds two things:
 - The **telemetry egress** to Grafana Cloud: one log Firehose per stage, from
   the stage list in `terraform/modules/shared/constants`, and one CloudWatch
   metric stream, which covers one account in one region.
+- The **invocation trail**: a CloudTrail trail that records each `Invoke` of
+  the stages' provision Lambdas, to a bucket and to Grafana. It answers who
+  invoked a phase, which OpenBao's audit log cannot; see
+  [docs/observability.md](docs/observability.md#who-invoked-the-provision-lambda).
 
 The first region of an account already has this directory next to the account
 root. For a further region, copy it:
@@ -691,7 +702,7 @@ The bucket already exists, so there is no bootstrap dance here:
 ```bash
 cd terraform/envs/bootstrap/nonprod/us-east-2
 tofu init
-tofu apply                           # the image registry and the telemetry egress
+tofu apply                           # the image registry, the telemetry egress and the trail
 ```
 
 Every image this project publishes to ECR lives under the `forge-central/`

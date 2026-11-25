@@ -20,11 +20,11 @@
 # ── The metric stream shares the account with FilOne's ─────────────────────
 #
 # fil-one/infra deploys `filone-infra-<stage>-MetricStream` into these same two
-# accounts, and it already ships AWS/Lambda and AWS/DynamoDB account-wide, which
-# covers the provision Lambda and the delegator's two tables. Those namespaces
-# are deliberately absent from the include filter below: naming them here would
-# duplicate every FilOne Lambda's metrics as well as ours. If FilOne's stream is
-# ever removed or narrowed, add the two namespaces here. fil-one/infra's
+# accounts, and it already ships AWS/Lambda account-wide, which covers the
+# provision Lambda. That namespace is deliberately absent from the include
+# filter below: naming it here would duplicate every FilOne Lambda's metrics as
+# well as ours. If FilOne's stream is ever removed or narrowed, add AWS/Lambda
+# here. fil-one/infra's
 # sst.config.ts carries a comment pointing back at this dependency.
 
 data "aws_caller_identity" "current" {}
