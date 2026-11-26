@@ -4530,34 +4530,37 @@ resource "grafana_rule_group" "appliance" {
     }
   }
 
-  # Ingot has egress counts it has not managed to report to Hilt for over 30
-  # minutes. Ingot counts the bytes GetObject sends by bucket and hour, keeps
-  # the counts in Postgres, and every 10 minutes sends Hilt the ones that have
-  # changed since Hilt last acknowledged them. Hilt serves them to fil-one as
-  # each tenant's egress, which is what the trial egress limit is checked
-  # against. The value is the age of the count that has waited longest, read
-  # from Postgres, so every Ingot on an appliance reports the same figure.
+  # Ingot has usage counts it has not managed to report to Hilt for over 30
+  # minutes. Ingot counts the bytes GetObject sends by bucket and hour, and
+  # each bucket's objects as they change, keeps the counts in Postgres, and
+  # every 10 minutes sends Hilt the ones that have changed since Hilt last
+  # acknowledged them. Hilt serves them to fil-one as each tenant's egress,
+  # which is what the trial egress limit is checked against, and as its
+  # object count. The value is the age of the count of either kind that has
+  # waited longest, read from Postgres, so every Ingot on an appliance
+  # reports the same figure.
   #
   # In normal running it stays under one report interval. Thirty minutes is
   # three missed reports, which rules out one slow or failed pass.
   #
   # A warning: nothing is lost while it fires. The counts stay in Postgres and
   # go out with the first report that succeeds; what is at risk is a tenant's
-  # egress in Hilt running behind, and with it the trial limit.
+  # egress and object count in Hilt running behind, and with them the trial
+  # limit.
   #
   # no_data_state is OK, as for the catalog rule: an Ingot without the
   # metric, such as one from before usage reporting, is not this rule's
   # business, and a stopped one is the container rule's.
   rule {
-    name           = "Ingot is not reporting egress"
+    name           = "Ingot is not reporting usage"
     condition      = "B"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has egress counts waiting over 30 minutes to be reported to Hilt"
-      description      = "Ingot reports the egress counts that have changed to Hilt every 10 minutes, and the oldest has now waited over 30. Nothing is lost: the counts are in Postgres and go out with the first report that succeeds, but tenants' egress in Hilt is behind until then. Each failed report logs a 'usage report' line with the error: `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"usage report\"`. 1) A connection error, timeout or 5xx: Hilt is unreachable or unhealthy; check the Forge Central alerts for the stage. 2) 'the issuer of this invocation may not perform this operation': Hilt does not have this Ingot registered as a provider; register it. 3) 'the usage report is not well formed' or 'a usage report may carry at most': escalate to Ingot's maintainers. 4) Any other error from Hilt: this stage's Hilt may predate the `/s3/usage/report` command; check which version is deployed and deploy a current one. 5) No 'usage report' lines at all: Ingot is not reporting, or cannot read its own Postgres; check 'usage flush' lines and Postgres, and escalate if both look healthy. The backlog is `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT count(*), min(dirty_since) FROM ingot.egress_usage WHERE bytes_sent <> bytes_reported'`. Restarting Ingot does not help and loses up to 5 seconds of counts."
+      summary          = "Ingot on {{ $labels.appliance }} ({{ $labels.node }}) has usage counts waiting over 30 minutes to be reported to Hilt"
+      description      = "Ingot reports the usage counts that have changed to Hilt every 10 minutes (the bytes it sent from each bucket, and each bucket's object count), and the oldest has now waited over 30. Nothing is lost: the counts are in Postgres and go out with the first report that succeeds, but tenants' egress and object counts in Hilt are behind until then. Each failed report logs a 'usage report' line with the error: `{service_name=\"appliance-{{ $labels.appliance }}-ingot\", node=\"{{ $labels.node }}\"} |= \"usage report\"`. 1) A connection error, timeout or 5xx: Hilt is unreachable or unhealthy; check the Forge Central alerts for the stage. 2) 'the issuer of this invocation may not perform this operation': Hilt does not have this Ingot registered as a provider; register it. 3) 'the usage report is not well formed' or 'a usage report may carry at most': escalate to Ingot's maintainers. 4) Any other error from Hilt: this stage's Hilt may predate the `/s3/usage/report` command; check which version is deployed and deploy a current one. 5) No 'usage report' lines at all: Ingot is not reporting, or cannot read its own Postgres; check 'usage flush' lines and Postgres, and escalate if both look healthy. The backlog is `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT count(*), min(dirty_since) FROM ingot.egress_usage WHERE bytes_sent <> bytes_reported'` for egress and `docker exec -it filone-platform-postgres-1 psql -U admin -d ingot -c 'SELECT count(*), min(dirty_since) FROM ingot.object_usage WHERE dirty_since IS NOT NULL'` for object counts. Restarting Ingot does not help and loses up to 5 seconds of counts."
       runbook_url      = local.appliance_runbook
       dashboard_url    = "${local.regions_dashboard}&viewPanel=39"
       __dashboardUid__ = "forge-regions"
@@ -4591,7 +4594,7 @@ resource "grafana_rule_group" "appliance" {
         intervalMs = 1000
         expr       = <<-PROMQL
           max by (appliance, region, node) (
-            ingot_usage_egress_oldest_unreported_age_seconds{${local.ingot_matcher}}
+            {__name__=~"ingot_usage_(egress|object)_oldest_unreported_age_seconds", ${local.ingot_matcher}}
           )
         PROMQL
       }))
