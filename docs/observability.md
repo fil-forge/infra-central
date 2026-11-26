@@ -174,7 +174,7 @@ which "Provision Lambda errors" reports.
 | Ingot multipart acceptance is stuck                  | Forge Regions            | Ingot's metrics               | —        |
 | Ingot is not receiving revocations                   | Forge Regions            | Hilt's and Ingot's logs, Loki | FIL-1646 |
 | Ingot catalog shipping has stalled                   | Forge Regions            | Ingot's metrics               | FIL-1596 |
-| Ingot is not reporting egress                        | Forge Regions            | Ingot's metrics               |          |
+| Ingot is not reporting usage                         | Forge Regions            | Ingot's metrics               |          |
 | Appliance OpenBao snapshot is stale                  | Forge Regions            | snapshot stamp                | FIL-1745 |
 | Appliance container is not running                   | Forge Regions containers | cAdvisor, staging             | FIL-1163 |
 | OpenBao cannot unseal                                | Forge Regions outages    | OpenBao's logs, Loki          | FIL-1164 |
