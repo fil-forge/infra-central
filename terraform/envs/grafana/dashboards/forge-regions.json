@@ -5645,7 +5645,7 @@
         "spec": {
           "id": 42,
           "title": "Buckets",
-          "description": "Buckets Ingot holds in this region, now; the line behind the number is the total over the dashboard time range. The region's Ingot instances share one database and report the same total, so the query takes the largest.",
+          "description": "Buckets Ingot holds in this region, now; the line behind the number is the total over the dashboard time range. The region's Ingot instances share one database and report the same total, so the query counts it once.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -5664,7 +5664,7 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max(ingot_buckets_count{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "expr": "sum(\n  max by (region) (\n    ingot_buckets_count{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n  )\n)",
                         "format": "time_series",
                         "instant": false,
                         "legendFormat": "Buckets",
@@ -5750,7 +5750,7 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max(ingot_objects_count{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "expr": "sum(\n  max by (region) (\n    ingot_objects_count{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}\n  )\n)",
                         "format": "time_series",
                         "instant": false,
                         "legendFormat": "Objects",
