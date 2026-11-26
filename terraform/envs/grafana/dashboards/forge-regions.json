@@ -5302,8 +5302,8 @@
         "kind": "Panel",
         "spec": {
           "id": 39,
-          "title": "Ingot unreported egress age",
-          "description": "How long the oldest egress count has waited to be reported to Hilt, per node. Ingot counts the bytes GetObject sends by bucket and hour and reports the counts that have changed every 10 minutes, so this stays under about 10 minutes and returns to zero after each report. A value that keeps climbing means reports are failing: the counts are safe in Postgres and go out once a report succeeds, but tenants' egress in Hilt is falling behind. The 'Ingot is not reporting egress' alert fires above 30 minutes.",
+          "title": "Ingot unreported usage age",
+          "description": "How long the oldest egress count and the oldest object count have waited to be reported to Hilt, per node. Ingot counts the bytes GetObject sends by bucket and hour, and each bucket's objects as they change, and reports the counts that have changed every 10 minutes, so this stays under about 10 minutes and returns to zero after each report. A value that keeps climbing means reports are failing: the counts are safe in Postgres and go out once a report succeeds, but tenants' egress and object counts in Hilt are falling behind. The 'Ingot is not reporting usage' alert fires above 30 minutes.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -5322,10 +5322,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max by (node) (ingot_usage_egress_oldest_unreported_age_seconds{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "expr": "max by (node, kind) (label_replace({__name__=~\"ingot_usage_(egress|object)_oldest_unreported_age_seconds\", service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}, \"kind\", \"$1\", \"__name__\", \"ingot_usage_(egress|object)_.*\"))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{node}} {{kind}}",
                         "range": true
                       }
                     },
@@ -5416,8 +5416,8 @@
         "kind": "Panel",
         "spec": {
           "id": 40,
-          "title": "Ingot unreported egress counts",
-          "description": "How many bucket-hour egress counts have changed since Hilt last acknowledged them, per node. It rises as buckets are read and falls to near zero at each report, since the hour in progress becomes due again whenever it grows. A count that only rises means reports are failing.",
+          "title": "Ingot unreported usage counts",
+          "description": "How many bucket-hour egress counts and object counts have changed since Hilt last acknowledged them, per node. It rises as buckets are read and written and falls to near zero at each report, since the hour in progress becomes due again whenever it grows. A count that only rises means reports are failing.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -5436,10 +5436,10 @@
                       "spec": {
                         "editorMode": "code",
                         "exemplar": false,
-                        "expr": "max by (node) (ingot_usage_egress_unreported_counts{service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"})",
+                        "expr": "max by (node, kind) (label_replace({__name__=~\"ingot_usage_(egress|object)_unreported_counts\", service_name=~\"appliance-.*-ingot\", appliance=~\"$stage-.*\", region=~\"($region)\"}, \"kind\", \"$1\", \"__name__\", \"ingot_usage_(egress|object)_.*\"))",
                         "format": "time_series",
                         "instant": false,
-                        "legendFormat": "{{node}}",
+                        "legendFormat": "{{node}} {{kind}}",
                         "range": true
                       }
                     },
