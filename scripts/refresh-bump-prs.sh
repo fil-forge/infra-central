@@ -6,9 +6,9 @@
 # something moves it. This moves them.
 #
 # Rebuilding is safe because of what a bump pull request is. It asks for one
-# thing, that dev run one digest, and its branch is main plus that one line. So
-# it can be regenerated from current main rather than merged, which is how
-# bump-deployed-image.yml builds it in the first place.
+# thing, that staging run one digest, and its branch is main plus that one
+# line. So it can be regenerated from current main rather than merged, which is
+# how bump-deployed-image.yml builds it in the first place.
 #
 # Usage:
 #   APP_SLUG=fil-forge-bot scripts/refresh-bump-prs.sh
@@ -36,7 +36,7 @@ esac
 : "${APP_SLUG:?set APP_SLUG to the GitHub App that opens the bump pull requests}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FILE="terraform/envs/dev/apps/terraform.tfvars"
+FILE="terraform/envs/staging/apps/terraform.tfvars"
 cd "$ROOT"
 
 # The digest one commit pins a service at, empty if it pins none.
@@ -63,7 +63,7 @@ opened=$(gh pr list --state open --limit 100 \
 # Its own statement, so `|| true` covers grep finding no bump and nothing else.
 # On one pipeline it would also swallow an outage or an expired token, and the
 # run would report having refreshed everything.
-matched=$(grep -E '^bot/bump-[a-z_]+-image-dev$' <<<"$opened" || true)
+matched=$(grep -E '^bot/bump-[a-z_]+-image-staging$' <<<"$opened" || true)
 if [ -z "$matched" ]; then
   echo "no open bump pull requests"
   exit 0
@@ -76,7 +76,7 @@ git fetch --quiet --force origin main "+refs/heads/bot/*:refs/remotes/origin/bot
 while IFS= read -r branch <&3; do
   echo "::group::$branch"
   service=${branch#bot/bump-}
-  service=${service%-image-dev}
+  service=${service%-image-staging}
 
   # Twice at most. The lease below fails when a publish replaces the branch
   # mid-run, and that publish built on the main this run is refreshing past, so
@@ -122,7 +122,7 @@ while IFS= read -r branch <&3; do
       fi
     else
       # Someone else moved this service while the branch sat open, so which
-      # digest dev should run is a question rather than an edit. Rebuilding
+      # digest staging should run is a question rather than an edit. Rebuilding
       # would answer it by rolling main back to this branch. Left alone, the
       # pull request shows the conflict it really has.
       base_digest=$(pin_at "$(git merge-base origin/main "origin/$branch")" "$service")
@@ -137,7 +137,7 @@ while IFS= read -r branch <&3; do
       message=$(git log -1 --format=%B "origin/$branch")
 
       git checkout --quiet -B "$branch" origin/main
-      changed=$(scripts/set-pin.sh "$service" "$digest" | sed -n 's/^changed=//p')
+      changed=$(scripts/set-pin.sh --stage staging "$service" "$digest" | sed -n 's/^changed=//p')
       if [ "$changed" != true ]; then
         echo "::error::$FILE pins $service at $main_digest and rewriting it to $digest changed nothing"
         exit 1

@@ -1,12 +1,11 @@
-# Keeps one pull request per target stage that promotes the previous stage's
-# images, and never merges it: merging it is how a person promotes. Staging
-# takes dev's pins and prod takes staging's.
+# Keeps one pull request that promotes staging's images to prod, and never
+# merges it: merging it is how a person promotes. Staging takes every published
+# image on its own, through the bump pull requests the bot merges.
 #
-# Check and deploy calls this after a push to main, once the source stage has
-# passed its smoke test: staging's pull request after smoke-dev, prod's after
-# smoke-staging. Each is built on the commit that run deployed, so a pull
-# request only ever proposes pins its source stage has passed smoke with. A
-# manual run rebuilds one target on current main without waiting for smoke.
+# Check and deploy calls this after a push to main, once staging has passed
+# smoke-staging. The pull request is built on the commit that run deployed, so
+# it only ever proposes pins staging has passed smoke with. A manual run
+# rebuilds it on current main without waiting for smoke.
 #
 # What it opens, refreshes and closes: scripts/promote.sh. Why it works this
 # way: docs/decisions/2026-10-automated-promotion.md.
@@ -16,7 +15,7 @@ on:
   workflow_call:
     inputs:
       target:
-        description: Stage to promote into, staging or prod
+        description: Stage to promote into; only prod
         type: string
         required: true
     secrets:
@@ -27,7 +26,7 @@ on:
       target:
         description: Stage to promote into
         type: choice
-        options: [staging, prod]
+        options: [prod]
         required: true
 
 permissions:
@@ -37,7 +36,7 @@ jobs:
   promote:
     name: Promote into ${{ inputs.target }}
     # A promotion pull request targets main, and only main's history carries
-    # the dev bumps its change list is read from.
+    # the bumps its change list is read from.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # One run per target at a time. Two runs would force-push the branch from
@@ -60,7 +59,7 @@ jobs:
 
       # The commit this run deployed, not main's tip: main may have moved past
       # it to pins the source stage has not passed smoke with yet. Full
-      # history, because each pin's source commit is read off the dev bump that
+      # history, because each pin's source commit is read off the bump that
       # first carried its digest.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

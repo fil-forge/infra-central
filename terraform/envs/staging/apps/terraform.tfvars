@@ -1,11 +1,11 @@
 # Pinned per service, by digest. A digest names one artifact and cannot move
-# underneath a running service, so staging runs the build that was promoted
+# underneath a running service, so staging runs the build that was merged
 # rather than whatever a rolling tag points at when a task restarts.
 #
-# Seeded from the digests dev ran when staging was created. Later versions
-# arrive by merging the "Promote dev's images to staging" pull request, which
-# scripts/promote.sh keeps open; each digest carries linux/arm64, which the
-# tasks run on.
+# Every image a service publishes from its main branch arrives here through a
+# bump pull request that bump-deployed-image.yml opens and the bot merges. Each
+# digest carries linux/arm64, which the tasks run on. Bump one by hand with
+# scripts/set-pin.sh.
 #
 # The blank lines between the pins are what keeps two services' bumps from
 # conflicting. Each bump rewrites one line, and git conflicts on changes to

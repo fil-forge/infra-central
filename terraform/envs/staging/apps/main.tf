@@ -30,7 +30,7 @@ variable "region" {
 }
 
 variable "image_digests" {
-  description = "Pinned per service in terraform.tfvars. Staging receives deliberate promotions after dev is healthy, and a digest keeps a replacement task on the reviewed build."
+  description = "Pinned per service in terraform.tfvars. Every published image is bumped here automatically and applied on the push to main, and a digest keeps a replacement task on the build that was merged."
   type = object({
     sprue           = string
     hilt            = string

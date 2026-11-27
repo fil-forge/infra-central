@@ -1,7 +1,8 @@
-# Deploys a service to the dev stage by pinning the image digest it just
+# Deploys a service to the staging stage by pinning the image digest it just
 # published. Services dispatch here from their own publish workflow; the commit
-# this opens is what deploys, because Check and deploy applies dev/apps on every
-# push to main.
+# this opens is what deploys, because Check and deploy applies staging/apps on
+# every push to main. Prod takes staging's pins only through the promotion pull
+# request a person merges.
 name: Bump deployed image
 
 on:
@@ -29,7 +30,7 @@ env:
 
 jobs:
   bump:
-    name: Bump ${{ github.event.client_payload.service || inputs.service }} in dev
+    name: Bump ${{ github.event.client_payload.service || inputs.service }} in staging
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -110,7 +111,7 @@ jobs:
             echo "commit=$COMMIT"
             echo "source_pr_url=$SOURCE_PR_URL"
             echo "run_url=$RUN_URL"
-            echo "branch=bot/bump-$SERVICE-image-dev"
+            echo "branch=bot/bump-$SERVICE-image-staging"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
@@ -123,14 +124,14 @@ jobs:
       # The rewrite itself lives in scripts/set-pin.sh, which the refresh and
       # promotion workflows and a person at a terminal run too. Its stdout is the
       # `changed` output and nothing else; what a person reads goes to stderr.
-      - name: Rewrite the dev pin
+      - name: Rewrite the staging pin
         id: edit
         env:
           SERVICE: ${{ steps.req.outputs.service }}
           DIGEST: ${{ steps.req.outputs.digest }}
         run: |
           set -euo pipefail
-          scripts/set-pin.sh "$SERVICE" "$DIGEST" >> "$GITHUB_OUTPUT"
+          scripts/set-pin.sh --stage staging "$SERVICE" "$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Set up OpenTofu
         if: steps.edit.outputs.changed == 'true'
@@ -141,7 +142,7 @@ jobs:
 
       - name: Check formatting
         if: steps.edit.outputs.changed == 'true'
-        run: tofu fmt -check terraform/envs/dev/apps/
+        run: tofu fmt -check terraform/envs/staging/apps/
 
       - name: Compose the message
         if: steps.edit.outputs.changed == 'true'
@@ -154,12 +155,12 @@ jobs:
           SOURCE_PR_URL: ${{ steps.req.outputs.source_pr_url }}
           RUN_URL: ${{ steps.req.outputs.run_url }}
           ACTOR: ${{ github.actor }}
-          APPS_DIR: terraform/envs/dev/apps
-          APPS_URL: ${{ github.server_url }}/${{ github.repository }}/tree/main/terraform/envs/dev/apps
+          APPS_DIR: terraform/envs/staging/apps
+          APPS_URL: ${{ github.server_url }}/${{ github.repository }}/tree/main/terraform/envs/staging/apps
         run: |
           set -euo pipefail
           short=${DIGEST#sha256:}
-          echo "subject=Bump $SERVICE in dev to sha256:${short:0:7}" >> "$GITHUB_OUTPUT"
+          echo "subject=Bump $SERVICE in staging to sha256:${short:0:7}" >> "$GITHUB_OUTPUT"
 
           {
             if [ -n "$SOURCE_PR_URL" ]; then
