@@ -20,7 +20,7 @@
 #
 # Prerequisites:
 #   - administrator credentials for the account holding the stage
-#   - the region's writer user, created by the apply from appliance_regions
+#   - the region's writer user, created by the apply from appliances
 set -euo pipefail
 
 RETENTION_DAYS=35

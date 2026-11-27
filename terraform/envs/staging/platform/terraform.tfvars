@@ -33,9 +33,18 @@ chain = {
   }
 }
 
-# Appliance region labels. Adding one here creates the transit key its node's
-# OpenBao seals against; moving it to the retired list destroys that key and
-# revokes the node's unseal token. A retired label stays in the second list, and
-# docs/appliance-onboarding.md is the procedure for both.
-appliance_regions         = ["eu-central-3"]
+# The appliances this stage serves: each region label and its node's egress
+# IPv4 address. Adding one creates the transit key its node's OpenBao seals
+# against and the IAM user it writes backups as, binds the node's unseal token
+# to the address, and makes the address the only source the signing service
+# admits for that node, since the service signs with the payer key for whoever
+# reaches it. Retiring one moves its label to retired_appliance_regions, which
+# destroys the key and the user and revokes the token; a retired label stays in
+# that list. docs/appliance-onboarding.md is the procedure for both.
+#
+# eu-central-3 is the Servers.com host in fil-forge/infra-nodes
+# (terraform/envs/staging/eu-central-3/main.tf).
+appliances = {
+  eu-central-3 = "23.83.66.244"
+}
 retired_appliance_regions = ["pilot-mad"]

@@ -157,6 +157,11 @@ check "pandora_sites_have_a_cluster" {
   }
 }
 
+locals {
+  # keys() returns the labels sorted.
+  appliance_regions = keys(var.appliances)
+}
+
 module "storage" {
   source = "./storage"
 
@@ -166,7 +171,7 @@ module "storage" {
   pitr_window_days = var.pitr_window_days
 }
 
-# The appliances' backup target. Its writer users follow appliance_regions, so
+# The appliances' backup target. Its writer users follow appliances, so
 # retiring a region also deletes the user and the key its node writes with.
 module "appliance_backups" {
   source = "./appliance-backups"
@@ -174,7 +179,7 @@ module "appliance_backups" {
 
   stage          = var.stage
   account_id     = local.account_id
-  regions        = var.appliance_regions
+  regions        = local.appliance_regions
   retention_days = var.appliance_backups.retention_days
 }
 
@@ -410,7 +415,7 @@ resource "aws_lambda_invocation" "vault" {
   input = jsonencode(merge({
     phase                     = "vault"
     trigger                   = var.vault_trigger
-    appliance_regions         = var.appliance_regions
+    appliance_regions         = local.appliance_regions
     retired_appliance_regions = var.retired_appliance_regions
     }, var.backup_replica_region == null ? {} : {
     backup_replica_region = var.backup_replica_region

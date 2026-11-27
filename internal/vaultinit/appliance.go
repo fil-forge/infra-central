@@ -48,7 +48,7 @@ func PlanApplianceKeys(existing, active, retired []string) (AppliancePlan, error
 	if len(both) > 0 {
 		sort.Strings(both)
 		return AppliancePlan{}, fmt.Errorf(
-			"region %s appears in both appliance_regions and retired_appliance_regions; a region is either live or retired",
+			"region %s appears in both appliances and retired_appliance_regions; a region is either live or retired",
 			strings.Join(both, ", "))
 	}
 
@@ -65,7 +65,7 @@ func PlanApplianceKeys(existing, active, retired []string) (AppliancePlan, error
 	if len(unaccounted) > 0 {
 		sort.Strings(unaccounted)
 		return AppliancePlan{}, fmt.Errorf(
-			"no list names the appliance region %s, which has a transit key: add it to appliance_regions to keep that key, or to retired_appliance_regions to destroy it and permanently end that node's ability to unseal",
+			"no list names the appliance region %s, which has a transit key: add it to appliances to keep that key, or to retired_appliance_regions to destroy it and permanently end that node's ability to unseal",
 			strings.Join(unaccounted, ", "))
 	}
 

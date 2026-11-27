@@ -8,7 +8,7 @@ variable "account_id" {
 }
 
 variable "regions" {
-  description = "Region labels of the appliances that write backups, from appliance_regions. Each one gets a writer user; a label that leaves the list loses its user and its key on the next apply."
+  description = "Region labels of the appliances that write backups, the keys of appliances. Each one gets a writer user; a label that leaves the list loses its user and its key on the next apply."
   type        = list(string)
 }
 

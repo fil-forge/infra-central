@@ -28,17 +28,17 @@
 #   2. after you approve it, with confirmation, which mints
 #
 # The region's transit key and backup writer user must already exist. Both are
-# created by the apply from appliance_regions in the stage's terraform.tfvars,
-# so a region that has not been committed and merged fails here rather than
-# being created on the spot.
+# created by the apply from appliances in the stage's terraform.tfvars, so a
+# region that has not been committed and merged fails here rather than being
+# created on the spot. The token is bound to the region's address in that map.
 #
 # Usage:
-#   scripts/mint-appliance-credentials.sh --region us-east-9 --node-ip 203.0.113.7
+#   scripts/mint-appliance-credentials.sh --region us-east-9
 #
 # Options:
 #   --region                appliance region label                  (required)
-#   --node-ip               the node's Elastic IP, bound as a /32   (required)
-#   --node-cidr             bind to this CIDR instead of --node-ip
+#   --node-ip               bind to this address instead of the region's in appliances
+#   --node-cidr             bind to this CIDR instead
 #   --stage                 stage holding the transit key            (default: dev)
 #   --period                renewal tolerance                        (default: 72h)
 #   --wrap-ttl              how long the hand-off may sit unclaimed  (default: 24h)
@@ -48,7 +48,7 @@
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
-#   - the node's Elastic IP already allocated, which is its own apply
+#   - the region and its node's egress address in appliances, merged and applied
 set -euo pipefail
 
 STAGE="${STAGE:-dev}"
@@ -89,7 +89,17 @@ done
 [ -n "$REGION" ] || { echo "ERROR: --region is required" >&2; exit 2; }
 
 if [ -z "$NODE_CIDR" ]; then
-  [ -n "$NODE_IP" ] || { echo "ERROR: --node-ip or --node-cidr is required" >&2; exit 2; }
+  if [ -z "$NODE_IP" ]; then
+    # shellcheck source=/dev/null
+    . "$(dirname "$0")/lib/appliances.sh"
+    TFVARS="$(dirname "$0")/../terraform/envs/${STAGE}/platform/terraform.tfvars"
+    [ -f "$TFVARS" ] || { echo "ERROR: no $TFVARS for stage $STAGE" >&2; exit 2; }
+    NODE_IP="$(read_appliances "$TFVARS" | awk -v region="$REGION" '$1 == region { print $2 }')"
+    [ -n "$NODE_IP" ] || {
+      echo "ERROR: appliances in $TFVARS lists no $REGION. Add it with the node's egress address and merge, or pass --node-ip." >&2
+      exit 2
+    }
+  fi
   NODE_CIDR="${NODE_IP}/32"
 fi
 

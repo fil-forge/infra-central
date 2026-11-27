@@ -58,10 +58,10 @@ variable "chain" {
   })
 }
 
-variable "appliance_regions" {
-  description = "Region labels of the appliances this stage serves, in terraform.tfvars. See docs/appliance-onboarding.md."
-  type        = list(string)
-  default     = []
+variable "appliances" {
+  description = "The appliances this stage serves, each region label with its node's egress IPv4 address, in terraform.tfvars. See docs/appliance-onboarding.md."
+  type        = map(string)
+  default     = {}
 }
 
 variable "retired_appliance_regions" {
@@ -92,7 +92,7 @@ module "platform" {
 
   chain = var.chain
 
-  appliance_regions         = var.appliance_regions
+  appliances                = var.appliances
   retired_appliance_regions = var.retired_appliance_regions
 
   # Each backup is locked for 35 days in compliance mode, which is what RFC 37

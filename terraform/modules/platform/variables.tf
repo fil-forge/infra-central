@@ -236,10 +236,23 @@ variable "seed_trigger" {
   default     = "1"
 }
 
-variable "appliance_regions" {
-  description = "Region labels of the appliances this stage serves. Each one gets a transit key its node's OpenBao seals against, created by the vault phase."
-  type        = list(string)
-  default     = []
+variable "appliances" {
+  description = "The appliances this stage serves: each region label and its node's egress IPv4 address. Each region gets a transit key its node's OpenBao seals against and, in a stage that takes backups, a writer user. The address is the only source the signing service admits for that node and what its unseal token is bound to."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for address in values(var.appliances) : can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", address)) && can(cidrhost("${address}/32", 0))
+    ])
+    error_message = "Each appliances value must be a bare IPv4 address, without a prefix length."
+  }
+
+  # A retired region's node must lose its signer access along with its unseal key.
+  validation {
+    condition     = length(setintersection(keys(var.appliances), var.retired_appliance_regions)) == 0
+    error_message = "A region in retired_appliance_regions must not stay in appliances. Retiring a region removes its entry, address included."
+  }
 }
 
 variable "retired_appliance_regions" {
@@ -251,7 +264,7 @@ variable "retired_appliance_regions" {
 variable "appliance_backups" {
   description = <<-EOT
     The bucket appliances push their database and OpenBao backups to, and a
-    writer user for each label in appliance_regions. Null for a stage whose
+    writer user for each region in appliances. Null for a stage whose
     appliances take no backups. retention_days is how long each backup is locked
     in compliance mode. See docs/decisions/2026-11-appliance-backup-target.md.
   EOT

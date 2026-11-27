@@ -8,3 +8,9 @@ a dashboard panel, or a line in `docs/observability.md`. Appliance services'
 alerts and panels live here too. Skip it for changes nothing operational
 depends on. "Adding an alert or panel" in `docs/observability.md` says how to
 do each.
+
+## Tests
+
+Name a bash script's tests `scripts/<name>.test.sh`, such as
+`scripts/appliance-scripts.test.sh`. `make check` runs every tracked file
+that matches.

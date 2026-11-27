@@ -21,6 +21,7 @@ output "platform" {
     bucket_arns               = module.platform.bucket_arns
     openbao_internal_address  = module.platform.openbao_internal_address
     chain                     = module.platform.chain
+    signer_allowed_sources    = module.platform.signer_allowed_sources
     log_forwarding            = module.platform.log_forwarding
     secret_arns               = module.platform.secret_arns
   }
