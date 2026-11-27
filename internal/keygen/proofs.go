@@ -36,7 +36,7 @@ type Proof struct {
 // Proofs returns the delegations this deployment needs, given the did:web of
 // each service.
 //
-// Three of smelt's five apply here. The piri-0 and hilt-ingot proofs belong to
+// Three of smelt's five apply here, plus the signing-service proof. The piri-0 and hilt-ingot proofs belong to
 // the storage-node side of the stack, which this project does not deploy. The
 // per-region delegation to an appliance's Ingot is in HiltIngotS3Proof below.
 //
@@ -62,6 +62,18 @@ func Proofs(did map[string]string) []Proof {
 			audience:  did["delegator"],
 			subject:   did["etracker"],
 			commands:  []string{"/egress/track"},
+		},
+		// The delegator extends this to each storage node on its allow list, so
+		// a node's signing requests trace back to the signing service through
+		// the delegator. The parent command covers every /pdp/sign/* command.
+		{
+			Consumer:  "delegator",
+			Name:      "signing-service-proof",
+			Issuer:    "signing-service",
+			issuerDID: did["signing-service"],
+			audience:  did["delegator"],
+			subject:   did["signing-service"],
+			commands:  []string{"/pdp/sign"},
 		},
 		// hilt presents this to sprue when registering tenants as customers.
 		// hilt's loader parses a UCAN *container*, not a bare delegation, hence
