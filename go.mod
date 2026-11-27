@@ -8,8 +8,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.21
 	github.com/aws/aws-sdk-go-v2/service/iam v1.68.0
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.51.0
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.83.0
-	github.com/aws/smithy-go v1.28.9
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.84.0
+	github.com/aws/smithy-go v1.28.10
 	github.com/ethereum/go-ethereum v1.17.10
 	github.com/fil-forge/hilt v0.0.1-0.20260910144506-ece036590924
 	github.com/fil-forge/sprue v0.0.0-20261020153451-7b9480480595
