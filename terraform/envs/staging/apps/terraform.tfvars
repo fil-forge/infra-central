@@ -22,5 +22,5 @@ image_digests = {
 
   signing_service = "sha256:6c17e7eb59ce72f082458c4601c3b720d064cfd4319bf122eee449ecc98adf28"
 
-  plc = "sha256:ebb12470f6fc50906c0ed867d009a056e131db1a994b45d7c3f1c8d2eb26dee9"
+  plc = "sha256:5adecd74dc3b5ba523ac070bfcda9b05b3be44cc2f3c2df448f89f8401761e4a"
 }
