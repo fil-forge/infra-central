@@ -39,7 +39,7 @@
 #   --region                appliance region label                  (required)
 #   --node-ip               the node's Elastic IP, bound as a /32   (required)
 #   --node-cidr             bind to this CIDR instead of --node-ip
-#   --stage                 stage holding the transit key            (default: dev)
+#   --stage                 stage holding the transit key            (default: staging)
 #   --period                renewal tolerance                        (default: 72h)
 #   --wrap-ttl              how long the hand-off may sit unclaimed  (default: 24h)
 #   --reissue-unseal-token  replace the region's live unseal token
@@ -51,7 +51,7 @@
 #   - the node's Elastic IP already allocated, which is its own apply
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 REGION=""
 NODE_IP=""
 NODE_CIDR=""

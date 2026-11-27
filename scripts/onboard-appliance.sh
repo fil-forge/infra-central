@@ -40,7 +40,7 @@
 #   --piri-proof-file   the proof the appliance signed for sprue (required
 #                       unless sprue already has the provider)
 #   --proof-out         write the returned delegation here   (default: stdout)
-#   --stage             stage to register with                    (default: dev)
+#   --stage             stage to register with                    (default: staging)
 #   --weight            sprue scheduling weight                   (default: 100)
 #   --replication-weight  sprue replication weight                (default: 100)
 #   --yes               skip the interactive prompt
@@ -50,7 +50,7 @@
 #   - the appliance provisioned, so its Piri DID exists
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 REGION=""
 PIRI_DID=""
 PIRI_URL=""

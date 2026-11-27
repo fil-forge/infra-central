@@ -12,10 +12,10 @@
 #   2. after you approve it, with confirmation, which signs and broadcasts
 #
 # Usage:
-#   scripts/fund-payer.sh [--stage dev] [--deposit 3] [--yes]
+#   scripts/fund-payer.sh [--stage staging] [--deposit 3] [--yes]
 #
 # Options:
-#   --stage             stage to fund                     (default: dev)
+#   --stage             stage to fund                     (default: staging)
 #   --deposit           USDFC to deposit                  (default: 3)
 #   --lockup-allowance  operator lockup cap, USDFC        (default: 3)
 #   --rate-allowance    operator rate cap, USDFC/epoch    (default: 0.1)
@@ -29,7 +29,7 @@
 #     https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc (10/day cap)
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 DEPOSIT="${DEPOSIT:-3}"
 LOCKUP_ALLOWANCE="${LOCKUP_ALLOWANCE:-3}"
 RATE_ALLOWANCE="${RATE_ALLOWANCE:-0.1}"

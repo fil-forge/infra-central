@@ -22,14 +22,14 @@
 #
 # Options:
 #   --region   appliance region label                    (required)
-#   --stage    stage the region belongs to               (default: dev)
+#   --stage    stage the region belongs to               (default: staging)
 #
 # Prerequisites:
 #   - AWS credentials for the account holding the stage
 #   - the region's label committed to appliance_regions and merged
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 REGION=""
 
 while [ $# -gt 0 ]; do

@@ -37,8 +37,9 @@ IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 # instead. Prod is a separate account with its own ECR repository, so its digest
 # comes from publishing there, not from copying staging's.
 #
-# Dev runs frozen at its current pins until it is torn down, so `make publish`
-# refuses it; the check follows the publish rule below.
+# Staging is the default for every target, and the scripts they call default to
+# it too when run directly. Dev runs frozen at its current pins until it is torn
+# down, so `make publish` refuses it; the check follows the publish rule below.
 STAGE       ?= staging
 ifeq ($(STAGE),prod)
 TFVARS      := terraform/envs/$(STAGE)/platform/terraform.tfvars

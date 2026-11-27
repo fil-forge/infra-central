@@ -25,7 +25,7 @@
 #
 # Options:
 #   --region   appliance region label                    (required)
-#   --stage    stage to retire the region in             (default: dev)
+#   --stage    stage to retire the region in             (default: staging)
 #   --yes      skip the interactive prompt
 #
 # Afterwards, re-onboard with scripts/onboard-appliance.sh. The log line has to be
@@ -35,7 +35,7 @@
 #   - AWS credentials for the account holding the stage
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 REGION=""
 ASSUME_YES=false
 

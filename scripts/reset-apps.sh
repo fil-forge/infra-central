@@ -44,7 +44,7 @@
 #   scripts/reset-apps.sh --stage dev --purge-agent-messages-before 2026-11-13T09:41:07Z
 #
 # Options:
-#   --stage    stage to reset, dev or staging             (default: dev)
+#   --stage    stage to reset, dev or staging             (default: staging)
 #   --yes      skip the interactive prompt
 #   --production
 #              allow --stage prod; the prompt is always shown there, so --yes
@@ -57,7 +57,7 @@
 #   - AWS credentials for the account holding the stage
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 ASSUME_YES=false
 ALLOW_PRODUCTION=false
 PURGE_BEFORE=""

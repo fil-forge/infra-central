@@ -22,7 +22,7 @@
 #   - AWS credentials for the account holding the stage
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-staging}"
 LINES="${LINES:-10}"
 SINCE="${SINCE:-1h}"
 
