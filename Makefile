@@ -31,12 +31,21 @@ ECR_HOST    = $(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 
 # Where the digest is recorded. The file is committed: the stage is planned by a
-# workflow, which sees only what is in version control. Dev and staging read
+# workflow, which sees only what is in version control. Staging reads
 # image.auto.tfvars, which `make publish` writes. Prod pins its digest in
 # terraform.tfvars, so for prod `make publish` prints the line to paste there
 # instead. Prod is a separate account with its own ECR repository, so its digest
-# comes from publishing there, not from copying dev's.
-STAGE       ?= dev
+# comes from publishing there, not from copying staging's.
+#
+# Dev runs frozen at its current pins until it is torn down, so nothing
+# publishes into it. The check runs while make reads this file, before the
+# login and builder prerequisites touch AWS or Docker.
+STAGE       ?= staging
+ifeq ($(STAGE),dev)
+ifneq ($(filter publish,$(MAKECMDGOALS)),)
+$(error make publish STAGE=dev is retired: dev is frozen until it is torn down. Publish into staging, the default)
+endif
+endif
 ifeq ($(STAGE),prod)
 TFVARS      := terraform/envs/$(STAGE)/platform/terraform.tfvars
 else

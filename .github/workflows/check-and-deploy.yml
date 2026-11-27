@@ -674,20 +674,9 @@ jobs:
           echo "the prod stage did not come up: 5 attempts over 4 minutes" >&2
           exit 1
 
-  # Rebuild each promotion pull request once its source stage has passed smoke
-  # on this commit. Two jobs rather than a matrix, because each waits on a
-  # different smoke test, and a failure in one chain must not hold the other.
-  promote-staging:
-    if: github.event_name == 'push'
-    needs: smoke-dev
-    permissions:
-      contents: read
-    uses: ./.github/workflows/promote.yml
-    with:
-      target: staging
-    secrets:
-      FORGE_BOT_PRIVATE_KEY: ${{ secrets.FORGE_BOT_PRIVATE_KEY }}
-
+  # Rebuild the promotion pull request into prod once staging has passed smoke
+  # on this commit. Staging takes every published image through the bump pull
+  # requests, so it has no promotion of its own.
   promote-prod:
     if: github.event_name == 'push'
     needs: smoke-staging
@@ -827,7 +816,6 @@ jobs:
       - apply-prod-platform
       - apply-prod-apps
       - smoke-prod
-      - promote-staging
       - promote-prod
       - start-node-tests
       - apply-grafana

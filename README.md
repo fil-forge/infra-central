@@ -144,7 +144,7 @@ build/                        Lambda container image
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and backup key, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
-scripts/promote.sh            opens or refreshes the pull request promoting into staging or prod
+scripts/promote.sh            opens or refreshes the pull request promoting staging into prod
 scripts/retire-region.sh      removes a region's Ingot identity from hilt and SSM
 scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
@@ -200,7 +200,7 @@ terraform/envs/<stage>/platform/   VPC, RDS, S3, ALB, OpenBao, provision Lambda
   main.tf                  module "platform" plus what this stage overrides
   terraform.tfvars         committed, non-secret: DNS, chain, contracts
   outputs.tf               re-exported for the apps root
-  image.auto.tfvars        committed Lambda digest; published in dev, copied on promotion
+  image.auto.tfvars        committed Lambda digest, written by `make publish`
   versions.tofu            OpenTofu version, S3 backend, providers
   versions.tf              refuses Terraform; OpenTofu never reads it
 
@@ -715,7 +715,7 @@ Docker with buildx and AWS credentials for the target account, and it creates a
 builder cannot push by digest and cannot cross-build for arm64.
 
 ```bash
-make publish STAGE=dev                            # AWS_REGION defaults to us-east-2
+make publish                                      # STAGE=staging, AWS_REGION=us-east-2
 make publish STAGE=<stage> AWS_REGION=us-west-2   # a further region
 ```
 
@@ -905,21 +905,20 @@ cast call "$FILECOIN_PAY_ADDRESS" \
 ### Iterating on the provision Lambda
 
 ```bash
-make publish STAGE=dev
+make publish
 ```
 
-That writes the new digest into the stage's `image.auto.tfvars`, so there is no
-line to edit by hand. **Commit that file and merge it.** The stage is planned by a
-workflow, which sees only what is in version control, so a digest left on your
-machine is applied nowhere.
+The stage defaults to staging. That writes the new digest into
+`terraform/envs/staging/platform/image.auto.tfvars`, so there is no line to edit
+by hand. **Commit that file and merge it.** The stage is planned by a workflow,
+which sees only what is in version control, so a digest left on your machine is
+applied nowhere.
 
-Dev and staging share an ECR repository. Promote the Lambda to staging by
-copying dev's digest into
-`terraform/envs/staging/platform/image.auto.tfvars`. The image is already in
-ECR, so the promotion needs no build or push.
+Dev runs frozen at its current pins until it is torn down, so
+`make publish STAGE=dev` stops with an error before it builds anything.
 
-Prod is a separate account with its own ECR repository, so a dev digest means
-nothing there. Promote the Lambda to prod by publishing into the prod account:
+Prod is a separate account with its own ECR repository, so a staging digest
+means nothing there. Promote the Lambda to prod by publishing into the prod account:
 
 ```bash
 make publish STAGE=prod
@@ -932,16 +931,16 @@ pins its digest. Commit that file and merge it.
 ### Deploying a service
 
 Change its digest in the stage's `image_digests` and merge. Every stage pins
-digests, dev included: dev is applied on every push to `main`, and a rolling tag
-would make what dev runs depend on when a task last restarted rather than on what
-was merged.
+digests, staging included: staging is applied on every push to `main`, and a
+rolling tag would make what staging runs depend on when a task last restarted
+rather than on what was merged.
 
-For dev, the services do this themselves. A publish workflow dispatches a
+For staging, the services do this themselves. A publish workflow dispatches a
 `bump-deployed-image` event carrying the digest it just pushed, and
 [`bump-deployed-image.yml`](.github/workflows/bump-deployed-image.yml) opens a
 pull request that changes the one line, with auto-merge enabled so the deploy
 lands as soon as the required checks pass. Those pull requests come from the
-`fil-forge-bot` GitHub App on the branch `bot/bump-<service>-image-dev`, one
+`fil-forge-bot` GitHub App on the branch `bot/bump-<service>-image-staging`, one
 branch per service, so a second publish updates the open request instead of
 stacking a stale one beside it.
 
@@ -957,8 +956,8 @@ service's first bump the branch is pushed before the pull request exists to be
 found. A rebuild keeps the original commit message, so the link to the pull
 request that published the image survives. A branch whose digest `main` already
 pins is closed instead, and one whose service someone else moved meanwhile is
-left alone: which digest dev should run is then a question rather than an edit,
-and the pull request shows the conflict it has.
+left alone: which digest staging should run is then a question rather than an
+edit, and the pull request shows the conflict it has.
 
 The same workflow bumps any of the six services on demand:
 
@@ -982,12 +981,16 @@ repository the service is published from, so the required `client_payload` is
 `service`, `digest` and `source_repo`; `commit`, `pr_url` and `run_url` are
 provenance links the commit message uses when present.
 
-Staging and prod are promoted by merging a pull request the bot keeps open:
-"Promote dev's images to staging" and "Promote staging's images to prod". Each
-is rebuilt after its source stage passes its smoke test, lists what every
-service brings, and merges only by hand. To hold a service back, push to its
-branch. [The decision record](docs/decisions/2026-10-automated-promotion.md)
-explains how they work.
+Prod is promoted by merging the pull request the bot keeps open, "Promote
+staging's images to prod". It is rebuilt after staging passes its smoke test,
+lists what every service brings, and merges only by hand. To hold a service
+back, push to its branch, `bot/promote-prod`.
+[The decision record](docs/decisions/2026-10-automated-promotion.md) explains
+how it works.
+
+Dev runs frozen at its current pins until it is torn down. It is still applied
+and smoke-tested on every push to `main`, but no bump or promotion moves its
+pins.
 
 ### Confirming nothing was regenerated
 

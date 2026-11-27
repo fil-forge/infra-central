@@ -2,6 +2,9 @@
 # underneath a running service, so what dev runs is what was merged rather than
 # whatever a rolling tag pointed at when a task last restarted.
 #
+# Frozen: published images are bumped into staging, and dev keeps these pins
+# until it is torn down.
+#
 # These are the manifest indexes each repository's `main` tag pointed at when
 # the stage was first brought up. Each carries linux/arm64, which the tasks run
 # on. Bump one by reading the digest its tag now names:

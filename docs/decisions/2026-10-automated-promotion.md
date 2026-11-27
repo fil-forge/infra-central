@@ -1,5 +1,9 @@
 # A bot keeps one promotion pull request per stage, and a person merges it
 
+> **Update 2026-11-27:** The staging promotion is retired. Every image a service publishes is
+> now bumped into staging and auto-merged, and the only promotion left is staging to prod, on
+> `bot/promote-prod`. See [the continuous deployment to staging RFC](https://github.com/fil-one/RFC/blob/main/rfcs/2026-11-continuous-deployment-to-staging.md).
+
 Service images move through the stages one hop at a time. Staging takes dev's pins, and prod takes
 staging's. For each hop, the `fil-forge-bot` GitHub App keeps one pull request that sets every pin
 in the target's `apps/terraform.tfvars` to what the source stage pins, and lists the commits each

@@ -8,7 +8,7 @@
 # Usage:
 #   scripts/set-pin.sh [--stage <dev|staging|prod>] <service> <sha256:...>
 #
-# The stage defaults to dev. Example:
+# The stage defaults to staging. Example:
 #   scripts/set-pin.sh sprue "$(crane digest ghcr.io/fil-forge/sprue:main)"
 #
 # Prints `changed=true` on stdout when the file was rewritten and
@@ -28,7 +28,7 @@ usage() {
   exit 2
 }
 
-STAGE=dev
+STAGE=staging
 case "${1-}" in
   -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --stage)   STAGE="${2-}"; shift 2 2>/dev/null || usage ;;

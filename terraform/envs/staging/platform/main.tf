@@ -70,8 +70,7 @@ variable "retired_appliance_regions" {
   default     = []
 }
 
-# Seeded from the digest already deployed to dev. Promote a Lambda build to
-# staging by copying dev's provision_image_digest after it is healthy there.
+# Written to image.auto.tfvars by `make publish`, which defaults to staging.
 variable "provision_image_digest" {
   type = string
 }

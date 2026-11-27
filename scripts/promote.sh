@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Open, refresh or close the pull request that promotes one stage's images to
-# the next.
+# Open, refresh or close the pull request that promotes staging's images to
+# prod.
 #
-# Dev's pins move on their own: every image a service publishes gets a bump pull
-# request that the bot merges. Staging's and prod's move only when a person
-# merges a promotion, and promotion goes one hop at a time:
-#   staging  takes dev's pins,      on bot/promote-staging
+# Staging's pins move on their own: every image a service publishes gets a bump
+# pull request that the bot merges. Prod's move only when a person merges a
+# promotion:
 #   prod     takes staging's pins,  on bot/promote-prod
-# Each target keeps one pull request that sets every one of its pins to what the
+# The target keeps one pull request that sets every one of its pins to what the
 # source stage pins at BASE, and lists what each service brings over what the
 # target runs. It never enables auto-merge: merging it is the promotion.
 #
@@ -20,7 +19,7 @@
 # is open.
 #
 # Usage:
-#   APP_SLUG=fil-forge-bot scripts/promote.sh <staging|prod> [--dry-run]
+#   APP_SLUG=fil-forge-bot scripts/promote.sh prod [--dry-run]
 #
 # --dry-run builds the commit, prints it, and pushes, opens and closes nothing.
 # Every run builds the commit in a temporary worktree and leaves the caller's
@@ -37,20 +36,19 @@
 #
 # Prerequisites:
 #   - a git work tree with origin fetchable and pushable, and full history
-#     (each pin's source commit is read off the dev bump that first carried it)
+#     (each pin's source commit is read off the bump that first carried it)
 #   - gh authenticated, for the compare and packages APIs and the pull request
 #   - jq, to read the compare API's pages as one
 #   - writes the local git identity (user.name, user.email) of the work tree
 set -euo pipefail
 
 usage() {
-  echo "usage: APP_SLUG=<app> scripts/promote.sh <staging|prod> [--dry-run]" >&2
+  echo "usage: APP_SLUG=<app> scripts/promote.sh prod [--dry-run]" >&2
   exit 2
 }
 
 case "${1-}" in
   -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  staging)   SOURCE=dev ;;
   prod)      SOURCE=staging ;;
   *)         usage ;;
 esac
@@ -72,7 +70,10 @@ cd "$ROOT"
 BRANCH=bot/promote-$TARGET
 SOURCE_FILE=terraform/envs/$SOURCE/apps/terraform.tfvars
 TARGET_FILE=terraform/envs/$TARGET/apps/terraform.tfvars
-DEV_FILE=terraform/envs/dev/apps/terraform.tfvars
+# Where bumps land. Dev took them before staging did, so a digest's bump is in
+# one file's history or the other's. Git reads a path's history after the
+# directory is deleted too.
+BUMP_FILES=(terraform/envs/dev/apps/terraform.tfvars terraform/envs/staging/apps/terraform.tfvars)
 SUBJECT="Promote $SOURCE's images to $TARGET"
 # This repository, which Actions names; for links in the message.
 SELF=${GITHUB_REPOSITORY:-fil-forge/infra-central}
@@ -97,10 +98,12 @@ pin_at() {
     "s|^[[:blank:]]*$3[[:blank:]]*=[[:blank:]]*\"(sha256:[0-9a-f]{64})\"[[:blank:]]*$|\1|p"
 }
 
-# The bump at BASE that first put a digest in dev's file, empty if none did.
-# Every digest a stage runs reached dev first, through a bump pull request.
+# The bump at BASE that first put a digest in a stage's pins, empty if none
+# did. Every digest a stage runs arrived first through a bump pull request, in
+# dev's file before the cutover to staging and in staging's after it. The
+# oldest commit is the bump: a promotion only copies a digest already pinned.
 bump_of() {
-  git log --reverse --format=%H -S "$1" "$base" -- "$DEV_FILE" | head -n 1
+  git log --reverse --format=%H -S "$1" "$base" -- "${BUMP_FILES[@]}" | head -n 1
 }
 
 # The commit a digest was built from, empty if unknown. The bump that carried it
@@ -137,8 +140,8 @@ load_versions() {
 }
 
 # A digest, shortened, linked to its version's page on ghcr.io, as found in the
-# VERSIONS load_versions last set. Failing that, to the pull request that bumped
-# dev to it, which names its source commit and publish run; plain if no bump at
+# VERSIONS load_versions last set. Failing that, to the pull request that first
+# pinned it, which names its source commit and publish run; plain if no bump at
 # BASE carried it either.
 digest_link() {
   local digest=$1 short="\`sha256:${1:7:7}\`" page bump pr

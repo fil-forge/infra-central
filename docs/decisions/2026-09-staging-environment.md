@@ -1,5 +1,9 @@
 # Shared staging runs protected, single-AZ infrastructure
 
+> **Update 2026-11-27:** Staging no longer waits for promotions from dev. Every image a service
+> publishes is bumped into staging and auto-merged, and `make publish` writes the provision Lambda's
+> digest to staging directly. See [the continuous deployment to staging RFC](https://github.com/fil-one/RFC/blob/main/rfcs/2026-11-continuous-deployment-to-staging.md).
+
 The shared staging environment runs in `us-east-2` in the sandbox AWS account. It uses the
 delegated `staging.fil-forge.com` and `staging.filonecontent.com` zones and deploys on every merge
 to `main`, after the same pull-request plans that protect dev.

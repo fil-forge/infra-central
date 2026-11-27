@@ -1,9 +1,9 @@
 # Non-secret per-stage configuration. Every secret in this project lives in SSM
 # and is minted by the provision Lambda, so this file is safe to commit.
 #
-# provision_image_digest is absent here on purpose. It lives in
-# image.auto.tfvars, where a promotion copies the digest already deployed to
-# dev; both stages use the same ECR repository.
+# provision_image_digest is absent here on purpose: `make publish` writes it to
+# image.auto.tfvars, so iterating on the Lambda never means editing this file by
+# hand. Dev and staging use the same ECR repository.
 
 # The shared staging zones are delegated to Route53 in the sandbox account.
 zone_name = "staging.fil-forge.com"
