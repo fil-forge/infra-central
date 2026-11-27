@@ -74,6 +74,14 @@ expect "a reference to another repository is left alone" \
   "Bump hilt in staging: Revert fil-forge/sprue#40" \
   "Revert fil-forge/sprue#40"
 
+expect "a repository name ending in - or . keeps its reference" \
+  "Bump hilt in staging: Revert octocat/legacy-#40 and octocat/old.#41" \
+  "Revert octocat/legacy-#40 and octocat/old.#41"
+
+expect "a bare reference after a hyphen is qualified" \
+  "Bump hilt in staging: Follow up fix-fil-forge/hilt#12" \
+  "Follow up fix-#12"
+
 expect "a hash that is no reference is left alone" \
   "Bump hilt in staging: Use url#fragment and #main" \
   "Use url#fragment and #main"
