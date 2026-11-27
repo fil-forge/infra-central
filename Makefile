@@ -214,6 +214,9 @@ check:
 	go test ./...
 	tofu -chdir=terraform fmt -check -recursive
 	set -euo pipefail; git ls-files -z '*.sh' | xargs -0 -r shellcheck
+# The scripts' own tests, each a plain bash file that runs offline and exits
+# non-zero on a failed case. Tracked files only, as for shellcheck above.
+	set -euo pipefail; git ls-files -z '*.test.sh' | xargs -0 -r -n 1 bash
 # Committed dashboards must be in the form scripts/normalise-dashboard.sh writes,
 # so a raw UI export with its server-side metadata and whoever-last-saved variable
 # selections cannot land. Reads files only: no Grafana credentials, no network.

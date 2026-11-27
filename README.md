@@ -141,6 +141,7 @@ internal/ssmstore/            the never-overwrite parameter store
 internal/fund/                the three FilecoinPay transactions
 internal/onboard/             the appliance registration writes and their verification
 build/                        Lambda container image
+scripts/bump-title.sh         titles an image bump pull request after its service commit
 scripts/fund-payer.sh         invokes the fund phase, with a confirmation prompt
 scripts/mint-appliance-credentials.sh  issues an appliance's unseal token and backup key, wrapped
 scripts/onboard-appliance.sh  registers an appliance and returns its S3 proof
@@ -877,6 +878,7 @@ them per run:
 ```bash
 make fund-payer STAGE=dev DEPOSIT=5
 make fund-payer FUND_ARGS="--rate-allowance 0.2 --lockup-allowance 5"
+scripts/bump-title.sh         titles an image bump pull request after its service commit
 scripts/fund-payer.sh --stage dev --deposit 3 --force-deposit
 ```
 
@@ -943,6 +945,16 @@ lands as soon as the required checks pass. Those pull requests come from the
 `fil-forge-bot` GitHub App on the branch `bot/bump-<service>-image-staging`, one
 branch per service, so a second publish updates the open request instead of
 stacking a stale one beside it.
+
+The pull request's title, and so the commit it lands as on `main`, carries the
+subject of the service commit the image was built from, such as `Bump hilt in
+staging: Fix tenant lock race (fil-forge/hilt#212)`. Every `#N` in that subject
+names the service repository, because a bare one would link to, and with a
+closing keyword close, an issue here. A second publish rewrites the title from
+its own commit. A manual run, or a dispatch whose commit cannot be read, names
+the digest instead: `Bump hilt in staging to sha256:6c17e7e`.
+[`scripts/bump-title.sh`](scripts/bump-title.sh) builds the title and
+`scripts/tests/bump-title.test.sh` tests it.
 
 Two things keep those pull requests mergeable while several are open at once.
 The pins are spaced a blank line apart, because git conflicts on changes to
