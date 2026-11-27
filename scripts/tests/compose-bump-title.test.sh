@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Tests for scripts/bump-title.sh, run from any machine:
+# Tests for scripts/compose-bump-title.sh, run from any machine:
 #
-#   scripts/tests/bump-title.test.sh
+#   scripts/tests/compose-bump-title.test.sh
 #
 # Each case pipes a commit message into the script and compares the one line
 # it prints. Plain bash and jq, written for the bash 3.2 macOS ships as well as
@@ -9,8 +9,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$HERE/../bump-title.sh"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/bump-title-test.XXXXXX")"
+SCRIPT="$HERE/../compose-bump-title.sh"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/compose-bump-title-test.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 STAGE="in staging"
@@ -45,7 +45,7 @@ words() {
   printf ' lorem%.0s' $(seq 2 "$1")
 }
 
-echo "bump-title.sh"
+echo "compose-bump-title.sh"
 
 expect "a squash subject's trailing pull request is qualified" \
   "Bump hilt in staging: Fix tenant lock race (fil-forge/hilt#212)" \
