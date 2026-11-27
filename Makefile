@@ -37,15 +37,9 @@ IMAGE       = $(ECR_HOST)/$(ECR_REPO)
 # instead. Prod is a separate account with its own ECR repository, so its digest
 # comes from publishing there, not from copying staging's.
 #
-# Dev runs frozen at its current pins until it is torn down, so nothing
-# publishes into it. The check runs while make reads this file, before the
-# login and builder prerequisites touch AWS or Docker.
+# Dev runs frozen at its current pins until it is torn down, so `make publish`
+# refuses it; the check follows the publish rule below.
 STAGE       ?= staging
-ifeq ($(STAGE),dev)
-ifneq ($(filter publish,$(MAKECMDGOALS)),)
-$(error make publish STAGE=dev is retired: dev is frozen until it is torn down. Publish into staging, the default)
-endif
-endif
 ifeq ($(STAGE),prod)
 TFVARS      := terraform/envs/$(STAGE)/platform/terraform.tfvars
 else
@@ -95,6 +89,16 @@ publish: login builder
 	    echo; \
 	    echo "Commit $(TFVARS) so the deploy workflow for $(STAGE) picks up the new image."; \
 	  fi
+
+# Refuses to publish into dev while make reads this file, before the login and
+# builder prerequisites touch AWS or Docker. Here rather than above the rule so
+# that .DEFAULT_GOAL is set: publish is the first target, so a bare `make`
+# runs it with MAKECMDGOALS empty.
+ifeq ($(STAGE),dev)
+ifneq ($(filter publish,$(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))),)
+$(error make publish STAGE=dev is retired: dev is frozen until it is torn down. Publish into staging, the default)
+endif
+endif
 
 .PHONY: builder
 builder:
