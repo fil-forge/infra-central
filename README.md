@@ -949,11 +949,13 @@ The pull request's title, and so the commit it lands as on `main`, carries the
 subject of the service commit the image was built from, such as `Bump hilt in
 staging: Fix tenant lock race (fil-forge/hilt#212)`. Every `#N` in that subject
 names the service repository, because a bare one would link to, and with a
-closing keyword close, an issue here. A second publish rewrites the title from
-its own commit. A manual run, or a dispatch whose commit cannot be read, names
-the digest instead: `Bump hilt in staging to sha256:6c17e7e`.
-[`scripts/compose-bump-title.sh`](scripts/compose-bump-title.sh) builds the title and
-`scripts/tests/compose-bump-title.test.sh` tests it.
+closing keyword close, an issue here. An `@` that would mention someone is
+dropped. A second publish rewrites the title from its own commit. A manual run,
+or a dispatch whose commit cannot be read, names the digest instead: `Bump hilt
+in staging to sha256:6c17e7e`.
+[`scripts/compose-bump-title.sh`](scripts/compose-bump-title.sh) looks the
+subject up and builds the title; `scripts/tests/compose-bump-title.test.sh`
+tests it.
 
 Two things keep those pull requests mergeable while several are open at once.
 The pins are spaced a blank line apart, because git conflicts on changes to
