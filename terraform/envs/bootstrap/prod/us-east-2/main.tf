@@ -1,7 +1,12 @@
 # Regional bootstrap for the prod account in us-east-2: the ECR repository the
 # prod stage pulls its provision image from, the Firehoses and metric stream
 # that carry the stage's logs and metrics to Grafana Cloud, and the KMS keys of
-# its Aurora cluster and its OpenBao seal.
+# its Aurora cluster and its OpenBao seal, with their replicas in the DR region,
+# and the EventBridge rules that tell Grafana when one of those keys changes.
+#
+# Apply it with -var key_admin=<your SSO username> whenever a key's policy or
+# replica changes, so both providers act as the key admin role from
+# ../account/; see docs/region-loss.md.
 #
 # The non-prod copy of this directory carries the full explanation of why the
 # state bucket and the CI roles are not here but in ../account/, why this root is
@@ -12,8 +17,56 @@
 # It cannot be applied before ../account/, which creates the bucket this root's
 # backend names.
 
+# The key guard below refuses PutKeyPolicy and ReplicateKey to everyone but the
+# key admin role, so an apply that changes a key's policy or replica must run
+# as that role. With this set, each provider assumes it from the operator's own
+# SSO credentials, in a session named after the operator, and keeps the role's
+# credentials in memory. The state backend keeps the SSO credentials.
+variable "key_admin" {
+  description = "Your SSO username, such as alan@fil.org. When set, both providers run as the KMS key admin role in a session of that name, which the role's trust policy requires. Needed when a key's policy or replica changes."
+  type        = string
+  default     = null
+}
+
+locals {
+  kms_key_admin_role_arn = "arn:aws:iam::${module.constants.prod_account_id}:role/${module.constants.prod_kms_key_admin_role_name}"
+}
+
 provider "aws" {
   region = "us-east-2"
+
+  allowed_account_ids = [module.constants.prod_account_id]
+
+  dynamic "assume_role" {
+    for_each = var.key_admin == null ? [] : [var.key_admin]
+    content {
+      role_arn     = local.kms_key_admin_role_arn
+      session_name = assume_role.value
+    }
+  }
+}
+
+# The DR region, for the replicas of the two keys below.
+provider "aws" {
+  alias  = "dr"
+  region = module.constants.dr_region
+
+  allowed_account_ids = [module.constants.prod_account_id]
+
+  dynamic "assume_role" {
+    for_each = var.key_admin == null ? [] : [var.key_admin]
+    content {
+      role_arn     = local.kms_key_admin_role_arn
+      session_name = assume_role.value
+    }
+  }
+}
+
+# IAM records every call in us-east-1, for the rule that watches the key admin
+# role below.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
 
   allowed_account_ids = [module.constants.prod_account_id]
 }
@@ -33,14 +86,15 @@ module "ecr" {
 # root, taking the final snapshot with it.
 #
 # Multi-region because the flag is fixed when a key is created. Backup copies
-# in the DR region (FIL-1298) and the Global Database secondary (FIL-1297)
-# need a replica of this key there. FIL-1445 adds that replica and the policy
-# that stops anyone but a break-glass role from deleting or disabling the key.
+# in the DR region (sc-310) and the Global Database secondary (sc-284) use its
+# replica there.
 resource "aws_kms_key" "aurora" {
-  description             = "Forge prod: the Aurora cluster"
-  multi_region            = true
-  enable_key_rotation     = true
-  deletion_window_in_days = 30
+  description                        = "Forge prod: the Aurora cluster"
+  multi_region                       = true
+  enable_key_rotation                = true
+  deletion_window_in_days            = 30
+  policy                             = data.aws_iam_policy_document.guarded_key.json
+  bypass_policy_lockout_safety_check = false
 
   lifecycle {
     prevent_destroy = true
@@ -52,6 +106,30 @@ resource "aws_kms_alias" "aurora" {
   target_key_id = aws_kms_key.aurora.key_id
 }
 
+# A replica shares the key material but has its own policy, so it takes the
+# same guard. An alias does not follow a key into its replicas, so the replica
+# gets the same alias in its own region.
+resource "aws_kms_replica_key" "aurora" {
+  provider = aws.dr
+
+  description                        = "Forge prod: the Aurora cluster (DR replica)"
+  primary_key_arn                    = aws_kms_key.aurora.arn
+  deletion_window_in_days            = 30
+  policy                             = data.aws_iam_policy_document.guarded_key.json
+  bypass_policy_lockout_safety_check = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_kms_alias" "aurora_dr" {
+  provider = aws.dr
+
+  name          = module.constants.prod_aurora_key_alias
+  target_key_id = aws_kms_replica_key.aurora.key_id
+}
+
 # The key prod OpenBao seals its storage with. Dev and staging get theirs from
 # the platform module, which destroys it with the stage. Prod's lives here
 # because OpenBao's storage, in the Aurora cluster, outlives the platform root in
@@ -61,14 +139,15 @@ resource "aws_kms_alias" "aurora" {
 # Multi-region because the flag is fixed when a key is created, and changing
 # the key later means migrating a running OpenBao to a new seal. After losing
 # us-east-2, the platform root applied in the DR region unseals the Global
-# Database secondary's copy of OpenBao with a replica of this key. FIL-1445 adds
-# that replica, the same alias on it in the DR region (an alias does not follow
-# a key into its replicas), and the same deletion guard as the Aurora key's.
+# Database secondary's copy of OpenBao with the replica below; see
+# docs/region-loss.md.
 resource "aws_kms_key" "openbao_seal" {
-  description             = "Forge prod: the OpenBao seal"
-  multi_region            = true
-  enable_key_rotation     = true
-  deletion_window_in_days = 30
+  description                        = "Forge prod: the OpenBao seal"
+  multi_region                       = true
+  enable_key_rotation                = true
+  deletion_window_in_days            = 30
+  policy                             = data.aws_iam_policy_document.guarded_key.json
+  bypass_policy_lockout_safety_check = false
 
   lifecycle {
     prevent_destroy = true
@@ -80,6 +159,115 @@ resource "aws_kms_alias" "openbao_seal" {
   target_key_id = aws_kms_key.openbao_seal.key_id
 }
 
+resource "aws_kms_replica_key" "openbao_seal" {
+  provider = aws.dr
+
+  description                        = "Forge prod: the OpenBao seal (DR replica)"
+  primary_key_arn                    = aws_kms_key.openbao_seal.arn
+  deletion_window_in_days            = 30
+  policy                             = data.aws_iam_policy_document.guarded_key.json
+  bypass_policy_lockout_safety_check = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_kms_alias" "openbao_seal_dr" {
+  provider = aws.dr
+
+  name          = module.constants.prod_openbao_seal_key_alias
+  target_key_id = aws_kms_replica_key.openbao_seal.key_id
+}
+
+# The policy of all four keys. Losing either key makes the Aurora cluster, its
+# snapshots and OpenBao's storage unreadable, so only the key admin role and
+# the account's root user may take the actions that end a key's use, or that
+# would let someone else do so.
+#
+# The first statement is KMS's default: it lets IAM policies grant use of the
+# key, which CI, the task roles and RDS rely on. Dropping it cuts them all off.
+#
+# The second denies everyone else the guarded actions. It names the exempt
+# principals by ARN in a condition rather than as a principal, because KMS
+# stores a named principal as the role's internal id: a recreated role would no
+# longer match. The root user is exempt so that a wrong role ARN here cannot
+# leave the policy uneditable. Every key keeps
+# bypass_policy_lockout_safety_check false, so KMS refuses a policy that would
+# stop its caller from editing it again.
+#
+# The guarded actions are the ones that stop a key working, keep it from being
+# fixed, or move its alias, which the platform root finds the key by. EnableKey
+# and CancelKeyDeletion are left open so anyone can undo a disable or a
+# scheduled deletion. No action that uses the key may be guarded; the check
+# below fails the plan if one is.
+locals {
+  kms_key_admin_principals = [
+    local.kms_key_admin_role_arn,
+    "arn:aws:iam::${module.constants.prod_account_id}:root",
+  ]
+
+  kms_guarded_actions = [
+    "kms:DeleteAlias",
+    "kms:DisableKey",
+    "kms:PutKeyPolicy",
+    "kms:ReplicateKey",
+    "kms:ScheduleKeyDeletion",
+    "kms:UpdateAlias",
+    "kms:UpdatePrimaryRegion",
+  ]
+}
+
+data "aws_iam_policy_document" "guarded_key" {
+  statement {
+    sid       = "EnableIamPolicies"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${module.constants.prod_account_id}:root"]
+    }
+  }
+
+  statement {
+    sid       = "GuardKeyLifecycle"
+    effect    = "Deny"
+    actions   = local.kms_guarded_actions
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = local.kms_key_admin_principals
+    }
+  }
+
+  lifecycle {
+    postcondition {
+      condition = alltrue([
+        for action in local.kms_guarded_actions :
+        !strcontains(action, "*") && !contains([
+          "kms:CreateGrant",
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:GenerateDataKeyWithoutPlaintext",
+          "kms:ReEncryptFrom",
+          "kms:ReEncryptTo",
+        ], action)
+      ])
+      error_message = "The key guard denies an action Aurora or OpenBao needs to use the key, or a wildcard. Guarding it would stop the cluster or the seal."
+    }
+  }
+}
+
 module "telemetry" {
   source = "../../../../modules/telemetry"
 
@@ -88,6 +276,234 @@ module "telemetry" {
   grafana_logs_user    = var.grafana_logs_user
   grafana_metrics_user = var.grafana_metrics_user
   grafana_push_token   = var.grafana_push_token
+}
+
+# ── Guarded key changes, to Grafana ──────────────────────────────────────────
+#
+# KMS publishes no metric for a key's state, so on-call hears of a guarded
+# action on the four keys from CloudTrail: EventBridge matches the call in the
+# region it was made in, the DR region forwards its matches here, and a rule
+# here writes both regions' matches to a log group that ships to Grafana like
+# the services' logs. The Grafana root's alerts.tf pages on a call that
+# succeeded and notifies on one the guard denied.
+#
+# The pattern names the keys and aliases rather than matching every KMS call,
+# because the account holds other teams' keys. A call can name a key by id, ARN,
+# alias or alias ARN, and CloudTrail records the resolved key in `resources`, so
+# the pattern accepts any of them in either place. It matches by suffix: a
+# replica shares its primary's id, which ends the key's ARN in either region,
+# and an alias ARN ends in the alias name. Listing every ARN instead would
+# overrun EventBridge's 2048-character pattern quota. ReplicateKey is guarded
+# but left out: it adds a replica and takes nothing away.
+locals {
+  kms_guarded_key_suffixes = [
+    for suffix in concat(
+      [aws_kms_key.aurora.key_id, aws_kms_key.openbao_seal.key_id],
+      [module.constants.prod_aurora_key_alias, module.constants.prod_openbao_seal_key_alias],
+    ) : { suffix = suffix }
+  ]
+
+  kms_key_change_pattern = jsonencode({
+    source      = ["aws.kms"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventName = ["DisableKey", "ScheduleKeyDeletion", "PutKeyPolicy", "DeleteAlias", "UpdateAlias", "UpdatePrimaryRegion"]
+    }
+    "$or" = [
+      { detail = { resources = { ARN = local.kms_guarded_key_suffixes } } },
+      { detail = { requestParameters = { keyId = local.kms_guarded_key_suffixes } } },
+      { detail = { requestParameters = { aliasName = local.kms_guarded_key_suffixes } } },
+    ]
+  })
+
+  primary_event_bus_arn = "arn:aws:events:us-east-2:${module.constants.prod_account_id}:event-bus/default"
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_changes_dr" {
+  provider = aws.dr
+
+  name          = "fc-prod-kms-key-changes"
+  description   = "Guarded calls on the prod Aurora and OpenBao seal keys, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_change_pattern
+
+  lifecycle {
+    precondition {
+      condition     = length(local.kms_key_change_pattern) <= 2048
+      error_message = "The KMS key change pattern is over EventBridge's 2048-character default quota, so the rule cannot be created."
+    }
+  }
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_changes_dr" {
+  provider = aws.dr
+
+  rule     = aws_cloudwatch_event_rule.kms_key_changes_dr.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
+}
+
+data "aws_iam_policy_document" "kms_key_changes_forwarder_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [module.constants.prod_account_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "kms_key_changes_forwarder" {
+  statement {
+    actions   = ["events:PutEvents"]
+    resources = [local.primary_event_bus_arn]
+  }
+}
+
+resource "aws_iam_role" "kms_key_changes_forwarder" {
+  name               = "fc-prod-kms-key-changes-forwarder"
+  assume_role_policy = data.aws_iam_policy_document.kms_key_changes_forwarder_assume.json
+}
+
+resource "aws_iam_role_policy" "kms_key_changes_forwarder" {
+  name   = "put-events-us-east-2"
+  role   = aws_iam_role.kms_key_changes_forwarder.id
+  policy = data.aws_iam_policy_document.kms_key_changes_forwarder.json
+}
+
+# Under /forge-central/prod/, so Loki finds it beside the stage's other groups.
+resource "aws_cloudwatch_log_group" "kms_key_changes" {
+  name              = "/forge-central/prod/kms-key-changes"
+  retention_in_days = 30
+}
+
+# Matches this region's calls and the ones forwarded from the DR region, which
+# keep their own `region`.
+resource "aws_cloudwatch_event_rule" "kms_key_changes" {
+  name          = "fc-prod-kms-key-changes"
+  description   = "Guarded calls on the prod Aurora and OpenBao seal keys, to CloudWatch Logs for Grafana."
+  event_pattern = local.kms_key_change_pattern
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_changes" {
+  rule = aws_cloudwatch_event_rule.kms_key_changes.name
+  arn  = aws_cloudwatch_log_group.kms_key_changes.arn
+}
+
+# EventBridge writes to a log group only under a resource policy that lets it.
+data "aws_iam_policy_document" "kms_key_changes_log_writer" {
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.kms_key_changes.arn}:*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com", "delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [aws_cloudwatch_event_rule.kms_key_changes.arn, aws_cloudwatch_event_rule.kms_key_admin.arn]
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_resource_policy" "kms_key_changes" {
+  policy_name     = "fc-prod-kms-key-changes"
+  policy_document = data.aws_iam_policy_document.kms_key_changes_log_writer.json
+}
+
+# ── The key admin role's use and changes, to the same log group ─────────────
+#
+# The rules above see what the key admin role does to the keys; these see the
+# role itself. Its assumption tells on-call a session has started before any
+# key call, and a change to its trust or permissions, which any
+# AdministratorAccess session can make, is otherwise unchecked. STS records
+# AssumeRole in the region whose endpoint was called, and IAM records every
+# call in us-east-1, so us-east-1 and the DR region forward here. The rules
+# take read-only management events too, because CloudTrail may record
+# AssumeRole as one and EventBridge drops those otherwise.
+locals {
+  kms_key_admin_pattern = jsonencode({
+    detail-type = ["AWS API Call via CloudTrail"]
+    "$or" = [
+      {
+        source = ["aws.sts"]
+        detail = { eventName = ["AssumeRole"], requestParameters = { roleArn = [local.kms_key_admin_role_arn] } }
+      },
+      {
+        source = ["aws.iam"]
+        detail = {
+          eventName         = ["UpdateAssumeRolePolicy", "AttachRolePolicy", "DetachRolePolicy", "PutRolePolicy", "DeleteRolePolicy", "DeleteRole"]
+          requestParameters = { roleName = [module.constants.prod_kms_key_admin_role_name] }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin" {
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of and changes to the prod KMS key admin role, to CloudWatch Logs for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin" {
+  rule = aws_cloudwatch_event_rule.kms_key_admin.name
+  arn  = aws_cloudwatch_log_group.kms_key_changes.arn
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin_dr" {
+  provider = aws.dr
+
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of the prod KMS key admin role, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin_dr" {
+  provider = aws.dr
+
+  rule     = aws_cloudwatch_event_rule.kms_key_admin_dr.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
+}
+
+resource "aws_cloudwatch_event_rule" "kms_key_admin_us_east_1" {
+  provider = aws.us_east_1
+
+  name          = "fc-prod-kms-key-admin"
+  description   = "Assumptions of and changes to the prod KMS key admin role, forwarded to us-east-2 for Grafana."
+  event_pattern = local.kms_key_admin_pattern
+  state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
+}
+
+resource "aws_cloudwatch_event_target" "kms_key_admin_us_east_1" {
+  provider = aws.us_east_1
+
+  rule     = aws_cloudwatch_event_rule.kms_key_admin_us_east_1.name
+  arn      = local.primary_event_bus_arn
+  role_arn = aws_iam_role.kms_key_changes_forwarder.arn
+}
+
+# The stage's log role belongs to the prod platform root
+# (modules/platform/log-forwarding), so its ARN is built from the name both
+# roots state rather than looked up.
+resource "aws_cloudwatch_log_subscription_filter" "kms_key_changes" {
+  name            = "grafana-loki"
+  log_group_name  = aws_cloudwatch_log_group.kms_key_changes.name
+  filter_pattern  = ""
+  destination_arn = module.telemetry.log_firehose_arns["prod"]
+  role_arn        = "arn:aws:iam::${module.constants.prod_account_id}:role/fc-prod-logs-to-firehose"
 }
 
 variable "grafana_logs_user" {

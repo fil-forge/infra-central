@@ -159,6 +159,7 @@ docs/appliance-onboarding.md  the runbook for admitting a regional appliance
 docs/jump-host.md             the static-IP SSH jump host, and how to connect through it
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
+docs/region-loss.md           restoring prod in eu-central-1: KMS replicas, SSM, appliances, key admin role
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration

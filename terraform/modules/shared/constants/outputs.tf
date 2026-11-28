@@ -49,7 +49,7 @@ output "prod_stages" {
 }
 
 output "dr_region" {
-  description = "The region that holds a stage's backup replicas, so a lost region can be restored from them. The provision Lambda replicates each key secret here, and the Aurora secondary (FIL-1297) lives here too. Restoring a stage may target a different region, closer to the one it lost."
+  description = "The region that holds a stage's backup replicas, and where a stage is restored after losing its region; see docs/region-loss.md. The provision Lambda replicates each key secret here, and prod's Aurora secondary (sc-284) and backup copies (sc-310) are to live here too."
   value       = "eu-central-1"
 }
 
@@ -61,6 +61,11 @@ output "prod_aurora_key_alias" {
 output "prod_openbao_seal_key_alias" {
   description = "Alias of the KMS key prod OpenBao seals its storage with. The prod regional bootstrap creates it and the prod platform root looks it up, so the key outlives any destroy of the platform root."
   value       = "alias/fc-prod-openbao-seal"
+}
+
+output "prod_kms_key_admin_role_name" {
+  description = "The only role that may delete, disable or re-policy the prod Aurora and OpenBao seal keys and their replicas. The prod account bootstrap creates it and the prod regional bootstrap names it in the keys' policies. Outside fc-*, so the CI apply role cannot write it."
+  value       = "forge-kms-key-admin"
 }
 
 # The SpiderOak compatibility server's appliances, per stage and then per
