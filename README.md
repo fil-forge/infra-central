@@ -149,6 +149,7 @@ scripts/retire-region.sh      removes a region's Ingot identity from hilt and SS
 scripts/store-appliance-root-credentials.sh  keeps a second copy of an appliance's root token and recovery key
 scripts/refresh-bump-prs.sh   rebuilds every open bump branch on top of main
 scripts/reset-apps.sh         wipes a dev or staging stage's app state and keeps the platform
+scripts/restore-appliance-backups.sh  copies a region's backups as of a time before a key leak
 scripts/set-pin.sh            pins one service of one stage at one image digest
 scripts/smoke-test.sh         checks a deployed stage over public HTTPS
 scripts/tail-logs.sh          prints the tail of every log group a stage owns
@@ -159,6 +160,7 @@ docs/appliance-onboarding.md  the runbook for admitting a regional appliance
 docs/jump-host.md             the static-IP SSH jump host, and how to connect through it
 docs/observability.md         what a stage ships to Grafana and the queries that find it
 docs/reset-apps.md            the runbook for wiping a dev or staging stage's app state
+docs/restore-appliance-backups.md  the runbook for restoring a region's backups after its key leaks
 docs/decisions/               why a thing is the way it is, one file per subject
 
 # Infra configuration
